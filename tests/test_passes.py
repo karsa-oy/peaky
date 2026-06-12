@@ -613,5 +613,23 @@ except L.LedgerError:
 check("locked contaminant refuses the CHO grid fit", not stolen
       and led0.loc[led0.peak_id == "D2", "neutral_formula"].iloc[0] == "C4H14O3Si2")
 
+# pass0 twin gate: a contaminant claim on a peak whose own 81Br twin is
+# missing must be refused (the v25 lactic-acid collision)
+mz_n1 = CH.ion_mz("C2H8O2Si1", "[M+Br]-")
+ledg = mk_ledger([("X1", mz_n1, 11950.0), ("Xw", mz_n1 + 1.99795, 427.0)])
+
+def fake_n1(client, sample_id, formulas, *, mechanism_ids=None, **kw):
+    return pd.DataFrame([dict(
+        compound_formula="C2H8O2Si1", compound_score=0.9,
+        ion_formula="C2H8BrO2Si-", ion_score=0.9, iso_label="M0",
+        is_base=True, theo_mz=mz_n1, rel_abundance=1.0, iso_score=0.9,
+        sample_peak_id="X1", sample_peak_mz=mz_n1,
+        sample_peak_intensity=11950.0, ppm_error=1.0, abundance_error=0.0)])
+
+sg = P.run_pass0_contaminants(None, "SID", ledg, PROF5, ACFG, ADD5,
+                              score_fn=fake_n1, log=lambda *a: None)
+check("pass0 refuses claim with inconsistent own twin (ratio 0.04)",
+      sg["committed"] == 0 and L.role_of(ledg, "X1") == L.ROLE_UNEXPLAINED, sg)
+
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

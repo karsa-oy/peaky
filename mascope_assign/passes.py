@@ -498,6 +498,7 @@ def run_pass0_contaminants(client, sample_id: str, ledger: pd.DataFrame,
     kids = scored[(~scored["is_base"]) & scored["sample_peak_id"].notna()
                   & (pd.to_numeric(scored["iso_score"], errors="coerce")
                      .fillna(0) > 0.4)]
+    mzs = ledger["mz"]
     for _, r in base.iterrows():
         ppm = r["ppm_error"]
         if ppm is None or pd.isna(ppm) or abs(float(ppm)) > 2.0:
@@ -506,6 +507,23 @@ def run_pass0_contaminants(client, sample_id: str, ledger: pd.DataFrame,
         try:
             if L.role_of(ledger, pid) != L.ROLE_UNEXPLAINED:
                 continue
+            # self-twin consistency: a [M+Br]- contaminant claim must own a
+            # consistent 81Br twin of its OWN. v25 lesson: silanediol n=1
+            # (170.9482) collided with lactic acid's 81Br child (170.9485);
+            # the 12k cps peak's twin at 172.946 was 427 cps (ratio 0.04) --
+            # the peak belongs to the lactic-acid envelope, not the
+            # contaminant. A composite minor component cannot be LOCKED.
+            if "Br" in str(r["ion_formula"]):
+                i0 = ledger.index[ledger["peak_id"] == pid][0]
+                m0 = float(ledger.at[i0, "mz"])
+                h0 = float(ledger.at[i0, "height"])
+                tw = _peak_near(mzs, m0 + _DBR, ppm=8.0)
+                rt = (float(ledger.at[tw, "height"]) / h0) if tw is not None else 0.0
+                if not (0.5 <= rt <= 1.7):
+                    log(f"[pass0] skip {r['compound_formula']} @{m0:.4f}: "
+                        f"own-81Br-twin ratio {rt:.2f} inconsistent "
+                        f"(composite or wrong claim)")
+                    continue
             fam_kids = kids[kids["compound_formula"] == r["compound_formula"]]
             n_kids = int((fam_kids["sample_peak_id"] != pid).sum())
             conf = ("Good (contaminant)" if float(r["ion_score"]) >= 0.7

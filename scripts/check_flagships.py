@@ -34,7 +34,8 @@ FLAGSHIPS = [
     ("C2HF3O2",  "[M-H]-",  1.5, "TFA second channel (pass-5 completion)"),
     # silanediol/PDMS ladder (GKA-discovered 2026-06-12; Mascope-verified with
     # 29Si/30Si/81Br satellites; overturned C5H10O6@244.97 and C7H16O7Si@318.99)
-    ("C2H8O2Si1",  "[M+Br]-", 1.5, "dimethylsilanediol n=1, 12k cps"),
+    # n=1 deliberately NOT asserted: its [M+Br]- collides with lactic acid's
+    # 81Br twin at 170.948 (composite); pass-0 twin gate refuses the claim
     ("C4H14O3Si2", "[M+Br]-", 1.5, "silanediol oligomer n=2 (was bogus C5H10O6 'High', z=3.6)"),
     ("C6H20O4Si3", "[M+Br]-", 1.5, "silanediol oligomer n=3 (was bogus C7H16O7Si, z=3.0)"),
     ("C8H26O5Si4", "[M+Br]-", 1.5, "silanediol oligomer n=4: the 20k cps ex-#1 unknown"),
