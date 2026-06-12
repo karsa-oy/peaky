@@ -51,15 +51,19 @@ exit non-zero on failure.
 - Heteroatoms enter the neutral only with positive evidence; relaxed filtering is
   "earned by evidence" (chain membership / isotope confirmation), never default.
 
-## Current status (2026-06-11)
+## Current status (2026-06-12, v28)
 
 Test sample `<sample-id>` (Br-CIMS, atmospheric), cutoff 100:
-- ~95% signal explained, ~290 s, ledger clean. Outputs archived in
-  `~/mascope-output/assign-dev/50BkQ_c100v13_*`.
-- **Known limitation**: the Low-confidence / high-ppm tail contains likely-wrong
-  heteroatom assignments. The fix is a reframe + new methods — see `ROADMAP.md`.
-  That is the next session's work; the user is sourcing time-resolved data to
-  enable the correlation-based confirmer.
+- 261 M0, 56.5% peaks / 89.3% signal explained (count-first reporting; the old
+  95% headline was fiction-padded), 21/21 flagships, ~180 s, ledger clean.
+  Outputs archived per-version in `~/mascope-output/assign-dev/v*/`.
+- Pipeline is now 6 passes (0: known species, 1: backbone+calibration, 2: GKA,
+  3: evidence-opened families, 4: residual iso-pairs/series, 5: completion)
+  plus two post-run audits (isotope physics, calibrated mass gate).
+- **Regression protection**: `python3 scripts/check_flagships.py <ledger.csv>`
+  after every change. Git history in this directory is the change log.
+- **Remaining frontier**: multi-halogen C/H-lattice families, unsolvable from
+  the sum spectrum — blocked on time-resolved data. See `ROADMAP.md`.
 
 ## Performance notes
 
