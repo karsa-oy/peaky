@@ -466,6 +466,81 @@ def commit_winners(ledger: pd.DataFrame, arb: dict, *, pass_no: int, method: str
             "rejected": rejected}
 
 
+# Known instrument-contaminant series, labeled BEFORE pass 1 (reagent-style):
+# these compositions are H-rich (H/C up to 4) and Si-bearing, so the CHO/CHON
+# pass-1 grid mis-claims their peaks with O-rich fantasies and LOCKS them
+# (v24: 244.9668 'C5H10O6 High' and 318.9856 'C7H16O7Si' were really the n=2/3
+# dimethylsilanediol oligomers -- both sat on the z>2 watch-list).
+def _silanediol_series(n_max: int = 8) -> list[str]:
+    """HO-(Si(CH3)2-O)n-H: PDMS hydrolysis products, the classic inlet/tubing
+    contamination. Composition C(2n)H(6n+2)O(n+1)Si(n)."""
+    return [f"C{2*n}H{6*n+2}O{n+1}Si{n}" for n in range(1, n_max + 1)]
+
+
+def run_pass0_contaminants(client, sample_id: str, ledger: pd.DataFrame,
+                           profile, cfg: PassConfig, adducts: list[str], *,
+                           score_fn=None, log=print) -> dict:
+    """Pass 0 -- label known instrument-contaminant series before the organic
+    passes run. Mascope scores the explicit compositions (its isotope model
+    covers 29Si/30Si + the reagent halogen); commits are LOCKED so pass 1
+    cannot displace them with grid CHO fits."""
+    score_fn = score_fn or IO.score_candidates
+    out = {"committed": 0, "locked": 0, "iso_attached": 0}
+    formulas = _silanediol_series()
+    scored = score_fn(client, sample_id, formulas,
+                      mechanism_ids=cfg.mechanism_ids)
+    if scored is None or len(scored) == 0:
+        log("[pass0] WARNING scoring returned EMPTY for the contaminant list")
+        out["scoring_empty"] = True
+        return out
+    base = scored[scored["is_base"] & scored["sample_peak_id"].notna()
+                  & scored["ion_score"].notna()]
+    kids = scored[(~scored["is_base"]) & scored["sample_peak_id"].notna()
+                  & (pd.to_numeric(scored["iso_score"], errors="coerce")
+                     .fillna(0) > 0.4)]
+    for _, r in base.iterrows():
+        ppm = r["ppm_error"]
+        if ppm is None or pd.isna(ppm) or abs(float(ppm)) > 2.0:
+            continue   # the known-list privilege still requires the MASS
+        pid = r["sample_peak_id"]
+        try:
+            if L.role_of(ledger, pid) != L.ROLE_UNEXPLAINED:
+                continue
+            fam_kids = kids[kids["compound_formula"] == r["compound_formula"]]
+            n_kids = int((fam_kids["sample_peak_id"] != pid).sum())
+            conf = ("Good (contaminant)" if float(r["ion_score"]) >= 0.7
+                    or n_kids >= 2 else "Low (contaminant)")
+            L.commit_assignment(
+                ledger, pid, neutral_formula=r["compound_formula"],
+                adduct=_mech_to_adduct(r), ion_formula=r["ion_formula"],
+                ion_score=float(r["ion_score"]),
+                compound_score=_f(r.get("compound_score")),
+                ppm_error=float(ppm), pass_no=0,
+                method="contaminant:silanediol", confidence=conf,
+                commentary=(f"Pass 0 (known contaminant): dimethylsilanediol "
+                            f"oligomer {r['compound_formula']} "
+                            f"{_mech_to_adduct(r)}, ppm {float(ppm):.2f}; "
+                            f"PDMS hydrolysis series (inlet/tubing), "
+                            f"GKA-discovered 2026-06-12"))
+            out["committed"] += 1
+            L.lock_peaks(ledger, [pid])
+            out["locked"] += 1
+            for _, k in fam_kids.iterrows():
+                if k["sample_peak_id"] == pid:
+                    continue
+                try:
+                    L.attach_isotopologue(ledger, k["sample_peak_id"], pid,
+                                          iso_label=k["iso_label"],
+                                          iso_match_score=_f(k["iso_score"]))
+                    out["iso_attached"] += 1
+                except L.LedgerError:
+                    continue
+        except L.LedgerError:
+            continue
+    log(f"[pass0] {out}")
+    return out
+
+
 def run_pass5_completion(client, sample_id: str, ledger: pd.DataFrame, profile,
                          cfg: PassConfig, adducts: list[str], *,
                          score_fn=None, log=print) -> dict:

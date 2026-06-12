@@ -97,8 +97,12 @@ def run(sample_id: str, context: str = "ambient-air", *,
         _checkpoint(tag)
         return s
 
-    summaries = {"pass1": _safe("pass1", lambda: passes.run_pass1(
-        client, sample_id, led, profile, pre, cfg, adducts, log=log))}
+    # Pass 0: known instrument-contaminant series (silanediol/PDMS ladder),
+    # locked before the organic grid can mis-claim their peaks
+    summaries = {"pass0": _safe("pass0", lambda: passes.run_pass0_contaminants(
+        client, sample_id, led, profile, cfg, adducts, log=log))}
+    summaries["pass1"] = _safe("pass1", lambda: passes.run_pass1(
+        client, sample_id, led, profile, pre, cfg, adducts, log=log))
     # self-calibrate the mass gate on the pass-1 backbone; all later commits
     # are judged by calibrated z-score instead of a fixed ppm window
     passes.calibrate(led, cfg, log=log)

@@ -567,5 +567,51 @@ check("untargeted peak untouched",
       L.role_of(led5, "far") == L.ROLE_UNEXPLAINED)
 check("ledger valid after pass5", L.validate(led5) == [], L.validate(led5))
 
+# ---------- pass 0: known-contaminant pre-pass (silanediol ladder) ----------
+check("silanediol series composition", P._silanediol_series(3) ==
+      ["C2H8O2Si1", "C4H14O3Si2", "C6H20O4Si3"], P._silanediol_series(3))
+mz_n2 = CH.ion_mz("C4H14O3Si2", "[M+Br]-")
+led0 = mk_ledger([("D2", mz_n2, 10712.0), ("D2br", mz_n2 + 1.99795, 10100.0)])
+
+def fake0(client, sample_id, formulas, *, mechanism_ids=None, **kw):
+    rows = []
+    if "C4H14O3Si2" in formulas:
+        rows.append(dict(compound_formula="C4H14O3Si2", compound_score=0.92,
+                         ion_formula="C4H14BrO3Si2-", ion_score=0.92,
+                         iso_label="M0", is_base=True, theo_mz=mz_n2,
+                         rel_abundance=1.0, iso_score=0.92,
+                         sample_peak_id="D2", sample_peak_mz=mz_n2,
+                         sample_peak_intensity=10712.0, ppm_error=-0.87,
+                         abundance_error=0.0))
+        rows.append(dict(compound_formula="C4H14O3Si2", compound_score=0.92,
+                         ion_formula="C4H14BrO3Si2-", ion_score=0.92,
+                         iso_label="81Br", is_base=False,
+                         theo_mz=mz_n2 + 1.99795, rel_abundance=0.97,
+                         iso_score=0.94, sample_peak_id="D2br",
+                         sample_peak_mz=mz_n2 + 1.99795,
+                         sample_peak_intensity=10100.0, ppm_error=-0.8,
+                         abundance_error=0.02))
+    return pd.DataFrame(rows)
+
+s0 = P.run_pass0_contaminants(None, "SID", led0, PROF5, ACFG, ADD5,
+                              score_fn=fake0, log=lambda *a: None)
+check("pass0 commits the silanediol oligomer",
+      led0.loc[led0.peak_id == "D2", "neutral_formula"].iloc[0] == "C4H14O3Si2"
+      and s0["committed"] == 1, s0)
+check("pass0 locks the peak", L.is_locked(led0, "D2"))
+check("pass0 attaches the 81Br child",
+      L.role_of(led0, "D2br") == L.ROLE_ISO, s0)
+# the v24 failure mode: pass-1 must NOT be able to displace it with a CHO fit
+try:
+    L.commit_assignment(led0, "D2", neutral_formula="C5H10O6",
+                        adduct="[M+Br]-", ion_formula="C5H10BrO6-",
+                        ion_score=0.95, ppm_error=0.8, pass_no=1, method="grid",
+                        confidence="High", commentary="bogus")
+    stolen = True
+except L.LedgerError:
+    stolen = False
+check("locked contaminant refuses the CHO grid fit", not stolen
+      and led0.loc[led0.peak_id == "D2", "neutral_formula"].iloc[0] == "C4H14O3Si2")
+
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

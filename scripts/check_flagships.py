@@ -32,12 +32,21 @@ FLAGSHIPS = [
     ("C10H18O4", "[M+Br]-", 1.5, "Br partner of Good [M-H]-, 2.0k cps"),
     ("C10H16O3", "[M+Br]-", 1.5, "Br partner of Good [M-H]-, 1.5k cps"),
     ("C2HF3O2",  "[M-H]-",  1.5, "TFA second channel (pass-5 completion)"),
+    # silanediol/PDMS ladder (GKA-discovered 2026-06-12; Mascope-verified with
+    # 29Si/30Si/81Br satellites; overturned C5H10O6@244.97 and C7H16O7Si@318.99)
+    ("C2H8O2Si1",  "[M+Br]-", 1.5, "dimethylsilanediol n=1, 12k cps"),
+    ("C4H14O3Si2", "[M+Br]-", 1.5, "silanediol oligomer n=2 (was bogus C5H10O6 'High', z=3.6)"),
+    ("C6H20O4Si3", "[M+Br]-", 1.5, "silanediol oligomer n=3 (was bogus C7H16O7Si, z=3.0)"),
+    ("C8H26O5Si4", "[M+Br]-", 1.5, "silanediol oligomer n=4: the 20k cps ex-#1 unknown"),
+    ("C10H32O6Si5","[M+Br]-", 1.5, "silanediol oligomer n=5"),
 ]
 
 # junk classes that must NEVER reappear (formula regexes on M0 neutrals)
 JUNK = [
     (r"F\d*", lambda n: n.get("F", 0) >= 1 and n.get("O", 0) > 6,
      "fluorochemical with O>6 (v16/v19 flood class)"),
+    (r"C5H10O6", lambda n: n == {"C": 5, "H": 10, "O": 6},
+     "the CHO fantasy that mis-claimed silanediol n=2 at 244.9668"),
 ]
 
 
