@@ -1,0 +1,324 @@
+"""Chemistry core: exact masses, formula algebra, DBE / Senior rules, and the
+theoretical neutral-formula grid.
+
+This is the lowest layer of the package. It knows nothing about Mascope, about
+experimental contexts, or about peaks. It provides the primitives every other
+module builds on:
+
+  * exact monoisotopic masses + electron mass
+  * parse / format chemical formulas
+  * neutral_mass(formula), ion_mz(neutral_mass, adduct)
+  * dbe(formula)  -- Double Bond Equivalents of the NEUTRAL
+  * dbe_ok / seniors_ok -- the hard structural gates
+  * enumerate_grid(ranges) -- all plausible NEUTRAL formulas in a box
+  * candidates_for_peaks(...) -- grid pre-filtered to observed peak m/z
+
+Design decision -- DBE is enforced on the NEUTRAL molecule:
+    A real neutral molecule always has a non-negative INTEGER DBE. Half-integer
+    DBE only appears on an *ion* formula because (de)protonation / adduct
+    formation flips H parity. So the grid emits neutrals with integer DBE >= 0
+    only; organic nitrates are still produced (neutral C8H15NO12 has integer
+    DBE; it is the observed ion C8H14NO12- that is half-integer, which is
+    expected and handled at the ion layer, not here).
+"""
+from __future__ import annotations
+
+import bisect
+import re
+from typing import Iterable, Iterator
+
+__version__ = "0.1.0"
+
+# ---------------------------------------------------------------------------
+# Exact monoisotopic masses (most-abundant isotope) and the electron mass.
+# ---------------------------------------------------------------------------
+M: dict[str, float] = {
+    "C": 12.0,
+    "H": 1.0078250319,
+    "O": 15.9949146221,
+    "N": 14.0030740052,
+    "S": 31.97207069,
+    "P": 30.97376163,
+    "Si": 27.9769265350,
+    "F": 18.9984031627,
+    "Cl": 34.96885268,
+    "Br": 78.9183371,
+    "I": 126.9044719,
+}
+M_E = 0.0005485799  # electron mass (Da)
+
+# Valence used for the Senior / DBE accounting. O and S are treated divalent
+# (zero DBE contribution); Si tetravalent like C; P trivalent like N for the
+# standard organic DBE formula.
+_DBE_PLUS = ("C", "Si")            # contribute +1 each (valence 4)
+_DBE_HALF_PLUS = ("N", "P")        # contribute +1/2 each (valence 3)
+_DBE_HALF_MINUS = ("H", "F", "Cl", "Br", "I")  # contribute -1/2 each (valence 1)
+
+# Element set we model. Output uses Hill notation (C, H, then alphabetical),
+# matching how Mascope formats formula strings -- important for string-level
+# comparison against match_compounds output.
+_ORDER = ["C", "H", "N", "O", "S", "P", "Si", "F", "Cl", "Br", "I"]
+
+# ---------------------------------------------------------------------------
+# Adduct / ion-form shifts:  ion_mz = neutral_mass + shift
+# Negative-mode and positive-mode singly-charged forms.
+# ---------------------------------------------------------------------------
+ADDUCT_SHIFTS: dict[str, float] = {
+    # negative mode
+    "[M-H]-":   -(M["H"]) + M_E,
+    "[M+Br]-":  M["Br"] + M_E,
+    "[M+Cl]-":  M["Cl"] + M_E,
+    "[M+I]-":   M["I"] + M_E,
+    "[M+NO3]-": M["N"] + 3 * M["O"] + M_E,
+    "[M+HSO4]-": 2 * M["H"] + M["S"] + 4 * M["O"] - M["H"] + M_E,  # = H + S + 4O
+    "[M+CHO2]-": M["C"] + M["H"] + 2 * M["O"] + M_E,   # formate
+    "[M+C2H3O2]-": 2 * M["C"] + 3 * M["H"] + 2 * M["O"] + M_E,  # acetate
+    # background air-ion channels (atmospheric-pressure negative sources):
+    # carbonate and superoxide adducts, plus electron-attachment radical anion
+    "[M+CO3]-": M["C"] + 3 * M["O"] + M_E,
+    "[M+O2]-": 2 * M["O"] + M_E,
+    "[M]-.": M_E,
+    # reagent-HBr cluster on a background channel: the SAME ion as a covalent
+    # bromo-analyte + CO3, decomposed so the reagent Br sits in the cluster
+    # (Y.HBr) and the reported neutral Y is bromine-free (user reagent rule).
+    "[M+HBr+CO3]-": M["H"] + M["Br"] + M["C"] + 3 * M["O"] + M_E,
+    # positive mode
+    "[M+H]+":   M["H"] - M_E,
+    "[M+Na]+":  22.9897692820 - M_E,
+    "[M+NH4]+": M["N"] + 4 * M["H"] - M_E,
+    "[M+K]+":   38.9637064864 - M_E,
+}
+
+
+# ---------------------------------------------------------------------------
+# Formula parsing / formatting
+# ---------------------------------------------------------------------------
+_TOKEN = re.compile(r"([A-Z][a-z]?)(\d*)")
+
+
+def parse_formula(formula: str) -> dict[str, int]:
+    """'C10H16O4' -> {'C':10,'H':16,'O':4}. Robust to empty / None."""
+    out: dict[str, int] = {}
+    for el, n in _TOKEN.findall(formula or ""):
+        if not el:
+            continue
+        out[el] = out.get(el, 0) + (int(n) if n else 1)
+    return out
+
+
+def format_formula(counts: dict[str, int]) -> str:
+    """{'C':10,'H':16,'O':4} -> 'C10H16O4' in Hill notation: C first, H second,
+    then every other element in alphabetical order of its symbol (matches
+    Mascope's formatting, e.g. 'CH2BrO2')."""
+    s = ""
+    if counts.get("C", 0) > 0:
+        s += "C" + (str(counts["C"]) if counts["C"] > 1 else "")
+    if counts.get("H", 0) > 0:
+        s += "H" + (str(counts["H"]) if counts["H"] > 1 else "")
+    for el in sorted(k for k in counts if k not in ("C", "H")):
+        k = counts[el]
+        if k > 0:
+            s += el + (str(k) if k > 1 else "")
+    return s
+
+
+def neutral_mass(formula: str | dict[str, int]) -> float:
+    cnt = formula if isinstance(formula, dict) else parse_formula(formula)
+    return sum(M[el] * n for el, n in cnt.items() if el in M)
+
+
+def ion_mz(neutral: str | dict[str, int] | float, adduct: str) -> float:
+    """Theoretical m/z of a singly-charged ion of `neutral` under `adduct`."""
+    if adduct not in ADDUCT_SHIFTS:
+        raise KeyError(f"unknown adduct {adduct!r}; known: {sorted(ADDUCT_SHIFTS)}")
+    mass = neutral if isinstance(neutral, (int, float)) else neutral_mass(neutral)
+    return mass + ADDUCT_SHIFTS[adduct]
+
+
+# ---------------------------------------------------------------------------
+# DBE / Senior rules  (computed on the NEUTRAL)
+# ---------------------------------------------------------------------------
+def dbe(formula: str | dict[str, int]) -> float:
+    """Double Bond Equivalents of the neutral.
+
+    DBE = 1 + (C+Si) + (N+P)/2 - (H+F+Cl+Br+I)/2
+    O and S are divalent -> no contribution.
+    """
+    cnt = formula if isinstance(formula, dict) else parse_formula(formula)
+    val = 1.0
+    val += sum(cnt.get(el, 0) for el in _DBE_PLUS)
+    val += sum(cnt.get(el, 0) for el in _DBE_HALF_PLUS) / 2.0
+    val -= sum(cnt.get(el, 0) for el in _DBE_HALF_MINUS) / 2.0
+    return val
+
+
+def seniors_cap(cnt: dict[str, int]) -> float:
+    """Maximum DBE permitted by Senior's rule for these element counts."""
+    return cnt.get("C", 0) + cnt.get("Si", 0) + cnt.get("N", 0) / 2.0 + 1.0
+
+
+def oxygen_ok(formula: str | dict[str, int]) -> tuple[bool, str | None]:
+    """Structural oxygen cap: O <= 2*(C+N+S+P) + 4.
+
+    This is valence chemistry, not a statistical Van Krevelen prior: every
+    oxygen needs a bonding site on the C/N/S/P skeleton (2 per skeletal atom,
+    +4 headroom for peroxide chains / terminal acids). DBE cannot constrain
+    oxygen (divalent O contributes zero), so without this cap the O-rich corner
+    of formula space can hit ANY mass within tolerance (e.g. C3H5ClO17).
+    Real HOMs (C10H18O7, O/C 0.7) and inorganic acids (H2SO4, HNO3) pass."""
+    cnt = formula if isinstance(formula, dict) else parse_formula(formula)
+    skeleton = (cnt.get("C", 0) + cnt.get("N", 0) + cnt.get("S", 0)
+                + cnt.get("P", 0))
+    cap = 2 * skeleton + 4
+    O = cnt.get("O", 0)
+    if O > cap:
+        return False, f"O={O} > structural cap {cap} (2*(C+N+S+P)+4)"
+    return True, None
+
+
+def dbe_ok(formula: str | dict[str, int], tol: float = 1e-9) -> tuple[bool, str | None]:
+    """Hard structural gate on the neutral: DBE must be a non-negative INTEGER
+    and satisfy Senior's rule. Returns (ok, reason_if_not)."""
+    cnt = formula if isinstance(formula, dict) else parse_formula(formula)
+    d = dbe(cnt)
+    if d < -tol:
+        return False, f"DBE={d:g} < 0"
+    if abs(d - round(d)) > tol:
+        return False, f"DBE={d:g} is half-integer (not a valid neutral)"
+    cap = seniors_cap(cnt)
+    if d > cap + tol:
+        return False, f"DBE={d:g} > Senior cap {cap:g}"
+    return True, None
+
+
+# ---------------------------------------------------------------------------
+# Theoretical neutral-formula grid
+# ---------------------------------------------------------------------------
+def parse_ranges(s: str) -> dict[str, tuple[int, int]]:
+    """'C0-30 H0-60 O0-15 N0-5 Br0-2' -> {'C':(0,30), ...}."""
+    out: dict[str, tuple[int, int]] = {}
+    for tok in s.split():
+        m = re.match(r"([A-Z][a-z]?)(\d+)-(\d+)", tok)
+        if m:
+            out[m.group(1)] = (int(m.group(2)), int(m.group(3)))
+    return out
+
+
+def enumerate_grid(
+    ranges: dict[str, tuple[int, int]],
+    mass_min: float = 30.0,
+    mass_max: float = 900.0,
+) -> list[tuple[float, str]]:
+    """Enumerate (neutral_mass, formula) for all formulas in the element box
+    that satisfy DBE >= 0, integer DBE, and Senior's rule.
+
+    H is *derived* from DBE rather than iterated, so the only valid (integer,
+    non-negative) DBE values are visited. This is both correct and fast.
+    """
+    elements = _ORDER
+    b = {el: ranges.get(el, (0, 0)) for el in elements}
+    out: list[tuple[float, str]] = []
+
+    for C in range(b["C"][0], b["C"][1] + 1):
+        if C * M["C"] > mass_max:
+            break
+        for Si in range(b["Si"][0], b["Si"][1] + 1):
+            for N in range(b["N"][0], b["N"][1] + 1):
+                for P in range(b["P"][0], b["P"][1] + 1):
+                    for F in range(b["F"][0], b["F"][1] + 1):
+                        for Cl in range(b["Cl"][0], b["Cl"][1] + 1):
+                            for Br in range(b["Br"][0], b["Br"][1] + 1):
+                                for I in range(b["I"][0], b["I"][1] + 1):
+                                    # Senior cap fixes the max DBE; iterate
+                                    # integer DBE 0..cap and derive H.
+                                    cap = int(C + Si + N / 2.0 + 1.0)
+                                    halo = F + Cl + Br + I
+                                    for d in range(0, cap + 1):
+                                        # DBE = 1 + (C+Si) + (N+P)/2 - (H+halo)/2
+                                        # -> H = 2*(1+C+Si) + (N+P) - 2*d - halo
+                                        H = 2 * (1 + C + Si) + (N + P) - 2 * d - halo
+                                        if H < 0:
+                                            continue
+                                        if not (b["H"][0] <= H <= b["H"][1]):
+                                            continue
+                                        for S in range(b["S"][0], b["S"][1] + 1):
+                                            # structural oxygen cap (see oxygen_ok)
+                                            o_hi = min(b["O"][1],
+                                                       2 * (C + N + S + P) + 4)
+                                            for O in range(b["O"][0], o_hi + 1):
+                                                mass = (
+                                                    C * M["C"] + H * M["H"]
+                                                    + N * M["N"] + O * M["O"]
+                                                    + S * M["S"] + P * M["P"]
+                                                    + Si * M["Si"] + F * M["F"]
+                                                    + Cl * M["Cl"] + Br * M["Br"]
+                                                    + I * M["I"]
+                                                )
+                                                if mass < mass_min or mass > mass_max:
+                                                    continue
+                                                cnt = {
+                                                    "C": C, "H": H, "N": N, "O": O,
+                                                    "S": S, "P": P, "Si": Si,
+                                                    "F": F, "Cl": Cl, "Br": Br, "I": I,
+                                                }
+                                                out.append((mass, format_formula(cnt)))
+    return out
+
+
+# Per-atom complexity penalty used by arbitration to break score ties in favour
+# of the simpler (CHO < CHON < heteroatom-rich) interpretation. A neutral
+# halogen must out-score a CHO competitor by a real margin to win.
+_COMPLEXITY_WEIGHT = {"N": 3, "S": 8, "P": 25, "Cl": 50, "Br": 50, "Si": 80, "I": 80, "F": 30}
+
+
+def complexity_penalty(formula: str | dict[str, int], scale: float = 0.01,
+                       cap: float = 0.20) -> float:
+    """Score penalty in [0, cap] proportional to heteroatom complexity."""
+    cnt = formula if isinstance(formula, dict) else parse_formula(formula)
+    raw = sum(_COMPLEXITY_WEIGHT.get(el, 0) * n for el, n in cnt.items())
+    return min(raw * scale, cap)
+
+
+_GRID_CACHE: dict = {}
+_GRID_CACHE_MAX = 16
+
+
+def _grid_cached(ranges: dict[str, tuple[int, int]], mass_min: float,
+                 mass_max: float) -> list[tuple[float, str]]:
+    """Memoised sorted grid -- enumeration is pure, and callers like chain-head
+    candidate generation hit the same element box many times per run."""
+    key = (tuple(sorted(ranges.items())), round(mass_min, 3), round(mass_max, 3))
+    g = _GRID_CACHE.get(key)
+    if g is None:
+        g = sorted(enumerate_grid(ranges, mass_min, mass_max))
+        if len(_GRID_CACHE) >= _GRID_CACHE_MAX:
+            _GRID_CACHE.clear()
+        _GRID_CACHE[key] = g
+    return g
+
+
+def candidates_for_peaks(
+    peak_mzs: Iterable[float],
+    ranges: dict[str, tuple[int, int]],
+    adducts: Iterable[str],
+    ppm_tolerance: float,
+    mass_min: float = 30.0,
+    mass_max: float = 900.0,
+) -> set[str]:
+    """Return neutral formulas whose theoretical mass matches at least one peak
+    m/z under at least one adduct, within ppm tolerance."""
+    grid = _grid_cached(ranges, mass_min, mass_max)
+    masses = [g[0] for g in grid]
+    shifts = [ADDUCT_SHIFTS[a] for a in adducts if a in ADDUCT_SHIFTS]
+    accepted: set[str] = set()
+    for mz in peak_mzs:
+        for shift in shifts:
+            m_neu = mz - shift
+            if m_neu < mass_min or m_neu > mass_max:
+                continue
+            tol = m_neu * ppm_tolerance * 1e-6
+            lo = bisect.bisect_left(masses, m_neu - tol)
+            hi = bisect.bisect_right(masses, m_neu + tol)
+            for i in range(lo, hi):
+                accepted.add(grid[i][1])
+    return accepted
