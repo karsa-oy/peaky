@@ -80,7 +80,11 @@ def isotope_pattern(ion_formula: str, *, min_rel: float = 0.03,
     counts = C.parse_formula(ion_formula)
     # distribution as {rounded_shift: [prob, weighted_mass_sum]}
     dist: dict[int, list[float]] = {0: [1.0, 0.0]}
-    PRUNE = min_rel * 0.05
+    # prune hard enough to bound the convolution but soft enough that the
+    # multi-atom cross terms survive (a 4-Si M+4 is a sum of many ~1e-3 paths --
+    # 81Br.30Si, 81Br.29Si2, 2x30Si... -- so an aggressive prune underpredicts
+    # the M+4 height and the silanediol M+4 wrongly survives as a contaminant)
+    PRUNE = 1e-6
     for el, n in counts.items():
         per = _ISO_DIST.get(el)
         if per is None or n <= 0:

@@ -702,7 +702,7 @@ def _peak_near(mzs: "pd.Series", target: float, ppm: float = 5.0):
 
 
 def complete_isotope_envelopes(ledger: pd.DataFrame, cfg: PassConfig, *,
-                               min_rel: float = 0.06, ppm: float = 6.0,
+                               min_rel: float = 0.06, ppm: float = 12.0,
                                log=print) -> dict:
     """Claim the FULL predicted isotope envelope (M+1/M+2/M+4...) of every
     committed M0, so multi-isotope species (Si-rich silanediols, multi-Br/Cl
