@@ -53,15 +53,36 @@ _ISO_DIST: dict[str, list[tuple[float, float]]] = {
 _HEAVY_ELEMENTS = ("Br", "Cl", "Si", "S")   # the M+2 drivers
 
 
-def _label_for_shift(dmass: float) -> str:
-    """Name the dominant isotopologue at a given mass shift (for ledger labels)."""
-    table = [(1.003355, "13C"), (1.997795, "81Br"), (1.997050, "37Cl"),
-             (1.996840, "30Si"), (1.995796, "34S"), (0.999568, "29Si"),
-             (2.004246, "18O"), (2.006710, "13C2"), (2.997363, "81Br+29Si"),
-             (3.001150, "81Br+13C"), (3.994635, "81Br+30Si"), (3.995590, "81Br2/2x37Cl"),
-             (3.993680, "2x30Si")]
-    best = min(table, key=lambda t: abs(t[0] - dmass))
-    return best[1] if abs(best[0] - dmass) <= 0.01 else f"M+{round(dmass)}"
+# (mass shift, label, {element: min count required to form it})
+_LABEL_TABLE = [
+    (1.003355, "13C", {"C": 1}),
+    (0.999568, "29Si", {"Si": 1}),
+    (0.997035, "15N", {"N": 1}),
+    (1.997795, "81Br", {"Br": 1}),
+    (1.997050, "37Cl", {"Cl": 1}),
+    (1.996840, "30Si", {"Si": 1}),
+    (1.995796, "34S", {"S": 1}),
+    (2.004246, "18O", {"O": 1}),
+    (2.006710, "13C2", {"C": 2}),
+    (2.997363, "81Br+29Si", {"Br": 1, "Si": 1}),
+    (3.001150, "81Br+13C", {"Br": 1, "C": 1}),
+    (3.994635, "81Br+30Si", {"Br": 1, "Si": 1}),
+    (3.995590, "2x81Br", {"Br": 2}),
+    (3.994100, "2x37Cl", {"Cl": 2}),
+    (3.993680, "2x30Si", {"Si": 2}),
+]
+
+
+def _label_for_shift(dmass: float, counts: dict | None = None) -> str:
+    """Name the dominant isotopologue at a mass shift, restricted to combos the
+    formula can actually form (a 1-Br ion's M+4 is 81Br+30Si, never 81Br2).
+    Falls back to a generic M+N when nothing achievable is close."""
+    cand = [t for t in _LABEL_TABLE
+            if counts is None or all(counts.get(e, 0) >= n for e, n in t[2].items())]
+    if not cand:
+        return f"M+{round(dmass)}"
+    best = min(cand, key=lambda t: abs(t[0] - dmass))
+    return best[1] if abs(best[0] - dmass) <= 0.012 else f"M+{round(dmass)}"
 
 
 def isotope_pattern(ion_formula: str, *, min_rel: float = 0.03,
@@ -135,7 +156,8 @@ def isotope_pattern(ion_formula: str, *, min_rel: float = 0.03,
         dmass = wm / p
         rel = p / base
         if rel >= min_rel:
-            out.append((round(dmass, 4), round(rel, 4), _label_for_shift(dmass)))
+            out.append((round(dmass, 4), round(rel, 4),
+                        _label_for_shift(dmass, counts)))
     return sorted(out)
 
 
