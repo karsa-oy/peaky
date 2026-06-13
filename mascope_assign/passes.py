@@ -29,7 +29,7 @@ from . import isotopes as ISO
 from . import ledger as L
 from . import series_gka as G
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 
 @dataclass

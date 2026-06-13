@@ -51,7 +51,7 @@ exit non-zero on failure.
 - Heteroatoms enter the neutral only with positive evidence; relaxed filtering is
   "earned by evidence" (chain membership / isotope confirmation), never default.
 
-## Current status (2026-06-13, v40)
+## Current status (2026-06-13, v41)
 
 Test sample `<sample-id>` (Br-CIMS, atmospheric), cutoff 100:
 - 268 M0, **60.6% peaks / 91.0% signal explained**, 21/21 flagships, ledger
