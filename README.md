@@ -51,16 +51,24 @@ exit non-zero on failure.
 - Heteroatoms enter the neutral only with positive evidence; relaxed filtering is
   "earned by evidence" (chain membership / isotope confirmation), never default.
 
-## Current status (2026-06-12, v35)
+## Current status (2026-06-13, v37/v38)
 
 Test sample `<sample-id>` (Br-CIMS, atmospheric), cutoff 100:
-- 276 M0, 58.6% peaks / 90.6% signal explained (count-first reporting; the old
-  95% headline was fiction-padded), 21/21 flagships, ledger clean.
-  **Tiered: 182 Identified / 94 Candidate** (`tiers.py`; mechanical rules,
-  candidate-density currency, lattice-monster + BrCl demotions, same-ion
+- 267 M0, **60.6% peaks / 91.0% signal explained**, 21/21 flagships, ledger
+  clean. **Tiered: 179 Identified / 88 Candidate** (`tiers.py`; mechanical
+  rules, candidate-density currency, lattice-monster + BrCl demotions, same-ion
   decomposition aliases excluded). Excel is an 11-sheet styled workbook
   (Identified / Candidates-per-formula / evidence-characterized Unassigned +
   legend). Outputs archived per-version in `~/mascope-output/assign-dev/v*/`.
+- **Isotope-envelope completion (`complete_isotope_envelopes`)**: predicts each
+  committed ion's full M+1/M+2/M+4 envelope (`isotopes.isotope_pattern`,
+  per-element convolution incl. Si/Br/Cl combos) and claims it — ~44% of the
+  bright "residual"/Candidate peaks were isotope satellites of brighter peaks,
+  not independent compounds. The 393/395 case: the silanediol Si4+Br M+2 at
+  395 was mis-assigned a phantom `C8H12ClF6NO2S` because its M+4/M+2 ratio
+  (~0.26) mimics a Cl doublet; now 395/397 are its envelope. Runs before pass 4
+  (so satellites never reach the iso-pair stage) and post-audit. iso_child rose
+  276→304; peaks-explained 58.6→60.6%.
 - **Pass 6 ladder gap-fill (`ladders.py`)**: walks homolog/oxidation diagonals
   out from committed anchors (+O/+CO/+CO2/+CH2O/±CH2/+C2H4/-H2O, same adduct)
   and fills the gaps, gated hard against the false positives the adversarial

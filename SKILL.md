@@ -77,6 +77,10 @@ Pass-3 contaminant families are eligible. Reagent adducts are NOT set by context
 | 2 | **iterative GKA series** expansion from locked anchors (CH₂/O/H₂O/CO/CO₂/C₂H₂O + siloxane/CF₂), chaining confirmed members as new anchors |
 | 3 | **automatic series detection** (the machine "rotating plot") opens contaminant families on decoy-controlled evidence; HBr-cluster ladder; organosulfate/nitrate/siloxane/amine + iso-gated bromo/chloro-organics |
 | 4 | **residual explainer**: isotope-pair resolution of ~1.998-Da doublets + deep 2-step series; DBE-only plausibility; ppm-disciplined acceptance |
+| 5 | **known-neutral completion**: cross-channel partners + series gaps of passes 1–4 (no new formula space) |
+| 6 | **anchored ladder gap-fill** (`ladders.py`): walk homolog/oxidation diagonals (+O/+CH₂/+CO₂/−H₂O, constant-DBE for carbon growth) out from Identified anchors, satellite-guarded, Candidate tier |
+| iso-env | **isotope-envelope completion** (`complete_isotope_envelopes`, before pass 4 + post-audit): claim every committed peak's full predicted M+2/M+4 envelope (Si/Br/Cl combos), attaching unexplained satellites and **displacing weak M0s that are really a parent's satellite** — kills the ~44% of "residual" peaks that are isotope lines (the silanediol M+2 mis-read as a Cl-F-S organic) |
+| audits | 13C carbon-clamp (pre-pass-4 + post), Br-doublet repair, calibrated mass gate |
 
 ## Chemistry rules (enforced + regression-tested)
 
@@ -121,8 +125,9 @@ already open. `run_assignment.py` emits one per run.
 | `contexts.py` | context profiles + plausibility filter + contaminant families |
 | `ledger.py` | the peak DataFrame + invariants + commit API |
 | `io_mascope.py` | the ONLY Mascope I/O: peaks, cheminfo, parallel `match_compounds` + per-isotopologue parser, adduct detection |
-| `isotopes.py` | prescan fingerprint → grid constraints |
+| `isotopes.py` | prescan fingerprint → grid constraints; **`isotope_pattern()`** envelope predictor (per-element convolution) |
 | `series_gka.py` | GKA/Kendrick math, repeat units, propagation |
+| `ladders.py` | pass-6 anchored homolog/oxidation ladder gap-fill |
 | `series_detect.py` | automatic decoy-controlled series detection + chain extraction |
 | `reagents.py` | reagent-cluster library + labeler |
 | `passes.py` | arbitration + the 4-pass director |
@@ -136,7 +141,7 @@ already open. `run_assignment.py` emits one per run.
 
 `for t in chemistry contexts ledger isotopes series_gka io_mascope reagents
 passes residual ladders tiers report series_detect; do python3 tests/test_$t.py; done`
-— 358 offline assertions, no network (io_mascope live smoke gated behind
+— 390 offline assertions, no network (io_mascope live smoke gated behind
 `MASCOPE_LIVE=1`). Every module has a matching `tests/test_<module>.py`. Add a
 test with each change; keep the suite green. See `README.md` for the dev loop and
 `ROADMAP.md` for the open quality work.
