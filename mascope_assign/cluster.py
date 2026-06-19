@@ -95,15 +95,16 @@ def threshold_scan(cm: pd.DataFrame, ts=(0.3, 0.4, 0.5, 0.6, 0.7), link=LINK):
     return out
 
 
-def cluster_rows(cols, lab, big, cm, traces_raw, grid, *, median_cps=None, maxc=10):
+def cluster_rows(cols, lab, big, cm, traces_raw, grid, *, median_cps=None, maxc=None):
     """Build per-cluster summary rows (sorted by size) for rendering:
-    (cid, members[brightest-first], r_bar, shape, peak_hour)."""
+    (cid, members[brightest-first], r_bar, shape, peak_hour). maxc=None -> ALL
+    clusters (the default — dissect all signal); pass an int to cap."""
     Lg = np.log10(traces_raw[cols].clip(lower=1e-9))
     Z = (Lg - Lg.mean()) / Lg.std()
     if median_cps is None:
         median_cps = {c: float(np.nanmedian(traces_raw[c].values)) for c in cols}
     rows = []
-    for cid in big[:maxc]:
+    for cid in (big if maxc is None else big[:maxc]):
         mem = sorted([c for c in cols if lab[c] == cid],
                      key=lambda c: -float(median_cps.get(c, 0)))
         mz = smooth(Z[mem].mean(axis=1).values)
@@ -129,6 +130,24 @@ def _wrap(toks, width=118):
     if cur:
         lines.append(cur)
     return lines
+
+
+def render_paged(rows, grid, traces_z, traces_raw, item_label, out_prefix, *,
+                 per_page=10, **kw):
+    """Render `rows` clusters across multiple pages of <= per_page each, so ALL
+    clusters are shown while each panel stays legible. Writes <out_prefix>_p<i>.png
+    and returns the list of paths. kw passes through to render_panels (mode/ylim)."""
+    if not rows:
+        return []
+    title = kw.pop("title", "")
+    pages = [rows[i:i + per_page] for i in range(0, len(rows), per_page)]
+    paths = []
+    for i, chunk in enumerate(pages, 1):
+        t = f"{title}  (page {i}/{len(pages)})" if len(pages) > 1 else title
+        out = f"{out_prefix}_p{i}.png"
+        render_panels(chunk, grid, traces_z, traces_raw, item_label, out, title=t, **kw)
+        paths.append(out)
+    return paths
 
 
 def render_panels(rows, grid, traces_z, traces_raw, item_label, out, *,

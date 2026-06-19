@@ -115,13 +115,19 @@ def load_context(out_dir: str, *, tag: str, label: str, ts_path: str | None = No
         p = f"{out_dir}/{fn}"
         if os.path.exists(p):
             ctx[key] = json.load(open(p))
-    for key, fn in [("vk", f"van_krevelen_full_{tag}.png"),
-                    ("changing", f"clusters_changing_{tag}.png"),
-                    ("flat", f"clusters_flat_{tag}.png"),
-                    ("unassigned", f"clusters_unassigned_{tag}.png")]:
-        p = f"{out_dir}/{fn}"
-        if os.path.exists(p):
-            ctx["fig"][key] = p
+    vk = f"{out_dir}/van_krevelen_full_{tag}.png"
+    if os.path.exists(vk):
+        ctx["fig"]["vk"] = vk           # single (scatter)
+    # cluster figures are PAGED (clusters_<set>_<tag>_p<i>.png) — collect ALL pages
+    for key, stem in [("changing", f"clusters_changing_{tag}"),
+                      ("flat", f"clusters_flat_{tag}"),
+                      ("unassigned", f"clusters_unassigned_{tag}")]:
+        paged = sorted(glob.glob(f"{out_dir}/{stem}_p*.png"),
+                       key=lambda s: int(s.rsplit("_p", 1)[1].split(".")[0]))
+        if paged:
+            ctx["fig"][key] = paged
+        elif os.path.exists(f"{out_dir}/{stem}.png"):
+            ctx["fig"][key] = [f"{out_dir}/{stem}.png"]
     cc = f"{out_dir}/clusters_changing_{tag}.csv"
     if os.path.exists(cc):
         ctx["changing_csv"] = pd.read_csv(cc)
@@ -156,16 +162,27 @@ def _text_lines(fig, lines, *, x=0.08, y0=0.90, dy=0.026, size=10):
     return y
 
 
-def _image_page(pdf, png, title, *, landscape=False, dpi=200):
-    """Embed a PNG as one page. landscape=True for wide figures (cluster panels)
-    so they downscale less and the labels stay legible. dpi sets the page raster."""
+def _image_page(pdf, png, title, *, landscape=False, dpi=200, native=False, src_dpi=170):
+    """Embed a PNG as one page. native=True makes the PAGE the image's own size
+    (page = pixels/src_dpi inches) so a tall cluster figure embeds 1:1 and stays
+    fully legible (the page is tall; scroll). Otherwise fit to A4 (landscape opt)."""
     import matplotlib.image as mpimg
     import matplotlib.pyplot as plt
+    img = mpimg.imread(png)
+    if native:
+        ih, iw = img.shape[0] / src_dpi, img.shape[1] / src_dpi
+        Th = 0.5                                    # title strip (inches)
+        fig = plt.figure(figsize=(iw, ih + Th), dpi=src_dpi)
+        fig.text(0.01, 1 - 0.20 / (ih + Th), title, fontsize=12, weight="bold", color=INK, va="top")
+        ax = fig.add_axes([0.005, 0.002, 0.99, ih / (ih + Th)])
+        ax.imshow(img); ax.axis("off")
+        pdf.savefig(fig); plt.close(fig)
+        return
     figsize = (A4[1], A4[0]) if landscape else A4
     fig = plt.figure(figsize=figsize, dpi=dpi)
     fig.text(0.04, 0.975, title, fontsize=13, weight="bold", color=INK)
     ax = fig.add_axes([0.02, 0.02, 0.96, 0.93])
-    ax.imshow(mpimg.imread(png)); ax.axis("off")
+    ax.imshow(img); ax.axis("off")
     pdf.savefig(fig, dpi=dpi)
     plt.close(fig)
 
@@ -336,10 +353,9 @@ def composition(ctx, pdf):
 
 
 def families(ctx, pdf):
-    if "changing" in ctx["fig"]:
-        _image_page(pdf, ctx["fig"]["changing"],
-                    f"{ctx['label']} — co-varying analyte families (changing peaks)",
-                    landscape=True)
+    for p in ctx["fig"].get("changing", []):
+        _image_page(pdf, p, f"{ctx['label']} — co-varying analyte families (changing peaks)",
+                    native=True)
     cc = ctx.get("changing_csv")
     if cc is None or not len(cc):
         return
@@ -366,12 +382,10 @@ def families(ctx, pdf):
 
 
 def clusters(ctx, pdf):
-    if "flat" in ctx["fig"]:
-        _image_page(pdf, ctx["fig"]["flat"],
-                    f"{ctx['label']} — flat background (RAW intensity bands)", landscape=True)
-    if "unassigned" in ctx["fig"]:
-        _image_page(pdf, ctx["fig"]["unassigned"],
-                    f"{ctx['label']} — unexplained-peak clusters (RAW intensity)", landscape=True)
+    for p in ctx["fig"].get("flat", []):
+        _image_page(pdf, p, f"{ctx['label']} — flat background (RAW intensity bands)", native=True)
+    for p in ctx["fig"].get("unassigned", []):
+        _image_page(pdf, p, f"{ctx['label']} — unexplained-peak clusters (RAW intensity)", native=True)
 
 
 def methods(ctx, pdf):
