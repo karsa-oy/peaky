@@ -393,9 +393,9 @@ def coverage(ctx, pdf):
              ("b", "  signal % on the bars (e.g. protonation usually dominates the signal)."),
              ("b", "• Unexplained peaks are a third of the m/z bins but only a few % of the signal "
                    "(dim, near-noise)."),
-             ("dim", "[M+NH4]+ is mass/isotope-identical to [M+H]+ of the +NH3 amine -- labelled NH4"),
-             ("dim", "only when the base compound is also seen in another channel (a prior, not a"),
-             ("dim", "measurement). Peak roles are defined on the Methods page.")]
+             ("dim", "[M+NH4]+ is mass/isotope-identical to [M+H]+ of the +NH3 amine -- kept as NH4 only"),
+             ("dim", "when its trace co-varies (r>=0.7) with the protonated/urea parent, else re-read as the"),
+             ("dim", "amine (a parsimony prior, not a measurement). Peak roles -> Methods page.")]
     _text_lines(fig, lines, y0=0.36, dy=0.029)
     _close(pdf, fig)
 
