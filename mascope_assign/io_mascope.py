@@ -72,6 +72,28 @@ def connect(env_path: str | None = None):
     return MascopeClient(url=url, access_token=tok)
 
 
+def escape_batch(name: str) -> str:
+    """The SDK resolves `batch=`/`batches=` as a case-insensitive REGEX via
+    str.contains, so a literal batch name with regex metacharacters (e.g.
+    'Orange peeling (Ur+ CIMS)' — parens + '+') silently fails to match. Escape
+    it to match literally."""
+    return re.escape(name)
+
+
+def fetch_batch_samples(client, batch: str, *, dataset: str | None = None,
+                        drop_columns=None) -> pd.DataFrame:
+    """Per-sample table for a batch (one row per sample) via samples.list. Carries
+    `sample_item_id`, `sample_item_name`, `datetime_utc`, `tic`, `polarity`, ...
+    — enough for representative-sample selection WITHOUT loading every peak. The
+    batch name is regex-escaped (see escape_batch). Pass drop_columns=[] (default)
+    to keep the id/time/tic columns the default SDK drop would remove."""
+    sl = client.samples.list(batch=escape_batch(batch), dataset=dataset,
+                             drop_columns=[] if drop_columns is None else drop_columns)
+    if sl is None or len(sl) == 0:
+        raise RuntimeError(f"no samples for batch {batch!r}")
+    return sl
+
+
 def fetch_batch_peaks(client, dataset: str, batch: str, *, save_path: str | None = None
                       ) -> pd.DataFrame:
     """Load the per-sample peak time-series for a whole batch (the TS / cluster /

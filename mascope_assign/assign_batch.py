@@ -1,0 +1,303 @@
+"""Batch assignment over a REPRESENTATIVE sample subset, with per-file records.
+
+This realises the sample-selection RULE (see sampling.py): rather than assign a
+single averaged file (which misses analytes present only part of the run), we
+assign each of the representative files SEPARATELY and combine. match_compounds
+is per-sample — a synthetic union spectrum can't be scored — so combining real
+per-file ledgers is the only principled path.
+
+We keep every per-file ledger on disk (out_dir/per_file/<sid>_ledger.csv) so the
+file-to-file JITTER can be investigated: does the same m/z get the same formula /
+tier in every file, and is its mass spread real or just per-file calibration?
+
+The combine step is OFFSET-AWARE: each file carries a median mass offset
+(io_mascope.estimate_offset); clustering aligns peaks on offset-corrected m/z so a
+genuine same-peak is not split by a per-file calibration shift, while the reported
+jitter separates the raw spread from the calibration-removed (residual) spread.
+
+`align()` / `merge_union()` are PURE (offline-tested). `run()` does the network
+assignment loop.
+"""
+from __future__ import annotations
+
+import json
+import os
+
+import numpy as np
+import pandas as pd
+
+from . import profiles as P
+from . import sampling as SS
+
+__version__ = "0.1.0"
+
+DEFAULT_TOL_PPM = 6.0
+TIER_RANK = {"Identified": 2, "Candidate": 1}
+_M0_COLS = ["mz", "neutral_formula", "adduct", "tier", "ion_score"]
+
+
+# ---------------------------------------------------------------------------
+# pure: cross-file alignment + union  (no network)
+# ---------------------------------------------------------------------------
+def _cluster_mz(mz_sorted: np.ndarray, tol_ppm: float) -> np.ndarray:
+    """Single-linkage gap clustering of an ASCENDING m/z array -> cluster ids."""
+    cid = np.zeros(len(mz_sorted), dtype=np.int64)
+    if len(mz_sorted) > 1:
+        gaps = np.diff(mz_sorted) / mz_sorted[:-1] * 1e6
+        cid[1:] = np.cumsum(gaps > tol_ppm)
+    return cid
+
+
+def align(per_file: dict, *, tol_ppm: float = DEFAULT_TOL_PPM,
+          offsets: dict | None = None):
+    """Align the M0 rows of several files by m/z.
+
+    per_file : {src -> DataFrame with _M0_COLS}. offsets : {src -> median ppm}
+    (subtracted before clustering so a per-file calibration shift does not split
+    a peak). Returns (merged, jitter):
+
+      merged  one row per m/z cluster: consensus mz, best assignment
+              (Identified>Candidate>ion_score), n_files, srcs, formula_agree,
+              mz_jitter_ppm_raw, mz_jitter_ppm_caldj.
+      jitter  long form, one row per (cluster, file): cluster, src, mz,
+              neutral_formula, adduct, tier, ion_score.
+    """
+    offsets = offsets or {}
+    frames = []
+    for src, df in per_file.items():
+        if df is None or not len(df):
+            continue
+        d = df[[c for c in _M0_COLS if c in df.columns]].dropna(subset=["mz"]).copy()
+        d["src"] = src
+        off = float(offsets.get(src, 0.0) or 0.0)
+        d["_mz_adj"] = d["mz"] * (1.0 - off / 1e6)   # offset-corrected for alignment
+        frames.append(d)
+    if not frames:
+        return (pd.DataFrame(columns=["mz", "neutral_formula", "adduct", "tier",
+                                      "ion_score", "n_files", "srcs", "formula_agree",
+                                      "mz_jitter_ppm_raw", "mz_jitter_ppm_caldj"]),
+                pd.DataFrame(columns=["cluster", "src", *_M0_COLS]))
+    allm = pd.concat(frames, ignore_index=True).sort_values("_mz_adj").reset_index(drop=True)
+    allm["cluster"] = _cluster_mz(allm["_mz_adj"].to_numpy(), tol_ppm)
+
+    merged_rows, jitter_rows = [], []
+    for cid, g in allm.groupby("cluster"):
+        g = g.assign(_r=g["tier"].map(lambda t: TIER_RANK.get(str(t), 0)))
+        best = g.sort_values(["_r", "ion_score"], ascending=False).iloc[0]
+        mz_raw = g["mz"].to_numpy(); mz_adj = g["_mz_adj"].to_numpy()
+        def _spread(a):
+            return float((a.max() - a.min()) / a.mean() * 1e6) if len(a) > 1 else 0.0
+        forms = set(g["neutral_formula"].dropna())
+        merged_rows.append(dict(
+            mz=float(g["mz"].mean()), neutral_formula=best["neutral_formula"],
+            adduct=best.get("adduct"), tier=best["tier"],
+            ion_score=best.get("ion_score"),
+            n_files=int(g["src"].nunique()), srcs=",".join(sorted(set(g["src"]))),
+            formula_agree=(len(forms) <= 1),
+            mz_jitter_ppm_raw=round(_spread(mz_raw), 3),
+            mz_jitter_ppm_caldj=round(_spread(mz_adj), 3)))
+        for _, r in g.sort_values("src").iterrows():
+            jitter_rows.append(dict(cluster=int(cid), src=r["src"], mz=float(r["mz"]),
+                                    neutral_formula=r.get("neutral_formula"),
+                                    adduct=r.get("adduct"), tier=r.get("tier"),
+                                    ion_score=r.get("ion_score")))
+    merged = pd.DataFrame(merged_rows).sort_values("mz").reset_index(drop=True)
+    jitter = pd.DataFrame(jitter_rows)
+    return merged, jitter
+
+
+def merge_union(per_file: dict, **kw):
+    """Just the merged union frame from align()."""
+    return align(per_file, **kw)[0]
+
+
+def _theo_ppm(mz, neutral, adduct):
+    """Observed-vs-theoretical ppm for an assigned (neutral, adduct) at mz."""
+    from . import chemistry as C
+    try:
+        theo = C.ion_mz(str(neutral), str(adduct))
+        return (float(mz) - theo) / theo * 1e6
+    except Exception:
+        return None
+
+
+def jitter_report(per_file: dict, *, tol_ppm: float = DEFAULT_TOL_PPM):
+    """File-to-file JITTER analysis over the per-file M0 frames (the user's goal:
+    'investigate the jitter'). For each assignment we compute the observed-vs-
+    theoretical ppm, giving each FILE a calibration offset (median ppm); peaks are
+    then compared two ways:
+
+      by_formula : keyed on (neutral_formula, adduct) — the same assignment seen
+                   in >=2 files. `mz_jitter_raw` = ppm spread of the raw masses;
+                   `mz_jitter_resid` = spread AFTER removing each file's offset
+                   (the genuine peak-position noise vs mere calibration drift).
+      by_mz      : keyed on offset-corrected m/z clusters — exposes FORMULA
+                   DISAGREEMENTS (same peak, different formula across files).
+
+    Returns dict: {offsets, by_formula (DataFrame), by_mz (DataFrame), summary}.
+    """
+    # per-file offset = median observed-vs-theoretical ppm of its assignments
+    offsets, rows = {}, []
+    for src, df in per_file.items():
+        if df is None or not len(df):
+            offsets[src] = None
+            continue
+        d = df.dropna(subset=["mz", "neutral_formula", "adduct"]).copy()
+        d["ppm"] = [_theo_ppm(m, n, a) for m, n, a in
+                    zip(d["mz"], d["neutral_formula"], d["adduct"])]
+        d = d.dropna(subset=["ppm"])
+        offsets[src] = float(d["ppm"].median()) if len(d) else None
+        d["src"] = src
+        rows.append(d)
+    if not rows:
+        return {"offsets": offsets, "by_formula": pd.DataFrame(),
+                "by_mz": pd.DataFrame(), "summary": {}}
+    allm = pd.concat(rows, ignore_index=True)
+
+    # --- by_formula: same (neutral, adduct) across files ---
+    frows = []
+    for (nf, ad), g in allm.groupby(["neutral_formula", "adduct"]):
+        if g["src"].nunique() < 2:
+            continue
+        ppm = g["ppm"].to_numpy()
+        resid = np.array([p - (offsets[s] or 0.0) for p, s in zip(g["ppm"], g["src"])])
+        frows.append(dict(
+            neutral_formula=nf, adduct=ad, n_files=int(g["src"].nunique()),
+            mz=float(g["mz"].mean()),
+            mz_jitter_raw=round(float(ppm.max() - ppm.min()), 3),
+            mz_jitter_resid=round(float(resid.max() - resid.min()), 3),
+            tiers=",".join(sorted(set(map(str, g["tier"])))),
+            tier_stable=(g["tier"].nunique() == 1),
+            ion_score_min=round(float(g["ion_score"].min()), 3) if "ion_score" in g else None,
+            ion_score_max=round(float(g["ion_score"].max()), 3) if "ion_score" in g else None))
+    by_formula = (pd.DataFrame(frows).sort_values("mz_jitter_resid", ascending=False)
+                  .reset_index(drop=True)) if frows else pd.DataFrame()
+
+    # --- by_mz: offset-corrected m/z clusters -> formula disagreements ---
+    allm["_mz_adj"] = [m * (1 - (offsets[s] or 0.0) / 1e6)
+                       for m, s in zip(allm["mz"], allm["src"])]
+    a = allm.sort_values("_mz_adj").reset_index(drop=True)
+    a["cluster"] = _cluster_mz(a["_mz_adj"].to_numpy(), tol_ppm)
+    mrows = []
+    for cid, g in a.groupby("cluster"):
+        forms = sorted(set(g["neutral_formula"].dropna()))
+        if g["src"].nunique() < 2:
+            continue
+        mrows.append(dict(mz=float(g["mz"].mean()), n_files=int(g["src"].nunique()),
+                          n_formulas=len(forms), formulas="; ".join(forms),
+                          disagree=(len(forms) > 1)))
+    by_mz = pd.DataFrame(mrows)
+
+    shared = len(by_formula)
+    disagree = int(by_mz["disagree"].sum()) if len(by_mz) else 0
+    jr = by_formula["mz_jitter_raw"] if shared else pd.Series(dtype=float)
+    jres = by_formula["mz_jitter_resid"] if shared else pd.Series(dtype=float)
+    summary = {
+        "offsets_ppm": {k: (round(v, 3) if v is not None else None) for k, v in offsets.items()},
+        "offset_spread_ppm": round(float(max(v for v in offsets.values() if v is not None)
+                                         - min(v for v in offsets.values() if v is not None)), 3)
+        if any(v is not None for v in offsets.values()) else None,
+        "shared_assignments": shared,
+        "tier_unstable": int((~by_formula["tier_stable"]).sum()) if shared else 0,
+        "formula_disagreements": disagree,
+        "mz_jitter_raw_median": round(float(jr.median()), 3) if shared else None,
+        "mz_jitter_raw_p95": round(float(jr.quantile(0.95)), 3) if shared else None,
+        "mz_jitter_resid_median": round(float(jres.median()), 3) if shared else None,
+        "mz_jitter_resid_p95": round(float(jres.quantile(0.95)), 3) if shared else None,
+    }
+    return {"offsets": offsets, "by_formula": by_formula, "by_mz": by_mz,
+            "summary": summary}
+
+
+def _m0(ledger: pd.DataFrame) -> pd.DataFrame:
+    """Extract the M0 (assigned-compound) rows in the _M0_COLS schema."""
+    role = ledger["role"] if "role" in ledger.columns else None
+    m = ledger[role == "M0"] if role is not None else ledger
+    cols = [c for c in _M0_COLS if c in m.columns]
+    return m[cols].copy()
+
+
+# ---------------------------------------------------------------------------
+# network: assign each representative file, keep per-file records, combine
+# ---------------------------------------------------------------------------
+def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
+        reagent: str = "auto", context: str | None = None,
+        n_time: int = SS.N_TIME, include_max_tic: bool = True,
+        out_dir: str, tol_ppm: float = DEFAULT_TOL_PPM,
+        sample_ids: list | None = None, log=print, **assign_kw) -> dict:
+    """Assign the representative subset of a batch and combine, keeping per-file
+    ledgers. Provide EITHER `peaks` (a batch peak/sample table) OR `batch` (a
+    batch name; the per-sample list is fetched fresh from the live server, which
+    also guarantees the selected sample ids are valid for get_peaks — cached ids
+    go stale / 404 when the server copy is renamed). `context` defaults to the
+    reagent profile's context. Extra kwargs pass through to assign.run. Writes
+    per_file/<sid>_ledger.csv, merged_ledger.csv, jitter.csv, batch_summary.json."""
+    from . import assign as A
+    from . import io_mascope as IO
+
+    out_dir = os.path.expanduser(out_dir)
+    pfdir = os.path.join(out_dir, "per_file")
+    os.makedirs(pfdir, exist_ok=True)
+
+    client = IO.connect()
+    if peaks is None:
+        if not batch:
+            raise ValueError("need peaks= or batch=")
+        peaks = IO.fetch_batch_samples(client, batch, dataset=dataset)
+        log(f"[assign_batch] fetched {len(peaks)} samples for batch {batch!r}")
+
+    prof = P.resolve(reagent, peaks)
+    context = context or prof.context
+    if sample_ids is None:
+        sel = SS.select_representative_samples(peaks, n_time=n_time,
+                                               include_max_tic=include_max_tic)
+        sample_ids = sel["sample_item_id"].tolist()
+        sel.to_csv(os.path.join(out_dir, "selected_samples.csv"), index=False)
+    log(f"[assign_batch] {prof.label} context={context!r}: "
+        f"{len(sample_ids)} representative files -> {pfdir}")
+
+    # Force the reagent's analyte channels (we know the reagent at batch level) so
+    # a per-sample match gap can't flip polarity / mis-assign a file. Caller can
+    # still override via assign_kw['adducts'].
+    assign_kw.setdefault("adducts", list(prof.adducts))
+    per_file, offsets, per_stats = {}, {}, []
+    for i, sid in enumerate(sample_ids, 1):
+        log(f"[assign_batch] ({i}/{len(sample_ids)}) assigning {sid} ...")
+        res = A.run(sid, context=context, log=log, **assign_kw)
+        led = res["ledger"]
+        led.to_csv(os.path.join(pfdir, f"{sid}_ledger.csv"), index=False)
+        per_file[sid] = _m0(led)
+        try:
+            offsets[sid] = IO.estimate_offset(IO.fetch_peaks(client, sid, use_cache=True))
+        except Exception:
+            offsets[sid] = None
+        st = dict(res.get("stats", {}))
+        st.update(sample_id=sid, offset_ppm=offsets[sid],
+                  n_M0=int((led["role"] == "M0").sum()) if "role" in led.columns else None)
+        per_stats.append(st)
+        log(f"[assign_batch]   {sid}: offset={offsets[sid]} stats={res.get('stats')}")
+
+    merged, jitter = align(per_file, tol_ppm=tol_ppm, offsets=offsets)
+    merged.to_csv(os.path.join(out_dir, "merged_ledger.csv"), index=False)
+    jitter.to_csv(os.path.join(out_dir, "jitter.csv"), index=False)
+
+    summary = {
+        "reagent": prof.name, "label": prof.label, "context": context,
+        "n_files": len(sample_ids), "sample_ids": sample_ids,
+        "tol_ppm": tol_ppm, "offsets_ppm": offsets,
+        "merged_M0": int(len(merged)),
+        "merged_tiers": merged["tier"].value_counts().to_dict() if len(merged) else {},
+        "n_in_all_files": int((merged["n_files"] == len(sample_ids)).sum()) if len(merged) else 0,
+        "n_single_file": int((merged["n_files"] == 1).sum()) if len(merged) else 0,
+        "formula_disagreements": int((~merged["formula_agree"]).sum()) if len(merged) else 0,
+        "per_file": per_stats,
+    }
+    with open(os.path.join(out_dir, "batch_summary.json"), "w") as fh:
+        json.dump(summary, fh, indent=2, default=str)
+    log(f"[assign_batch] DONE: {summary['merged_M0']} merged M0 "
+        f"({summary['merged_tiers']}); {summary['n_in_all_files']} in all files, "
+        f"{summary['n_single_file']} single-file, "
+        f"{summary['formula_disagreements']} formula disagreements")
+    return {"profile": prof, "context": context, "sample_ids": sample_ids,
+            "per_file": per_file, "offsets": offsets, "merged": merged,
+            "jitter": jitter, "summary": summary, "out_dir": out_dir}

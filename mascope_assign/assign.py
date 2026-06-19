@@ -60,7 +60,7 @@ def _module_hashes() -> dict:
 def run(sample_id: str, context: str = "ambient-air", *,
         cfg: passes.PassConfig | None = None, use_cache: bool = True,
         do_pass2: bool = True, do_pass3: bool = True, do_pass4: bool = True,
-        do_pass5: bool = True, ts_peaks=None,
+        do_pass5: bool = True, ts_peaks=None, adducts=None,
         log=print, checkpoint_dir=None) -> dict:
     cfg = cfg or passes.PassConfig()
     profile = contexts.get_context(context)
@@ -68,10 +68,14 @@ def run(sample_id: str, context: str = "ambient-air", *,
 
     raw = io_mascope.fetch_peaks(client, sample_id, use_cache=use_cache)
     led = ledger.new_ledger(raw)
-    adducts = io_mascope.detect_adducts(raw)
-    # Polarity is read from the detected adducts (cation forms end with "+"); the
-    # context's declared polarity is a cross-check, not the authority (adducts are
-    # always detected from the sample -- the SKILL design rule).
+    # Adducts are normally detected from the sample's own server matches (the
+    # SKILL design rule for mixed-reagent datasets). But a batch with a KNOWN
+    # reagent can pass `adducts=` to force the analyte channels: per-sample match
+    # detection is unreliable when a sample has few/no server matches (a positive
+    # sample with no urea-channel match then falls back to [M-H]- and the whole
+    # spectrum is mis-assigned in the wrong polarity). The explicit list wins.
+    adducts = list(adducts) if adducts else io_mascope.detect_adducts(raw)
+    # Polarity is read from the (detected or forced) adducts (cation forms end "+").
     polarity = "positive" if any(str(a).rstrip().endswith("+") for a in adducts) \
         else "negative"
     # opportunistic extra channels, scored only if the server has the mechanism

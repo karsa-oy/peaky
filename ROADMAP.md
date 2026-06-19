@@ -10,19 +10,32 @@ them; `io_mascope.connect()` reads the live .env.
 
 **Spine built (2026-06-19):** `mascope_assign/profiles.py` (ReagentProfile Br/Ur +
 `resolve(auto, peaks)`), `mascope_assign/pipeline.py` (`run(batch|dataset|peaks,
-reagent='auto', stages)` — load + profile + 'matrix' wired), `io_mascope` (canonical
+reagent='auto', stages)` — load + profile + 'matrix' wired + representative-sample
+selection), `mascope_assign/sampling.py` (THE RULE, below), `io_mascope` (canonical
 .env search + `fetch_batch_peaks`). Tested on the orange batches.
 
+**SAMPLE-SELECTION RULE (set 2026-06-19, `sampling.py`, LIVE in pipeline):** we do
+NOT assign a single averaged file — a peak only present part of the run is then
+invisible (the uronium 08:20 snapshot at hour 11.3 missed the hour-18-22 event
+analytes). Instead assign a representative subset and MERGE by m/z: **5 samples
+evenly spaced in TIME** (nearest distinct sample to each of 5 equally-spaced target
+times; endpoints always in) **+ the 1 max-TIC sample** (richest spectrum). `run()`
+always computes `out['assign_samples']` (table w/ role: time-grid / max-TIC /
+both) + `out['assign_sample_ids']`. Selecting in TIME not row-index = a lone late
+file in an irregular run still gets a pick. 19 tests in test_sampling.py.
+
 **NEXT (in priority order):**
-1. Fold the **validate** stage into pipeline.py — a THIN layer on the existing
+1. Wire **assign** stage: the sample SELECTION is done — what remains is to loop
+   `assign.run` over `out['assign_sample_ids']` and MERGE the ledgers by m/z (the
+   merge logic exists in scratch `ts_uro/merge_experiment.py` — fold it in).
+2. Fold the **validate** stage into pipeline.py — a THIN layer on the existing
    `isotopes.py` (`isotope_pattern` envelope + `prescan`), NOT the scratch
    `~/mascope-output/assign-dev/isotope_validate.py` (which duplicates it). The only
    new part = scoring predicted M+2 vs the OBSERVED spectrum over the brightest samples.
-2. Fold the **cluster** stage (scratch: cluster_analytes/fold_orphans/*_raw) → module,
+3. Fold the **cluster** stage (scratch: cluster_analytes/fold_orphans/*_raw) → module,
    profile-driven; keep the <12-sample guard.
-3. Add binning **max-width split guard** to `timeseries.build_matrix` (single-linkage
+4. Add binning **max-width split guard** to `timeseries.build_matrix` (single-linkage
    chains on dense/drifting data; negligible on orange but harden for sharing).
-4. Wire **assign** stage (already in pkg via assign.py/passes.py) into pipeline.
 5. SKILL.md entry + tests + de-hardcode → push to GitHub (remote not yet created).
 
 **Test batches** ("Aleksei's workspace"): Orange peeling Br `NH7D3KHzoGcXCycw`,

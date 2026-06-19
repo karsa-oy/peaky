@@ -22,6 +22,7 @@ class ReagentProfile:
     reagent_ion_re: str | None      # regex on ion_formula picking the reagent ions
     ranges: str                     # grid element ranges for local enumeration
     detect_adduct: str | None       # presence of this adduct => this reagent (auto-detect)
+    context: str = "ambient-air"    # default assign.run context (mode + VK priors + caps)
     aliases: tuple = field(default_factory=tuple)
 
 
@@ -30,14 +31,16 @@ BR = ReagentProfile(
     adducts=["[M+Br]-", "[M-H]-", "[M+HBr+Br]-"],
     normaliser="reagent", reagent_ion_re=r"Br\d-$",
     ranges="C0-40 H0-80 N0-3 O0-18 S0-2 Cl0-2 Br0-2",
-    detect_adduct="[M+Br]-", aliases=("br", "bromide", "br-cims", "br-"))
+    detect_adduct="[M+Br]-", context="ambient-air",
+    aliases=("br", "bromide", "br-cims", "br-"))
 
 UR = ReagentProfile(
     name="Ur", label="Ur⁺ CIMS", polarity="+",
     adducts=["[M+H]+", "[M+(CH4N2O)H]+"],
     normaliser="tic", reagent_ion_re=None,
     ranges="C0-40 H0-90 N0-8 O0-15 S0-2",
-    detect_adduct="[M+(CH4N2O)H]+", aliases=("ur", "uronium", "urea", "urea-cims", "ur+"))
+    detect_adduct="[M+(CH4N2O)H]+", context="uronium",
+    aliases=("ur", "uronium", "urea", "urea-cims", "ur+"))
 
 PROFILES: dict[str, ReagentProfile] = {BR.name: BR, UR.name: UR}
 _BY_ALIAS = {a: p for p in PROFILES.values() for a in (p.name.lower(), *p.aliases)}

@@ -16,9 +16,10 @@ import pandas as pd
 
 from . import io_mascope as IO
 from . import profiles as P
+from . import sampling as SS
 from . import timeseries as TS
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"  # + representative-sample selection (5 time-grid + max-TIC)
 
 STAGES = ("matrix", "assign", "cluster", "validate")
 
@@ -37,16 +38,29 @@ def load(*, batch: str | None = None, dataset: str | None = None,
 
 def run(*, batch: str | None = None, dataset: str | None = None,
         peaks: "str | pd.DataFrame | None" = None, reagent: str = "auto",
-        stages: tuple = ("matrix",), out_dir: str | None = None) -> dict:
+        stages: tuple = ("matrix",), out_dir: str | None = None,
+        n_time: int = SS.N_TIME, include_max_tic: bool = True) -> dict:
     """Run the pipeline on one batch.
 
-    Returns a dict with at least {profile, peaks, n_samples} plus per-stage outputs.
-    Pass reagent by name ('Br'/'Ur') or 'auto' to detect from the data.
+    Returns a dict with at least {profile, peaks, n_samples, assign_samples}
+    plus per-stage outputs. Pass reagent by name ('Br'/'Ur') or 'auto' to detect
+    from the data.
+
+    THE RULE (always computed, regardless of stages): `assign_samples` is the
+    representative subset to assign + merge — `n_time` samples evenly spaced in
+    TIME plus the max-TIC sample (see sampling.py). `assign_sample_ids` is the
+    bare id list. Assignment runs on these, not on a single averaged file, so the
+    merged peak list covers analytes that only appear at part of the run.
     """
     pk = load(batch=batch, dataset=dataset, peaks=peaks)
     prof = P.resolve(reagent, pk)
-    n_samples = pk["sample_item_name"].nunique() if "sample_item_name" in pk.columns else None
+    n_samples = pk["sample_item_id"].nunique() if "sample_item_id" in pk.columns else None
+    assign_samples = SS.select_representative_samples(
+        pk, n_time=n_time, include_max_tic=include_max_tic)
     out: dict = {"profile": prof, "peaks": pk, "n_samples": n_samples,
+                 "assign_samples": assign_samples,
+                 "assign_sample_ids": assign_samples["sample_item_id"].tolist()
+                 if "sample_item_id" in assign_samples.columns else [],
                  "stages": tuple(stages)}
 
     if "matrix" in stages:
@@ -56,7 +70,9 @@ def run(*, batch: str | None = None, dataset: str | None = None,
 
     # 'assign' / 'cluster' / 'validate' are added as the scratch modules
     # (cluster_*, isotope_validate) are consolidated into the package against
-    # isotopes.py. Flag clearly until then rather than silently no-op.
+    # isotopes.py. Flag clearly until then rather than silently no-op. NOTE the
+    # 'assign' stage's sample SELECTION is already live (assign_samples above);
+    # what remains is to run assign.run per selected id and merge the ledgers.
     todo = [s for s in stages if s in ("assign", "cluster", "validate")]
     if todo:
         out["pending_stages"] = todo
