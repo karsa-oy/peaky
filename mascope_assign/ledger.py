@@ -31,6 +31,8 @@ ROLE_UNEXPLAINED = "unexplained"
 ROLE_M0 = "M0"
 ROLE_ISO = "iso_child"
 ROLE_REAGENT = "reagent"
+ROLE_ARTIFACT = "artifact"   # instrumental: ringing / shoulder of a much
+                             # brighter peak; not a real ion (not unexplained)
 
 # Canonical column set. Identity columns come from the peak source; the rest are
 # filled by the assignment passes.
@@ -296,11 +298,27 @@ def displace_to_isotopologue(
     return ledger
 
 
-def mark_reagent(ledger: pd.DataFrame, peak_id, label: str) -> pd.DataFrame:
+def mark_reagent(ledger: pd.DataFrame, peak_id, label: str, *,
+                 ion_formula: str | None = None) -> pd.DataFrame:
     i = _row_index(ledger, peak_id)
     if bool(ledger.at[i, "locked"]):
         raise LedgerError(f"peak {peak_id!r} is locked")
     ledger.at[i, "role"] = ROLE_REAGENT
+    ledger.at[i, "commentary"] = label
+    if ion_formula is not None:   # a reagent cluster has a KNOWN formula -> record it
+        ledger.at[i, "ion_formula"] = ion_formula
+    return ledger
+
+
+def mark_artifact(ledger: pd.DataFrame, peak_id, label: str) -> pd.DataFrame:
+    """Mark a peak as an instrumental artifact (ringing/shoulder of a brighter
+    peak). Only an UNEXPLAINED peak may be reclassified -- never demote a
+    committed assignment or reagent to artifact."""
+    i = _row_index(ledger, peak_id)
+    if str(ledger.at[i, "role"]) != ROLE_UNEXPLAINED:
+        raise LedgerError(f"peak {peak_id!r} is not unexplained (role "
+                          f"{ledger.at[i, 'role']!r}); refusing to mark artifact")
+    ledger.at[i, "role"] = ROLE_ARTIFACT
     ledger.at[i, "commentary"] = label
     return ledger
 
@@ -320,7 +338,8 @@ def validate(ledger: pd.DataFrame) -> list[str]:
     if dups:
         problems.append(f"duplicate peak_id rows: {dups[:5]}")
     # role domain
-    bad_roles = set(ledger["role"]) - {ROLE_UNEXPLAINED, ROLE_M0, ROLE_ISO, ROLE_REAGENT}
+    bad_roles = set(ledger["role"]) - {ROLE_UNEXPLAINED, ROLE_M0, ROLE_ISO,
+                                       ROLE_REAGENT, ROLE_ARTIFACT}
     if bad_roles:
         problems.append(f"unknown roles: {bad_roles}")
     # I2: every iso_child points to an M0 owner
@@ -358,7 +377,7 @@ def stats(ledger: pd.DataFrame) -> dict:
     h_total = float(eff.sum(skipna=True))
     out = {"n_peaks": n, "by_role": {}, "signal_by_role": {},
            "count_frac_by_role": {}, "n_synthetic": int(synthetic.sum())}
-    for role in (ROLE_M0, ROLE_ISO, ROLE_REAGENT, ROLE_UNEXPLAINED):
+    for role in (ROLE_M0, ROLE_ISO, ROLE_REAGENT, ROLE_ARTIFACT, ROLE_UNEXPLAINED):
         rolem = led["role"] == role
         out["by_role"][role] = int((rolem & real).sum())
         out["signal_by_role"][role] = (

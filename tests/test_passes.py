@@ -290,6 +290,75 @@ check("calibrate refuses a tiny backbone",
       P.calibrate(small, cfg_small, log=lambda *a: None) is None
       and cfg_small.cal_mu is None)
 
+# ---------- offset-tolerance: a -2.4 ppm instrument (uronium) ----------
+# the backbone is high-SCORE but mislabeled 'Low' (the pre-calibration confidence
+# gate is centered on 0 ppm). calibrate must still find the -2.4 ppm center by
+# selecting on SCORE, not the label.
+off_led = L.new_ledger(pd.DataFrame({
+    "peak_id": [f"o{i}" for i in range(30)],
+    "mz": [150.0 + i for i in range(30)], "height": [1e4] * 30}))
+for i in range(30):
+    L.commit_assignment(off_led, f"o{i}", neutral_formula="C8H18O3",
+                        adduct="[M+H]+", ion_score=0.95, compound_score=0.95,
+                        ppm_error=-2.4 + (0.2 if i % 2 else -0.2),
+                        pass_no=1, method="cheminfo+grid",
+                        confidence="Low", commentary="backbone")
+cfg_off = P.PassConfig()
+P.calibrate(off_led, cfg_off, log=lambda *a: None)
+check("calibrate finds the -2.4 ppm offset despite 'Low' labels",
+      cfg_off.cal_mu is not None and abs(cfg_off.cal_mu + 2.4) < 0.15
+      and cfg_off.cal_sigma < 0.6, (cfg_off.cal_mu, cfg_off.cal_sigma))
+
+# confidence_label judges ppm against the calibrated center
+cfg_u = P.PassConfig()
+check("confidence_label: -2.4 ppm reads Low when uncalibrated (centered 0)",
+      P.confidence_label(0.97, -2.4, 1, False, cfg_u) == "Low")
+cfg_u.cal_mu, cfg_u.cal_sigma = -2.4, 0.3
+check("confidence_label: -2.4 ppm reads High at the calibrated center",
+      P.confidence_label(0.97, -2.4, 1, False, cfg_u) == "High")
+check("confidence_label: an off-trend +0.3 ppm fit reads Low even calibrated",
+      P.confidence_label(0.85, 0.3, 0, False, cfg_u) == "Low")
+
+# relabel_confidence re-grades pass-1's commits against the fitted center:
+# upgrade the on-cal backbone, demote the off-trend monster, keep the suffix.
+rel_led = L.new_ledger(pd.DataFrame({
+    "peak_id": ["good", "mon"], "mz": [200.0, 462.1], "height": [1e5, 1e5]}))
+L.commit_assignment(rel_led, "good", neutral_formula="C8H18O3", adduct="[M+H]+",
+                    ion_score=0.96, compound_score=0.96, ppm_error=-2.45,
+                    pass_no=1, method="cheminfo+grid", confidence="Low",
+                    commentary="x")
+L.commit_assignment(rel_led, "mon", neutral_formula="C15H27NO15", adduct="[M+H]+",
+                    ion_score=0.81, compound_score=0.81, ppm_error=0.32,
+                    pass_no=2, method="gka-series", confidence="Good (series)",
+                    commentary="x")
+cfg_rel = P.PassConfig(); cfg_rel.cal_mu, cfg_rel.cal_sigma = -2.45, 0.3
+P.relabel_confidence(rel_led, cfg_rel, log=lambda *a: None)
+gconf = str(rel_led.loc[rel_led.peak_id == "good", "confidence"].iloc[0])
+mconf = str(rel_led.loc[rel_led.peak_id == "mon", "confidence"].iloc[0])
+check("relabel upgrades the on-cal backbone (Low -> Good/High)",
+      gconf.startswith(("Good", "High")), gconf)
+check("relabel demotes the off-trend monster + keeps the suffix",
+      mconf.startswith(("Low", "Suspect")) and "series" in mconf, mconf)
+check("relabel is a no-op when uncalibrated",
+      P.relabel_confidence(rel_led, P.PassConfig(), log=lambda *a: None) == 0)
+
+# arbitration is calibration-aware: an off-trend mass-coincidence with a HIGHER
+# raw score loses to the on-trend formula once calibrated (else it wins then is
+# z-rejected at commit, leaving the peak unexplained -- the high-Si PDMS failure).
+cfg_arb = P.PassConfig(); cfg_arb.cal_mu, cfg_arb.cal_sigma = -2.45, 0.27
+sc_off = pd.DataFrame([
+    iso_row(sample_peak_id="P", compound_formula="C12H39NO6Si6", compound_score=0.85,
+            ion_formula="C12H40NO6Si6", ion_score=0.85, ppm_error=-2.40),   # on-trend
+    iso_row(sample_peak_id="P", compound_formula="C19H51NO4Si9", compound_score=0.90,
+            ion_formula="C19H52NO4Si9", ion_score=0.90, ppm_error=1.60),    # off-trend, higher
+])
+w_cal = P.arbitrate(sc_off, cfg_arb)["winners"].iloc[0]
+check("arbitration: on-trend PDMS beats higher-scoring off-trend coincidence (calibrated)",
+      w_cal["neutral"] == "C12H39NO6Si6", (w_cal["neutral"], w_cal["eff_score"]))
+w_unc = P.arbitrate(sc_off, P.PassConfig())["winners"].iloc[0]
+check("arbitration uncalibrated: higher raw score still wins (no cal penalty)",
+      w_unc["neutral"] == "C19H51NO4Si9", w_unc["neutral"])
+
 # ---------- commit gates: NaN ppm, z-score, minor channel ----------
 def gate_ledger(pids):
     return L.new_ledger(pd.DataFrame({
@@ -505,6 +574,24 @@ check("envelope: 395 re-parented to the silanediol 393",
 check("envelope: 397 (M+4) re-parented to the silanediol too",
       led.loc[led.peak_id == "Mp4", "parent_peak_id"].iloc[0] == "Si")
 check("envelope: ledger still valid after displacement", L.validate(led) == [], L.validate(led))
+
+# di-bromide [M+HBr+Br]- core (2 Br in the ion) commits in pass 6 -> the new 3rd
+# envelope sweep must claim its M+2 (~1.95x) and M+4 (~0.95x) satellites, which
+# were sitting in the residual (the Family-A GKA ladder, 2026-06-13).
+ledd = mk_ledger([("core", 356.9348, 742.0), ("m2", 358.9328, 1395.0),
+                  ("m4", 360.9308, 700.0)])
+L.commit_assignment(ledd, "core", neutral_formula="C10H14O4", adduct="[M+HBr+Br]-",
+                    ion_formula="C10H15Br2O4-", ion_score=0.80, ppm_error=-0.4,
+                    pass_no=6, method="ladder:gapfill", confidence="Good (ladder)",
+                    commentary="di-bromide SOA core")
+_T.apply_tiers(ledd)
+outd = P.complete_isotope_envelopes(ledd, P.PassConfig(), log=lambda *a: None)
+check("envelope: di-bromide M+2 (358.93) attached to the core",
+      L.role_of(ledd, "m2") == L.ROLE_ISO
+      and ledd.loc[ledd.peak_id == "m2", "parent_peak_id"].iloc[0] == "core", outd)
+check("envelope: di-bromide M+4 (360.93) attached to the core",
+      L.role_of(ledd, "m4") == L.ROLE_ISO
+      and ledd.loc[ledd.peak_id == "m4", "parent_peak_id"].iloc[0] == "core", outd)
 
 # guard: a CHO-only M0 must NOT claim a coincidental peak ~2 Da above it (its
 # pattern has no M+2 driver), and must NOT displace a real neighbour
@@ -756,6 +843,98 @@ sg = P.run_pass0_known(None, "SID", ledg, PROF5, ACFG, ADD5,
                               score_fn=fake_n1, log=lambda *a: None)
 check("pass0 refuses claim with inconsistent own twin (ratio 0.04)",
       sg["committed"] == 0 and L.role_of(ledg, "X1") == L.ROLE_UNEXPLAINED, sg)
+
+# pass0 nitroaromatic: dinitrophenol C6H4N2O5 [M-H]- is H-poor (VK-floor blocked)
+# so the grid can't reach it; pass-0 supplies it. No Br -> no twin gate, just the
+# |ppm|<=2 + score gate. (v45->v46 fix; confirmed present by Orbitool.)
+check("dinitrophenol in the known-species nitroaromatic family",
+      P._known_species().get("nitroaromatic", {}).get("C6H4N2O5") is not None)
+mz_dnp = CH.ion_mz("C6H4N2O5", "[M-H]-")
+ledn = mk_ledger([("DNP", mz_dnp, 808.0)])
+
+def fake_dnp(client, sample_id, formulas, *, mechanism_ids=None, **kw):
+    if "C6H4N2O5" not in formulas:
+        return pd.DataFrame([])
+    return pd.DataFrame([dict(
+        compound_formula="C6H4N2O5", compound_score=0.82,
+        ion_formula="C6H3N2O5-", ion_score=0.82, iso_label="M0",
+        is_base=True, theo_mz=mz_dnp, rel_abundance=1.0, iso_score=0.82,
+        sample_peak_id="DNP", sample_peak_mz=mz_dnp,
+        sample_peak_intensity=808.0, ppm_error=-0.24, abundance_error=0.0)])
+
+sn = P.run_pass0_known(None, "SID", ledn, PROF5, ACFG, ADD5,
+                       score_fn=fake_dnp, log=lambda *a: None)
+check("pass0 commits dinitrophenol [M-H]- (no Br twin gate)",
+      sn["committed"] == 1
+      and ledn.loc[ledn.peak_id == "DNP", "neutral_formula"].iloc[0] == "C6H4N2O5"
+      and ledn.loc[ledn.peak_id == "DNP", "method"].iloc[0] == "known:nitroaromatic", sn)
+
+# ---------- pass0 known-species gate is offset-aware (prior_offset) ----------
+# a silanediol at -2.3 ppm: rejected when the instrument offset is unknown
+# (|2.3|>2.0), committed once the rough offset (-1.9) is seeded -- the
+# silanediol-vs-C5H10O6 collision at a -1.9 ppm source.
+mz_off = CH.ion_mz("C4H14O3Si2", "[M+Br]-")
+
+
+def fake_off(client, sample_id, formulas, *, mechanism_ids=None, **kw):
+    if "C4H14O3Si2" not in formulas:
+        return pd.DataFrame([])
+    return pd.DataFrame([
+        dict(compound_formula="C4H14O3Si2", compound_score=0.92,
+             ion_formula="C4H14BrO3Si2-", ion_score=0.92, iso_label="M0",
+             is_base=True, theo_mz=mz_off, rel_abundance=1.0, iso_score=0.92,
+             sample_peak_id="O2", sample_peak_mz=mz_off,
+             sample_peak_intensity=10712.0, ppm_error=-2.3, abundance_error=0.0),
+        dict(compound_formula="C4H14O3Si2", compound_score=0.92,
+             ion_formula="C4H14BrO3Si2-", ion_score=0.92, iso_label="81Br",
+             is_base=False, theo_mz=mz_off + 1.99795, rel_abundance=0.97,
+             iso_score=0.94, sample_peak_id="O2br",
+             sample_peak_mz=mz_off + 1.99795, sample_peak_intensity=10100.0,
+             ppm_error=-2.3, abundance_error=0.02)])
+
+
+led_b = mk_ledger([("O2", mz_off, 10712.0), ("O2br", mz_off + 1.99795, 10100.0)])
+P.run_pass0_known(None, "SID", led_b, PROF5, P.PassConfig(), ADD5,
+                  score_fn=fake_off, log=lambda *a: None)
+check("pass0 rejects a -2.3 ppm known species when offset-blind",
+      L.role_of(led_b, "O2") == L.ROLE_UNEXPLAINED)
+led_o = mk_ledger([("O2", mz_off, 10712.0), ("O2br", mz_off + 1.99795, 10100.0)])
+cfg_seed = P.PassConfig(); cfg_seed.prior_offset = -1.9
+P.run_pass0_known(None, "SID", led_o, PROF5, cfg_seed, ADD5,
+                  score_fn=fake_off, log=lambda *a: None)
+check("pass0 commits the -2.3 ppm known species once offset seeded (-1.9)",
+      L.role_of(led_o, "O2") == L.ROLE_M0
+      and led_o.loc[led_o.peak_id == "O2", "neutral_formula"].iloc[0] == "C4H14O3Si2")
+
+# ---------- build_ranges reads the context grid-box width ----------
+PROF_URO = XC.get_context("uronium")
+r_amb = P.build_ranges(PROF5, None, include_N=True)               # ambient-air
+r_uro = P.build_ranges(PROF_URO, None, include_N=True)
+check("ambient grid box C<=40 / O<=30",
+      r_amb["C"][1] == 40 and r_amb["O"][1] == 30, (r_amb["C"], r_amb["O"]))
+check("uronium grid box widened to C<=46 / O<=32",
+      r_uro["C"][1] == 46 and r_uro["O"][1] == 32, (r_uro["C"], r_uro["O"]))
+check("uronium grid admits N up to the context cap",
+      r_uro["N"][1] == PROF_URO.max_N, r_uro["N"])
+r_ovr = P.build_ranges(PROF_URO, None, include_N=True, c_max=20, o_max=10)
+check("explicit c_max/o_max overrides the profile",
+      r_ovr["C"][1] == 20 and r_ovr["O"][1] == 10, (r_ovr["C"], r_ovr["O"]))
+
+# ---------- positive polarity: pass 0 known-species is a no-op ----------
+check("_known_species(positive) is empty", P._known_species("positive") == {})
+check("_known_species(negative) keeps the atmospheric list",
+      "atmospheric" in P._known_species("negative"))
+
+
+def _boom(*a, **k):
+    raise AssertionError("pass0 must not score the oracle in positive mode")
+
+
+s_pos = P.run_pass0_known(None, "SID", mk_ledger([("p", 100.0, 500.0)]),
+                          PROF_URO, ACFG, ["[M+H]+", "[M+(CH4N2O)H]+"],
+                          score_fn=_boom, log=lambda *a: None)
+check("pass0 positive mode commits nothing without calling the oracle",
+      s_pos["committed"] == 0, s_pos)
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

@@ -18,6 +18,7 @@ is unit-tested offline. The pass drivers wrap it with the live oracle.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 import pandas as pd
@@ -29,7 +30,7 @@ from . import isotopes as ISO
 from . import ledger as L
 from . import series_gka as G
 
-__version__ = "0.5.0"
+__version__ = "0.8.0"  # offset-tolerant gates + prior_offset + calibration-aware arbitration + carbon-clamp Si-skip
 
 
 @dataclass
@@ -93,6 +94,10 @@ class PassConfig:
     # with NO ppm at all carries no mass evidence and is never committed.
     cal_mu: float | None = None
     cal_sigma: float | None = None
+    # rough mass offset (ppm) seeded from the sample's own matches BEFORE the
+    # pass-1 self-calibration, so the pre-calibration pass-0 known-species gate is
+    # not blind to a large systematic instrument offset (set by assign.run).
+    prior_offset: float = 0.0
     cal_z_accept: float = 2.0
     cal_z_pattern: float = 4.0
     cal_sigma_floor: float = 0.25   # don't let a lucky tight fit reject everything
@@ -113,7 +118,13 @@ class PassConfig:
 # ---------------------------------------------------------------------------
 def confidence_label(score: float, ppm: float | None, n_iso: int, tied: bool,
                      cfg: PassConfig, suffix: str = "") -> str:
-    a = abs(ppm) if ppm is not None and pd.notna(ppm) else 99.0
+    # ppm proximity is judged against the CALIBRATED mass center when known, so a
+    # uniform instrument offset (e.g. the -2.4 ppm of the uronium source) does not
+    # read as "off-mass" and cap every commit at Low. Pre-calibration commits
+    # (pass 1, cal_mu still None) use 0 and are re-graded by relabel_confidence
+    # once calibrate() has fitted the center.
+    center = cfg.cal_mu if cfg.cal_mu is not None else 0.0
+    a = abs(ppm - center) if ppm is not None and pd.notna(ppm) else 99.0
     if score >= cfg.tau_high and a <= cfg.ppm * 1.5 and n_iso >= 1 and not tied:
         lab = "High"
     elif score >= cfg.tau_good and a <= cfg.ppm * 2:
@@ -132,6 +143,11 @@ def confidence_label(score: float, ppm: float | None, n_iso: int, tied: bool,
 # ---------------------------------------------------------------------------
 _BACKBONE_ELEMENTS = {"C", "H", "O", "N"}
 
+# arbitration penalty per sigma that a candidate's ppm sits BEYOND the calibrated
+# accept band (offset-aware; 0 when uncalibrated). Modest, so it only overturns a
+# genuinely off-trend mass-coincidence, not an on-trend near-tie.
+CAL_ARB_WEIGHT = 0.04
+
 
 def calibrate(ledger: pd.DataFrame, cfg: PassConfig, *, log=print) -> tuple | None:
     """Fit the instrument's real mass accuracy (mu, sigma of the ppm error)
@@ -140,11 +156,18 @@ def calibrate(ledger: pd.DataFrame, cfg: PassConfig, *, log=print) -> tuple | No
     Robust fit: median + scaled MAD, so a few bad commits can't widen the
     window they would then pass through. Returns (mu, sigma, n) or None when
     the backbone is too small to trust."""
-    m0 = ledger[(ledger["role"] == L.ROLE_M0) & ledger["ppm_error"].notna()]
-    rows = m0[m0["confidence"].astype(str).str.startswith(("High", "Good"))]
-    keep = rows["neutral_formula"].astype(str).map(
-        lambda f: set(C.parse_formula(f)) <= _BACKBONE_ELEMENTS)
-    ppm = rows.loc[keep, "ppm_error"].astype(float)
+    m0 = ledger[(ledger["role"] == L.ROLE_M0) & ledger["ppm_error"].notna()].copy()
+    # Select the backbone by SCORE, not the confidence LABEL: the label embeds a
+    # |ppm|<=2 sub-gate centered on 0, so at a large systematic mass offset (e.g.
+    # the -2.4 ppm uronium source) it would exclude exactly the genuine backbone
+    # and bias mu toward 0. Score is offset-independent; the median+MAD then finds
+    # the true center robustly. (For a well-calibrated source the two selections
+    # coincide.)
+    score = pd.to_numeric(m0.get("ion_score"), errors="coerce").fillna(0.0)
+    chon = m0["neutral_formula"].astype(str).map(
+        lambda f: bool(C.parse_formula(f))
+        and set(C.parse_formula(f)) <= _BACKBONE_ELEMENTS)
+    ppm = m0.loc[(score >= cfg.tau_good) & chon, "ppm_error"].astype(float)
     if len(ppm) < cfg.cal_min_n:
         log(f"[calibrate] backbone too small (n={len(ppm)} < {cfg.cal_min_n}); "
             "mass gate stays off")
@@ -166,6 +189,51 @@ def z_of(ppm, cfg: PassConfig) -> float | None:
     if ppm is None or pd.isna(ppm):
         return None
     return abs(float(ppm) - cfg.cal_mu) / cfg.cal_sigma
+
+
+def _conf_suffix(conf) -> str:
+    """The parenthetical method tag of a confidence label ('Good (series)' ->
+    'series'); '' when there is none."""
+    m = re.search(r"\(([^)]+)\)", str(conf or ""))
+    return m.group(1) if m else ""
+
+
+def relabel_confidence(ledger: pd.DataFrame, cfg: PassConfig, *, log=print) -> int:
+    """Re-grade committed-M0 confidence labels against the calibrated mass center.
+
+    Pass 1 commits BEFORE calibrate() runs, so at a large systematic mass offset
+    its labels -- judged against 0 ppm -- read the whole high-score backbone as
+    'Low', which then caps the report tier at Candidate and (because the tier
+    engine recalibrates off High/Good rows) starves the mass-error gate. Re-judged
+    against cal_mu the backbone recovers its true High/Good grade, while an
+    off-trend mass monster that looked Good near 0 is correctly demoted. The
+    method suffix (series / siloxane / ...) is preserved. No-op when uncalibrated.
+    """
+    if cfg.cal_mu is None:
+        return 0
+    # only the UNLOCKED pass-1 backbone: locked commits (pass-0 known species,
+    # the siloxane ladder, any pass-1 High) carry a DELIBERATE grade -- e.g. a
+    # known composite contaminant (silanediol n=4, ~35% Mascope score) is locked
+    # by the known-species privilege and must not be re-graded to Reject here.
+    m0 = ledger[(ledger["role"] == L.ROLE_M0) & ~ledger["locked"].astype(bool)]
+    kids = (ledger[ledger["role"] == L.ROLE_ISO]
+            .groupby("parent_peak_id")["peak_id"].nunique())
+    n = 0
+    for i, r in m0.iterrows():
+        vals = [float(v) for v in (r.get("ion_score"), r.get("compound_score"))
+                if v is not None and pd.notna(v)]
+        score = min(vals) if vals else 0.0
+        n_iso = int(kids.get(r["peak_id"], 0))
+        tied = bool(r.get("tied")) if pd.notna(r.get("tied")) else False
+        new = confidence_label(score, r.get("ppm_error"), n_iso, tied, cfg,
+                               _conf_suffix(r.get("confidence")))
+        if new != str(r.get("confidence")):
+            ledger.at[i, "confidence"] = new
+            n += 1
+    if n:
+        log(f"[relabel] re-graded {n} confidence labels to the calibrated center "
+            f"(mu={cfg.cal_mu:+.2f} ppm, sigma={cfg.cal_sigma:.2f})")
+    return n
 
 
 # ---------------------------------------------------------------------------
@@ -250,9 +318,23 @@ def arbitrate(scored: pd.DataFrame, cfg: PassConfig) -> dict:
     # pay a ranking penalty so a near-tie goes to the primary channel. The
     # commit-side corroboration gate lives in commit_winners.
     base["adduct_label"] = base.apply(_mech_to_adduct, axis=1)
+    # Calibration-aware off-trend penalty: once the mass calibration is known, a
+    # candidate whose ppm sits far from the calibrated center is unlikely to be
+    # the true formula even if its raw (OFFSET-BLIND) oracle score is high (the
+    # server scores |ppm| vs theoretical, not vs the instrument's real center).
+    # Without this, at a large systematic offset a mass-coincidence nearer 0 ppm
+    # out-scores the true on-trend formula, WINS arbitration, then is z-rejected
+    # at commit -- leaving the peak unexplained instead of taking the on-trend
+    # formula (the mass-degenerate high-Si PDMS failure at the uronium -2.45 ppm
+    # offset). Pre-calibration (pass 1) cal_mu is None -> no penalty.
+    def _cal_offtrend(ppm):
+        z = z_of(ppm, cfg)
+        return 0.0 if z is None else max(0.0, z - cfg.cal_z_accept) * CAL_ARB_WEIGHT
+    base["cal_penalty"] = base["ppm_error"].map(_cal_offtrend)
     base["eff_score"] = (base["raw_score"] - base["penalty"]
                          - base["adduct_label"].isin(cfg.minor_channels)
-                         * cfg.minor_channel_penalty)
+                         * cfg.minor_channel_penalty
+                         - base["cal_penalty"])
 
     winners = []
     for pid, grp in base.groupby("sample_peak_id"):
@@ -326,6 +408,11 @@ _DIFF_TO_ADDUCT = {
     (("Na", 1),): "[M+Na]+",
     (("H", 4), ("N", 1)): "[M+NH4]+",
     (("K", 1),): "[M+K]+",
+    # protonated-urea (uronium) adduct: ion = neutral + CH4N2O + H. Without this
+    # entry the urea-channel assignments fall through to the "[M-H]-" default and
+    # are mislabeled (positive-mode urea-CIMS: ~1/3 of the backbone is this
+    # channel). diff sorts alphabetically C,H,N,O.
+    (("C", 1), ("H", 5), ("N", 2), ("O", 1)): "[M+(CH4N2O)H]+",
 }
 
 
@@ -497,7 +584,16 @@ def _silanediol_series(n_max: int = 8) -> list[str]:
 # molecules excluded by the integer-DBE / C>=1 organic priors. Each is scored
 # by Mascope and LOCKED before pass 1, but still gated on mass + 81Br twin.
 #   family -> (formula -> human label)
-def _known_species() -> dict:
+def _known_species(polarity: str = "negative") -> dict:
+    # The known-species privilege is reagent/polarity-specific. The lists below
+    # are NEGATIVE-mode (Br/halide-CIMS): small atmospheric acids/radicals seen
+    # as Br- adducts, [M-H]- nitroaromatics, and the silanediol [M+Br]-/[M-H]-
+    # contaminant series. In POSITIVE mode (urea-CIMS) none of these apply -- the
+    # N-base / oxygenated-VOC analytes are reachable by the organic grid, and the
+    # silanediol series would be scored under the wrong (anion) ion form -- so
+    # pass 0 is a no-op and the grid + pass-3 families carry the sample.
+    if str(polarity) == "positive":
+        return {}
     atmos = {
         # small atmospheric acids / radicals detected as Br- adducts -- the
         # PRIMARY analytes of a Br-CIMS, all invisible to the organic grid:
@@ -509,9 +605,22 @@ def _known_species() -> dict:
         "HNO2": "nitrous acid",
         "HNO4": "peroxynitric acid",
     }
+    # Atmospheric nitroaromatics (brown-carbon tracers from NOx + aromatic VOC /
+    # biomass burning), detected as [M-H]-. These are H-POOR / high-DBE, so the
+    # ambient Van Krevelen floor + DBE/C ceiling block them from the organic grid
+    # -- they must be supplied as known tracers (the v45->v46 fix; dinitrophenol
+    # was independently confirmed present by an Orbitool assignment). Only those
+    # actually present + |ppm|<=2 commit, so listing absent ones is harmless.
+    nitroaromatic = {
+        "C6H4N2O5": "2,4-dinitrophenol",
+        "C6H5NO3":  "nitrophenol",
+        "C6H5NO4":  "nitrocatechol",
+        "C7H6N2O5": "dinitrocresol",
+    }
     contam = {f: "dimethylsilanediol oligomer (PDMS hydrolysis, inlet/tubing)"
               for f in _silanediol_series()}
-    return {"atmospheric": atmos, "contaminant:silanediol": contam}
+    return {"atmospheric": atmos, "nitroaromatic": nitroaromatic,
+            "contaminant:silanediol": contam}
 
 
 def run_pass0_known(client, sample_id: str, ledger: pd.DataFrame,
@@ -525,10 +634,14 @@ def run_pass0_known(client, sample_id: str, ledger: pd.DataFrame,
     consistency check, so a composite collision is refused, not locked."""
     score_fn = score_fn or IO.score_candidates
     out = {"committed": 0, "locked": 0, "iso_attached": 0}
-    registry = _known_species()
+    registry = _known_species(getattr(profile, "polarity", "negative"))
     label_of = {f: (fam, lbl) for fam, d in registry.items()
                 for f, lbl in d.items()}
     formulas = sorted(label_of)
+    if not formulas:                       # positive mode: pass 0 is a no-op
+        log(f"[pass0] no known-species list for polarity="
+            f"{getattr(profile, 'polarity', 'negative')!r}; skipping")
+        return out
     scored = score_fn(client, sample_id, formulas,
                       mechanism_ids=cfg.mechanism_ids)
     if scored is None or len(scored) == 0:
@@ -543,8 +656,12 @@ def run_pass0_known(client, sample_id: str, ledger: pd.DataFrame,
     mzs = ledger["mz"]
     for _, r in base.iterrows():
         ppm = r["ppm_error"]
-        if ppm is None or pd.isna(ppm) or abs(float(ppm)) > 2.0:
-            continue   # the known-list privilege still requires the MASS
+        # the known-list privilege still requires the MASS, but judged against the
+        # rough offset (cfg.prior_offset) so a uniformly-shifted instrument (e.g.
+        # -1.9 ppm) doesn't drop on-trend contaminants and hand the peak to an
+        # off-trend CHO mass-fit (the silanediol-vs-C5H10O6 collision at -1.9 ppm).
+        if ppm is None or pd.isna(ppm) or abs(float(ppm) - cfg.prior_offset) > 2.0:
+            continue
         pid = r["sample_peak_id"]
         try:
             if L.role_of(ledger, pid) != L.ROLE_UNEXPLAINED:
@@ -567,7 +684,9 @@ def run_pass0_known(client, sample_id: str, ledger: pd.DataFrame,
                         f"(composite or wrong claim)")
                     continue
             fam, lbl = label_of[r["compound_formula"]]
-            tag = "atmospheric" if fam == "atmospheric" else "contaminant"
+            tag = ("atmospheric" if fam == "atmospheric"
+                   else "nitroaromatic" if fam == "nitroaromatic"
+                   else "contaminant")
             fam_kids = kids[kids["compound_formula"] == r["compound_formula"]]
             n_kids = int((fam_kids["sample_peak_id"] != pid).sum())
             conf = (f"Good ({tag})" if float(r["ion_score"]) >= 0.7
@@ -583,7 +702,10 @@ def run_pass0_known(client, sample_id: str, ledger: pd.DataFrame,
                             f"{_mech_to_adduct(r)} = {lbl}, ppm "
                             f"{float(ppm):.2f}, ion score {float(r['ion_score']):.2f}"
                             + ("; excluded from the organic grid (radical / C0 "
-                               "inorganic)" if fam == "atmospheric" else "")))
+                               "inorganic)" if fam == "atmospheric"
+                               else "; H-poor nitroaromatic blocked by the ambient "
+                               "VK floor/DBE ceiling -- assigned as a known BrC tracer"
+                               if fam == "nitroaromatic" else "")))
             out["committed"] += 1
             L.lock_peaks(ledger, [pid])
             out["locked"] += 1
@@ -954,8 +1076,15 @@ def demote_carbon_inconsistent(ledger: pd.DataFrame, cfg: PassConfig, *,
     n = 0
     for _, r in ledger[(ledger["role"] == L.ROLE_M0)
                        & ~ledger["locked"].astype(bool)].iterrows():
-        n_c = C.parse_formula(str(r["ion_formula"])).get("C", 0)
+        cnt = C.parse_formula(str(r["ion_formula"]))
+        n_c = cnt.get("C", 0)
         if n_c < 8:
+            continue
+        # the carbon clamp reads the M+1 region as 13C only; a Si-bearing formula
+        # has a 29Si M+1 (4.7%/Si) far larger than 13C, so the measured "13C
+        # ratio" over-estimates carbon and would wrongly clear a real siloxane.
+        # Skip them -- their carbon is corroborated by the Si-isotope envelope.
+        if cnt.get("Si", 0) > 0:
             continue
         # measure carbon from a committed 13C child, else an unclaimed satellite
         k = ledger[(ledger["role"] == L.ROLE_ISO)
@@ -1277,7 +1406,8 @@ def _commentary(w, pass_no, method) -> str:
 # ---------------------------------------------------------------------------
 def build_ranges(profile: X.ContextProfile, pre, *, include_N: bool,
                  extra_elements: dict[str, tuple[int, int]] | None = None,
-                 o_max: int = 30, c_max: int = 40) -> dict[str, tuple[int, int]]:
+                 o_max: int | None = None, c_max: int | None = None
+                 ) -> dict[str, tuple[int, int]]:
     """Build a NEUTRAL-formula grid box.
 
     Pass 1/2 are CHO(N) only: heteroatoms are NOT auto-added from the (noisy)
@@ -1285,7 +1415,15 @@ def build_ranges(profile: X.ContextProfile, pre, *, include_N: bool,
     contaminant families). This is what prevents the [M+Br]- alias from being
     mis-read as a brominated neutral: in a Br-CIMS sample the Br lives in the
     ADDUCT, not the neutral. The prescan only caps C here.
+
+    The box width defaults to the context's grid_c_max / grid_o_max (40 / 30 for
+    the ambient Br-CIMS profiles; wider for a heavier positive source like
+    urea-CIMS). An explicit c_max / o_max argument overrides the profile.
     """
+    if o_max is None:
+        o_max = getattr(profile, "grid_o_max", 30)
+    if c_max is None:
+        c_max = getattr(profile, "grid_c_max", 40)
     cmax = c_max
     if pre is not None and getattr(pre, "estimated_max_C", 0):
         cmax = min(c_max, max(12, pre.estimated_max_C + 4))
@@ -1525,8 +1663,8 @@ def run_pass1(client, sample_id: str, ledger: pd.DataFrame, profile, pre,
 def run_pass2(client, sample_id: str, ledger: pd.DataFrame, profile,
               cfg: PassConfig, adducts: list[str], *, log=print) -> dict:
     units = tuple(G.ORGANIC_UNITS)
-    if "siloxane" in profile.pass3_families:
-        units = units + ("C2H6OSi",)
+    if {"siloxane", "pdms"} & set(profile.pass3_families):
+        units = units + ("C2H6OSi",)   # the PDMS dimethylsiloxane rung (+74.019)
     if "fluorinated" in profile.pass3_families:
         units = units + ("CF2",)
     total = {"committed": 0, "locked": 0, "iso_attached": 0}

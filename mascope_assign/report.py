@@ -26,7 +26,7 @@ from . import contexts as X
 from . import ledger as L
 from . import tiers as T
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"  # + Below-assignability sheet
 
 
 def _alts_list(cell) -> list[dict]:
@@ -85,8 +85,8 @@ _ASSIGN_COL_ORDER = [
     "mz", "height", "neutral_formula", "adduct", "ion_formula", "dbe",
     "compound_class", "oxidation", "heteroatoms", "ion_score",
     "compound_score", "ppm_error", "confidence", "candidate_density",
-    "composite_note", "tier_reason", "isotopologues_text", "alternatives_text",
-    "pass_no", "method", "commentary", "peak_id",
+    "degeneracy_note", "composite_note", "tier_reason", "isotopologues_text",
+    "alternatives_text", "pass_no", "method", "commentary", "peak_id",
 ]
 
 
@@ -103,6 +103,7 @@ def _candidate_rows(cand: pd.DataFrame) -> pd.DataFrame:
             "eff_score": r.get("eff_score", np.nan),
             "ppm_error": r["ppm_error"], "confidence": r["confidence"],
             "candidate_density": r.get("candidate_density", pd.NA),
+            "degeneracy_note": r.get("degeneracy_note", ""),
             "why_candidate": r.get("tier_reason", ""),
             "isotopologues": r.get("isotopologues_text", ""),
             "commentary": r["commentary"], "peak_id": r["peak_id"],
@@ -120,8 +121,8 @@ def _candidate_rows(cand: pd.DataFrame) -> pd.DataFrame:
                 "peak_id": r["peak_id"],
             })
     cols = ["mz", "height", "rank", "formula", "adduct", "score", "eff_score",
-            "ppm_error", "confidence", "candidate_density", "why_candidate",
-            "isotopologues", "commentary", "peak_id"]
+            "ppm_error", "confidence", "candidate_density", "degeneracy_note",
+            "why_candidate", "isotopologues", "commentary", "peak_id"]
     df = pd.DataFrame(rows, columns=cols)
     if len(df):
         df = (df.sort_values(["height", "mz", "rank"],
@@ -139,6 +140,8 @@ def build_sheets(ledger: pd.DataFrame, context: str = "ambient-air",
         T.apply_tiers(led)
     if "composite_note" not in led.columns:   # old ledgers predate composite detection
         led["composite_note"] = pd.NA
+    if "degeneracy_note" not in led.columns:   # old ledgers predate the degeneracy audit
+        led["degeneracy_note"] = pd.NA
     m0 = led[led["role"] == L.ROLE_M0].copy()
     if len(m0):
         m0 = _enrich_m0(m0)
@@ -224,11 +227,25 @@ def build_sheets(ledger: pd.DataFrame, context: str = "ambient-air",
         "mz", "height", "commentary", "peak_id"]].copy().sort_values(
         "height", ascending=False)
 
+    # below-assignability: M0 commits flagged as mass-saturated O-monsters -- the
+    # base mass fits but ~dozens of plausible ions sit within <=1 ppm, so the
+    # formula is one arbitrary pick, NOT an identification. Listed as a constrained
+    # mass + the tie-set size, separated from the real Candidates.
+    if "below_assignability" in led.columns:
+        bamask = (led["role"] == L.ROLE_M0) & led["below_assignability"].fillna(False).astype(bool)
+        bcols = [c for c in ["mz", "neutral_formula", "adduct", "ion_formula", "ppm_error",
+                             "ion_score", "degeneracy_density", "degeneracy_note", "tier_reason"]
+                 if c in led.columns]
+        below = led[bamask][bcols].copy().sort_values("mz") if bamask.any() else pd.DataFrame(columns=bcols)
+    else:
+        below = pd.DataFrame()
+
     return {
         "Summary": summary_stats(led, context=context, sample_id=sample_id),
         "Read me": legend_sheet(),
         "Identified": identified,
         "Candidates": candidates,
+        "Below assignability": below,
         "Unassigned": un,
         "By class": by_class,
         "Unique formulas": uniq,
@@ -367,6 +384,7 @@ _NUM_FMT = {
 }
 _WRAP_COLS = {"commentary": 70, "evidence": 46, "why_candidate": 46,
               "tier_reason": 46, "alternatives_text": 44, "composite_note": 50,
+              "degeneracy_note": 60,
               "isotopologues_text": 30, "isotopologues": 30,
               "interpretation": 52, "explanation": 90, "value": 46}
 

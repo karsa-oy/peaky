@@ -42,6 +42,13 @@ def main(argv=None):
     ap.add_argument("--no-pass4", action="store_true")
     ap.add_argument("--no-pass5", action="store_true")
     ap.add_argument("--output-dir", default=".")
+    # OPTIONAL time-resolved disposition: a batch (+dataset) whose per-sample peaks
+    # are loaded and used to classify each assignment as inlet-flat background vs
+    # ambient analyte (and demote flat di-bromide/CO3 background). The TS unlock.
+    ap.add_argument("--ts-batch", default=None,
+                    help="batch name to load as the time series (e.g. '<batch>')")
+    ap.add_argument("--ts-dataset", default=None,
+                    help="dataset for --ts-batch (defaults to the sample's dataset)")
     args = ap.parse_args(argv)
 
     cfg = passes.PassConfig(ppm=args.ppm, search_ppm=args.search_ppm,
@@ -51,10 +58,21 @@ def main(argv=None):
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
     base = od / f"{args.sample_id}_{stamp}"
 
+    ts_peaks = None
+    if args.ts_batch:
+        from mascope_assign import io_mascope  # noqa: E402
+        client = io_mascope.connect()
+        ts_peaks = client.load_peaks(
+            dataset=args.ts_dataset, batches=args.ts_batch,
+            matches=False, areas=False, heights=True, average=False,
+            confirm_above=None)
+        print(f"[ts] loaded {len(ts_peaks)} peaks across "
+              f"{ts_peaks['sample_item_id'].nunique()} samples for the time-series step")
+
     out = assign.run(args.sample_id, args.context, cfg=cfg,
                      use_cache=not args.no_cache, do_pass2=not args.no_pass2,
                      do_pass3=not args.no_pass3, do_pass4=not args.no_pass4, do_pass5=not args.no_pass5,
-                     checkpoint_dir=str(od / "checkpoints"))
+                     ts_peaks=ts_peaks, checkpoint_dir=str(od / "checkpoints"))
     led = out["ledger"]
 
     led.to_csv(f"{base}_ledger.csv", index=False)

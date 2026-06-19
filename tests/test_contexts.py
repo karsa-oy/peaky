@@ -47,6 +47,21 @@ check("neutral nitrate C8H15NO12 plausible in chamber", keep, why)
 keep, why = X.filter_by_context("C10H16O4", "ambient-air")
 check("C10H16O4 plausible ambient", keep, why)
 
+# --- saturated C3 polyols: glycerol/glycols are REAL (H/C 2.67); the h_to_c
+#     ceiling was raised 2.6->2.75 so candidate generation no longer clips them
+#     (they used to slip in only via the pass-4 iso-pair bypass). ---
+keep_gly, why_gly = X.filter_by_context("C3H8O3", "ambient-air")   # glycerol, H/C 2.67
+check("glycerol C3H8O3 plausible ambient (H/C 2.67)", keep_gly, why_gly)
+keep_pg, _ = X.filter_by_context("C3H8O2", "ambient-air")          # propylene glycol
+check("propylene glycol C3H8O2 plausible ambient", keep_pg)
+keep_gly_in, _ = X.filter_by_context("C3H8O3", "indoor-air")
+check("glycerol plausible indoor (glycols are real indoor signal)", keep_gly_in)
+# DBE still bounds H/C: over-saturated junk stays rejected (these have DBE<0)
+keep_j1, _ = X.filter_by_context("C4H22O4", "ambient-air")   # H/C 5.5, DBE -6
+keep_j2, _ = X.filter_by_context("C3H10O3", "ambient-air")   # H/C 3.33, DBE -1
+check("over-saturated C4H22O4 still rejected (DBE caps)", not keep_j1)
+check("over-H C3H10O3 still rejected (DBE caps)", not keep_j2)
+
 # --- PAH-like (low H/C) rejected in ambient but allowed in combustion ---
 keep_a, _ = X.filter_by_context("C16H10", "ambient-air")   # H/C=0.625 < 0.7
 keep_c, _ = X.filter_by_context("C16H10", "combustion")    # H/C ok, DBE/C ok
@@ -100,6 +115,52 @@ check("bromoform CHBr3 passes water ctx", keep_bf, why_bf)
 # (H+X)/C = 6/6 = 1.0 — inside bounds; plain H/C=0.17 would have failed
 keep_pbp, why_pbp = X.filter_by_context("C6HBr5O", "water")
 check("C6HBr5O rejected only by Br cap, not H/C", (not keep_pbp) and "Br=5" in str(why_pbp), why_pbp)
+
+# --- POSITIVE uronium (urea-CIMS) context -----------------------------------
+uro = X.get_context("uronium")
+check("uronium resolves", uro.label == "uronium")
+check("uronium aliases", X.get_context("urea-cims") is uro and X.get_context("urea") is uro)
+check("uronium polarity positive", uro.polarity == "positive", uro.polarity)
+check("negative contexts default polarity negative",
+      X.get_context("ambient-air").polarity == "negative")
+check("uronium widens the grid box (C46/O32)",
+      uro.grid_c_max == 46 and uro.grid_o_max == 32, (uro.grid_c_max, uro.grid_o_max))
+check("default grid box unchanged (C40/O30)",
+      X.get_context("ambient-air").grid_c_max == 40
+      and X.get_context("ambient-air").grid_o_max == 30)
+check("uronium offers positive adducts incl. urea",
+      "[M+(CH4N2O)H]+" in uro.reagent_adducts and "[M+H]+" in uro.reagent_adducts)
+check("uronium bans neutral halogens (positive, no halide reagent)",
+      uro.max_Br == 0 and uro.max_Cl == 0 and uro.max_F == 0)
+check("uronium opens positive pass-3 families (amine/siloxane)",
+      {"amine", "siloxane"} <= set(uro.pass3_families))
+# an N-base analyte the urea source is selective for passes; a brominated
+# neutral is rejected by the halogen cap (no Br reagent in positive mode)
+keep_nbase, why_nbase = X.filter_by_context("C11H17NO2", "uronium")   # N/C 0.09, ok
+check("N-base C11H17NO2 passes uronium", keep_nbase, why_nbase)
+keep_amine, _ = X.filter_by_context("C6H15N", "uronium")              # tripropylamine-ish
+check("amine C6H15N passes uronium", keep_amine)
+keep_bromo, why_bromo = X.filter_by_context("C10H15BrO", "uronium")
+check("brominated neutral rejected in uronium (Br cap 0)",
+      (not keep_bromo) and "Br=" in str(why_bromo), why_bromo)
+# a high-O HOM passes (urea-CIMS detects oxygenated VOC)
+keep_hom, why_hom = X.filter_by_context("C10H16O6", "uronium")        # O/C 0.6
+check("oxygenated VOC C10H16O6 passes uronium", keep_hom, why_hom)
+
+# --- PDMS / long-siloxane family (assign the characterized siloxane ladder) ---
+check("uronium opens the pdms family", "pdms" in uro.pass3_families)
+check("uronium max_Si raised to 12 (reach the long PDMS ladder)", uro.max_Si == 12)
+check("pdms family reaches Si>6 (the rungs siloxane can't)",
+      X.CONTAMINANT_FAMILIES["pdms"]["add"]["Si"][1] >= 10)
+check("pdms family offers positive Si adducts incl. NH4",
+      "[M+NH4]+" in X.CONTAMINANT_FAMILIES["pdms"]["adducts"]
+      and "[M+H]+" in X.CONTAMINANT_FAMILIES["pdms"]["adducts"])
+# a high-Si PDMS oligomer passes the uronium VK filter (Heff/(C+Si)~2, O/(C+Si)~0.3)
+keep_pdms, why_pdms = X.filter_by_context("C12H39NO6Si6", "uronium")  # 462.145 [M+H]+
+check("PDMS oligomer C12H39NO6Si6 passes uronium", keep_pdms, why_pdms)
+# the short siloxane family is UNCHANGED (no impact on the shared reference contexts)
+check("shared siloxane family Si cap unchanged at 6",
+      X.CONTAMINANT_FAMILIES["siloxane"]["add"]["Si"][1] == 6)
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

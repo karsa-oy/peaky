@@ -32,11 +32,12 @@ MCP. `~5 min` for a ~1000-peak sample at cutoff 100.
 
 ```bash
 for t in chemistry contexts ledger isotopes series_gka io_mascope reagents \
-         passes residual report series_detect; do
+         passes residual ladders tiers report series_detect degeneracy cleanup \
+         siloxane timeseries; do
   echo "== $t =="; python3 tests/test_$t.py || break
 done
 ```
-229 offline assertions, no network. Live smoke for io_mascope:
+560+ offline assertions, no network. Live smoke for io_mascope:
 `MASCOPE_LIVE=1 python3 tests/test_io_mascope.py`. **Rule: every code change
 ships with a test; keep the suite green.** Tests use plain asserts (no pytest),
 exit non-zero on failure.
@@ -51,15 +52,32 @@ exit non-zero on failure.
 - Heteroatoms enter the neutral only with positive evidence; relaxed filtering is
   "earned by evidence" (chain membership / isotope confirmation), never default.
 
-## Current status (2026-06-13, v41)
+## Current status (2026-06-16 — see ROADMAP.md for full state, lessons + next steps)
 
-Test sample `<sample-id>` (Br-CIMS, atmospheric), cutoff 100:
-- 268 M0, **60.6% peaks / 91.0% signal explained**, 21/21 flagships, ledger
-  clean. **Tiered: 179 Identified / 89 Candidate** (`tiers.py`; mechanical
-  rules, candidate-density currency, lattice-monster + BrCl demotions, same-ion
-  decomposition aliases excluded). Excel is an 11-sheet styled workbook
-  (Identified / Candidates-per-formula / evidence-characterized Unassigned +
-  legend). Outputs archived per-version in `~/mascope-output/assign-dev/v*/`.
+Two validated modes now:
+- **Negative Br-CIMS** (reference) — `<sample-id>` 404'd on <server>; the same
+  physical sample lives at `<sample-id>` (<dataset>,
+  08:21, −1.99 ppm). Full run: **22/22 flagships + 0 junk** (offset-aware
+  check_flagships), 263 M0 / 177 Identified.
+- **Positive urea-CIMS** (`uronium` context, NEW) — `<sample-id>`. Full
+  pipeline at the −2.45 ppm offset: **719 M0 (604 Id), signal explained 64%→81%
+  after the PDMS/siloxane-ladder pass** (`siloxane.py`). Outputs in
+  `~/mascope-output/uronium-v5/`. The session added: positive context + urea
+  reagent library, offset-tolerant calibration (calibrate/confidence/relabel/
+  tiers/arbitration + `estimate_offset` pre-cal), Br-pass polarity guards, the
+  dedicated siloxane pass, and a multi-file "experiment" merge. **560+ tests green.**
+
+Earlier reference numbers (v44, the −0.6 ppm Br copy), cutoff 100:
+- 269 M0, **65.7% peaks / 91.6% signal explained**, 21/21 flagships, 0 junk,
+  ledger clean, **446 offline tests green**. **Tiered: 170 Identified / 99
+  Candidate** (`tiers.py`; now also a mass-error-distribution gate, a
+  CO₃-background-channel gate, and degeneracy-awareness). Roles: M0 / iso_child /
+  reagent / **artifact** (ringing) / unexplained. New modules `degeneracy.py`
+  (honest cross-family degeneracy) + `cleanup.py` (isotope-confirmed recovery,
+  bromide-cluster labelling, ringing-artifact flagging). Outputs archived
+  per-version in `~/mascope-output/assign-dev/v*/`.
+- ⚠️ A tested reagent-formula / `[81BrO]-` fix is in the working tree but NOT yet
+  in an output — **re-run to v45 next session** (ROADMAP "0. PICK UP HERE").
 - **Composite-peak detection (`detect_composites`)**: the M+1 region (13C/29Si)
   is halogen-free, so it scales only with the assigned compound; if observed M0
   exceeds the M+1-implied intensity, an unresolved co-eluting compound shares

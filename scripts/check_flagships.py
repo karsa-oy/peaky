@@ -7,6 +7,12 @@ cross-channel corroboration, GKA series membership) are present and sane in
 the given ledger, and that the known junk classes are absent. Run this after
 every pipeline change: TFA silently vanishing between v12 and v19 is the
 failure mode this protects against.
+
+SCOPE: the FLAGSHIPS list is specific to the REFERENCE sample <sample-id>
+(Br-CIMS ambient air, <instrument> 2025.10.02). It is a regression guard for code
+changes on that sample -- NOT a universal validity check. A different sample has
+different real peaks, so expect MISSING failures there; re-derive the flagship
+set per validated sample (or pass a sample-matched list) before trusting it.
 """
 from __future__ import annotations
 
@@ -46,6 +52,11 @@ FLAGSHIPS = [
     ("HNO3", "[M+Br]-", 1.5, "nitric acid, 5.2k cps (was mislabeled reagent)"),
     ("HNO2", "[M+Br]-", 1.5, "nitrous acid, 3.8k cps (was mislabeled reagent)"),
     ("HNO4", "[M+Br]-", 1.5, "peroxynitric acid, 0.24k cps"),
+    # atmospheric nitroaromatic (brown-carbon tracer) -- H-poor/high-DBE so the
+    # ambient VK floor + DBE/C ceiling block it from the grid; supplied via the
+    # pass-0 known-species "nitroaromatic" family (v46). Independently confirmed
+    # by an Orbitool assignment of the same peak.
+    ("C6H4N2O5", "[M-H]-", 1.5, "2,4-dinitrophenol @183.0047, -0.43 ppm, 0.91 (pass-0 nitroaromatic)"),
 ]
 
 # junk classes that must NEVER reappear (formula regexes on M0 neutrals)
@@ -70,6 +81,18 @@ def main() -> int:
     m0 = led[led["role"] == "M0"]
     failed = 0
 
+    # Instrument mass offset = median ppm of the committed backbone. The |ppm|
+    # bounds below are judged RELATIVE to it, so the SAME flagship set passes on a
+    # copy of the reference sample acquired on a server with a different absolute
+    # calibration -- the reference moved from a ~-0.6 ppm to a -1.9 ppm server
+    # (2026-06-16). The reported ppm in the ledger stays RAW; this only re-centers
+    # the regression bound (it does NOT excuse a wrong mass: a real outlier is
+    # still |ppm - offset| > bound).
+    pe = pd.to_numeric(m0["ppm_error"], errors="coerce").dropna()
+    offset = float(pe.median()) if len(pe) >= 10 else 0.0
+    print(f"instrument mass offset {offset:+.2f} ppm "
+          f"(flagship |ppm| bounds are offset-relative)\n")
+
     for nf, ad, max_ppm, why in FLAGSHIPS:
         rows = m0[m0["neutral_formula"] == nf]
         if ad is not None:
@@ -79,7 +102,7 @@ def main() -> int:
             failed += 1
             continue
         r = rows.iloc[0]
-        ppm = abs(r["ppm_error"]) if pd.notna(r["ppm_error"]) else 99.0
+        ppm = abs(r["ppm_error"] - offset) if pd.notna(r["ppm_error"]) else 99.0
         conf = str(r["confidence"])
         tier = str(r["tier"]) if "tier" in led.columns and pd.notna(r.get("tier")) else None
         if ppm > max_ppm:

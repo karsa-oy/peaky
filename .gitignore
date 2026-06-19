@@ -1,2 +1,10 @@
 __pycache__/
 *.pyc
+
+# secrets & data (never commit)
+.env
+.env.*
+*.parquet
+*.npy
+*.log
+.DS_Store

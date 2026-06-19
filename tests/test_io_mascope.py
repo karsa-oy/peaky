@@ -104,6 +104,31 @@ check("score_candidates allow_partial records failures",
       len(partial.attrs.get("match_batch_failures", [])) == 1,
       partial.attrs)
 
+# ---------- estimate_offset: rough offset from the sample's own matches ----------
+from mascope_assign import chemistry as _C  # noqa: E402
+# build a synthetic match table at a uniform -1.9 ppm offset (Br-CIMS)
+_off_rows = []
+for f, mech in [("C10H16O4", "+Br-"), ("C10H16O3", "+Br-"), ("C5H10O3", "+Br-"),
+                ("C2HF3O2", "+Br-"), ("C9H14O4", "-H+"), ("C6H12O3", "+Br-"),
+                ("C4H6O4", "-H+"), ("HNO3", "+Br-"), ("C8H12O4", "+Br-"),
+                ("C10H18O4", "+Br-")]:
+    add = IO.MECH_TO_ADDUCT[mech]
+    mz = _C.ion_mz(f, add) * (1 - 1.9e-6)            # observed = -1.9 ppm
+    _off_rows.append({"target_compound_formula": f, "ionization_mechanism": mech,
+                      "target_isotope_formula": f, "mz": mz})
+# a heavy-isotope row + an unmatched row must be ignored
+_off_rows.append({"target_compound_formula": "C10H16O4", "ionization_mechanism": "+Br-",
+                  "target_isotope_formula": "[13C]C9H16BrO4-", "mz": 999.0})
+_off_rows.append({"target_compound_formula": None, "ionization_mechanism": "+Br-",
+                  "target_isotope_formula": None, "mz": 300.0})
+off = IO.estimate_offset(pd.DataFrame(_off_rows))
+check("estimate_offset recovers the -1.9 ppm instrument offset",
+      off is not None and abs(off + 1.9) < 0.2, off)
+check("estimate_offset None when too few matches",
+      IO.estimate_offset(pd.DataFrame(_off_rows[:3])) is None)
+check("estimate_offset None on a table with no match columns",
+      IO.estimate_offset(pd.DataFrame({"mz": [1.0, 2.0]})) is None)
+
 # ---------- live smoke (opt-in) ----------
 if os.environ.get("MASCOPE_LIVE") == "1":
     print("\n-- live smoke --")

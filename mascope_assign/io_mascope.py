@@ -23,10 +23,21 @@ from pathlib import Path
 
 import pandas as pd
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"  # + estimate_offset (rough pre-calibration from sample matches)
 
-DEFAULT_ENV = os.path.expanduser("~/mascope-mcp/.env")
+# Credential .env search order (canonical first). The long-running MCP server
+# holds a STALE in-memory token and 401s; the SDK reads the live file, so always
+# load from disk. ~/.mascope/.env is the canonical home (decoupled from mascope-mcp).
+ENV_SEARCH = ["~/.mascope/.env", "~/mascope-mcp/.env", "~/.claude/skills/mascope-sdk/.env"]
 CACHE_ROOT = Path(os.path.expanduser("~/.mascope-assign-cache"))
+
+
+def _find_env(explicit: str | None = None) -> str:
+    for cand in ([explicit] if explicit else []) + ENV_SEARCH:
+        p = os.path.expanduser(cand)
+        if os.path.exists(p):
+            return p
+    return os.path.expanduser(ENV_SEARCH[0])
 MATCH_BATCH = 200   # match_compounds times out above ~500
 
 # Default server-side match parameters. mz_tolerance is INTEGER ppm.
@@ -47,16 +58,31 @@ _ISO_TOKEN = re.compile(r"\[(\d+[A-Z][a-z]?)\](\d*)")
 # ---------------------------------------------------------------------------
 # Connection
 # ---------------------------------------------------------------------------
-def connect(env_path: str = DEFAULT_ENV):
-    """Build a MascopeClient from the .env (MASCOPE_URL, MASCOPE_ACCESS_TOKEN)."""
+def connect(env_path: str | None = None):
+    """Build a MascopeClient from the .env (MASCOPE_URL, MASCOPE_ACCESS_TOKEN).
+    Searches ENV_SEARCH (canonical ~/.mascope/.env first) unless env_path given."""
     from dotenv import load_dotenv
-    load_dotenv(env_path)
+    path = _find_env(env_path)
+    load_dotenv(path)
     url = os.environ.get("MASCOPE_URL")
     tok = os.environ.get("MASCOPE_ACCESS_TOKEN")
     if not url or not tok:
-        raise RuntimeError(f"MASCOPE_URL / MASCOPE_ACCESS_TOKEN not found in {env_path}")
+        raise RuntimeError(f"MASCOPE_URL / MASCOPE_ACCESS_TOKEN not found in {path}")
     from mascope_sdk import MascopeClient
     return MascopeClient(url=url, access_token=tok)
+
+
+def fetch_batch_peaks(client, dataset: str, batch: str, *, save_path: str | None = None
+                      ) -> pd.DataFrame:
+    """Load the per-sample peak time-series for a whole batch (the TS / cluster /
+    correlation layer). Distinct from fetch_peaks (one assignment sample). Uses the
+    SDK batch loader (dataset=, not the deprecated workspace=)."""
+    peaks = client.load_peaks(dataset=dataset, batches=batch)
+    if peaks is None or len(peaks) == 0:
+        raise RuntimeError(f"no peaks for batch {batch!r} in dataset {dataset!r}")
+    if save_path:
+        peaks.to_parquet(os.path.expanduser(save_path))
+    return peaks
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +136,7 @@ ADDUCT_TO_MECH = {
     "[M+Na]+": "+Na+",
     "[M+NH4]+": "+NH4+",
     "[M+CO3]-": "+CO3-",
+    "[M+(CH4N2O)H]+": "+(CH4N2O)H+",   # protonated-urea (uronium) adduct channel
 }
 MECH_TO_ADDUCT = {v: k for k, v in ADDUCT_TO_MECH.items()}
 
@@ -127,6 +154,41 @@ def detect_adducts(peaks: pd.DataFrame) -> list[str]:
         if a and a not in out:
             out.append(a)
     return out or ["[M-H]-"]
+
+
+def estimate_offset(peaks: pd.DataFrame, *, min_n: int = 8) -> float | None:
+    """Rough median ppm mass-offset from the sample's OWN server matches (base
+    ions only). The pass-1 self-calibration is the authoritative fit, but it runs
+    AFTER pass 0 / pass 1 -- so a source with a large systematic offset (the
+    instrument sits at e.g. -1.9 ppm) is blind to it in pass 0's |ppm|<=2 known-
+    species gate, which then drops real contaminants whose on-trend mass is just
+    past 2 ppm and lets pass 1 grab the peak with an off-trend mass-coincidence.
+    This seeds those pre-calibration gates. None when too few matches to trust."""
+    from . import chemistry as C
+    cols = {"target_compound_formula", "ionization_mechanism", "mz"}
+    if peaks is None or not cols <= set(peaks.columns):
+        return None
+    iso_col = "target_isotope_formula" in peaks.columns
+    ppms: list[float] = []
+    for r in peaks.dropna(subset=["target_compound_formula", "mz",
+                                  "ionization_mechanism"]).itertuples():
+        if iso_col and "[" in str(getattr(r, "target_isotope_formula", "") or ""):
+            continue                                 # heavy-isotope row, skip
+        add = MECH_TO_ADDUCT.get(str(r.ionization_mechanism))
+        if not add or add not in C.ADDUCT_SHIFTS:
+            continue
+        try:
+            theo = C.ion_mz(str(r.target_compound_formula), add)
+        except Exception:
+            continue
+        p = (float(r.mz) - theo) / theo * 1e6
+        if abs(p) <= 10:                             # gross-outlier guard
+            ppms.append(p)
+    if len(ppms) < min_n:
+        return None
+    ppms.sort()
+    n = len(ppms)
+    return (ppms[n // 2] if n % 2 else (ppms[n // 2 - 1] + ppms[n // 2]) / 2)
 
 
 # ---------------------------------------------------------------------------

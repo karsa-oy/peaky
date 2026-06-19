@@ -19,13 +19,19 @@ from dataclasses import dataclass, field
 
 from . import chemistry as C
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
 
 
 @dataclass(frozen=True)
 class ContextProfile:
     label: str
     description: str
+    # Ion-source polarity. "negative" is the Br/halide-CIMS default the pipeline
+    # was built around; "positive" (urea-CIMS / APCI+) switches the opportunistic
+    # channels to cation adducts and turns OFF the Br-specific composite test
+    # (its halogen-free-M+1 discriminator needs a halogen adduct to read the
+    # co-component off the even-shift residual -- see assign.run).
+    polarity: str = "negative"
     # Van Krevelen ratio windows (applied only for C >= 3)
     h_to_c: tuple = (0.0, 99.0)
     o_to_c: tuple = (0.0, 99.0)
@@ -40,6 +46,11 @@ class ContextProfile:
     max_Br: int = 99
     max_I: int = 99
     max_Si: int = 99
+    # NEUTRAL-formula grid box width (build_ranges). The default 40/30 matches the
+    # ambient Br-CIMS box; a heavier-mass source (urea-CIMS reaches ~730 Da, so
+    # neutrals ~670 Da) widens C so the >500 Da peaks get candidates.
+    grid_c_max: int = 40
+    grid_o_max: int = 30
     # a halogen / Si in a NEUTRAL needs a minimum carbon scaffold, else it is
     # almost always a reagent-cluster alias. {element: min_C}.
     min_C_for: dict = field(default_factory=dict)
@@ -64,6 +75,12 @@ CONTAMINANT_FAMILIES: dict[str, dict] = {
     "siloxane":      {"add": {"Si": (1, 6), "O": (1, 6), "C": (2, 12), "H": (6, 36)},
                       "adducts": ("[M+H]+", "[M+NH4]+", "[M-H]-"),
                       "note": "PDMS / siloxane column bleed (D3..D6)"},
+    "pdms":          {"add": {"Si": (4, 12), "O": (3, 14), "C": (8, 26),
+                              "H": (18, 78), "N": (0, 2)},
+                      "adducts": ("[M+H]+", "[M+NH4]+", "[M+Na]+", "[M+(CH4N2O)H]+"),
+                      "note": "long-chain polydimethylsiloxane / silicone bleed "
+                              "(Si-O-Si(CH3)2 ladder, +C2H6OSi = +74.019); the "
+                              "Si>6 oligomers the short siloxane family can't reach"},
     "fluorinated":   {"add": {"F": (1, 17), "O": (0, 6)}, "adducts": ("[M-H]-",),
                       "note": "PFAS / CF2 series contaminant; O capped at "
                               "fluorochemical levels -- v16 audit: an open O "
@@ -91,7 +108,12 @@ _AMBIENT = ContextProfile(
     label="ambient-air",
     description=("Outdoor / ambient air. VOC oxidation chemistry (OH/O3/NO3/Cl): "
                  "CHO, organonitrates, organosulfates; routine contaminant load."),
-    h_to_c=(0.7, 2.6), o_to_c=(0.0, 1.5), n_to_c=(0.0, 0.4), dbe_to_c=(0.0, 0.75),
+    # H/C ceiling 2.75 (not 2.6): a saturated C3 polyol -- glycerol C3H8O3,
+    # propylene glycol C3H8O2 -- has H/C 2.67 and is REAL atmospheric signal
+    # (biomass burning / cooking / industrial). DBE>=0 already caps H/C at
+    # 2+2/Ceff, so 2.75 only admits the C3 glycols the old 2.6 wrongly clipped
+    # (they slipped in here ONLY via the pass-4 iso-pair bypass).
+    h_to_c=(0.7, 2.75), o_to_c=(0.0, 1.5), n_to_c=(0.0, 0.4), dbe_to_c=(0.0, 0.75),
     max_N=3, max_S=1, max_P=0, max_F=0, max_Si=1, max_Cl=2, max_Br=2, max_I=1,
     min_C_for={"Br": 5, "Cl": 5, "F": 3},
     reagent_adducts=("[M-H]-", "[M+NO3]-"),
@@ -102,7 +124,7 @@ _CHAMBER = ContextProfile(
     label="chamber",
     description=("Smog / environmental chamber. Clean known precursor + controlled "
                  "oxidant; HOMs and accretion dimers, tight unsaturation."),
-    h_to_c=(0.9, 2.6), o_to_c=(0.0, 2.2), n_to_c=(0.0, 0.4), dbe_to_c=(0.0, 0.7),
+    h_to_c=(0.9, 2.75), o_to_c=(0.0, 2.2), n_to_c=(0.0, 0.4), dbe_to_c=(0.0, 0.7),
     max_N=2, max_S=1, max_P=0, max_F=0, max_Si=1,
     min_C_for={"Br": 5, "Cl": 5, "F": 3},
     reagent_adducts=("[M-H]-", "[M+NO3]-"),
@@ -113,7 +135,9 @@ _INDOOR = ContextProfile(
     label="indoor-air",
     description=("Indoor air. Siloxanes (personal-care / sealants), glycols, amines, "
                  "phthalates are REAL signal here, not just background."),
-    h_to_c=(0.7, 2.5), o_to_c=(0.0, 1.5), n_to_c=(0.0, 0.5), dbe_to_c=(0.0, 0.9),
+    # H/C ceiling 2.75: glycols/glycerol are explicitly REAL indoor signal (see
+    # description) -- the old 2.5 ceiling contradicted that by clipping them.
+    h_to_c=(0.7, 2.75), o_to_c=(0.0, 1.5), n_to_c=(0.0, 0.5), dbe_to_c=(0.0, 0.9),
     max_N=3, max_S=1, max_P=1, max_F=2, max_Si=6, max_Cl=2, max_Br=1,
     min_C_for={"Br": 5, "Cl": 4, "F": 2},
     reagent_adducts=("[M-H]-", "[M+H]+", "[M+NH4]+"),
@@ -158,6 +182,32 @@ _FOOD = ContextProfile(
     pass3_families=("phthalate", "glycol_peg", "siloxane"),
 )
 
+_URONIUM = ContextProfile(
+    label="uronium",
+    description=("Urea-CIMS POSITIVE mode (protonated-urea / uronium reagent). "
+                 "N-heavy chemistry: oxygenated VOC + amine / N-base analytes seen "
+                 "as [M+H]+ and [M+urea+H]+; the urea reagent forms [urea_n+H]+ "
+                 "cluster ions. Background/inlet-characterisation sample."),
+    polarity="positive",
+    # N-heavy positive VK windows. H/C spans aromatic N-heterocycles (~0.5) to
+    # saturated amines/amino-alcohols (~2.6). O/C allows HOMs (urea-CIMS detects
+    # oxygenated VOC up to O/C~1.5). N/C up to 0.6 admits the N-bases the source
+    # is selective for (urea reagent is N-rich) without opening the polyamide
+    # corner. DBE/C up to 1.1 admits aromatic / heterocyclic N.
+    h_to_c=(0.4, 2.6), o_to_c=(0.0, 1.5), n_to_c=(0.0, 0.6), dbe_to_c=(0.0, 1.1),
+    # max_Si 12: the heavy unexplained residual is a long PDMS/silicone ladder
+    # (Si up to ~10-12, +C2H6OSi rungs) -- the `pdms` Pass-3 family needs the cap
+    # raised to reach it. Si only enters the neutral via the siloxane/pdms
+    # families (Pass 1/2 are CHO(N)-only), so this does not loosen the backbone.
+    max_N=5, max_S=2, max_P=1, max_F=0, max_Si=12, max_Cl=0, max_Br=0, max_I=0,
+    # urea-CIMS reaches ~730 Da -> neutrals ~670 Da; widen C past the ambient 40.
+    grid_c_max=46, grid_o_max=32,
+    # Si only as a siloxane scaffold (PDMS bleed), never a bare-Si mass-fit.
+    min_C_for={"Si": 2},
+    reagent_adducts=("[M+H]+", "[M+(CH4N2O)H]+", "[M+Na]+", "[M+NH4]+"),
+    pass3_families=("amine", "siloxane", "pdms", "glycol_peg", "phthalate"),
+)
+
 _NONE = ContextProfile(
     label="none",
     description="Structural gates only (integer DBE>=0, Senior's rule).",
@@ -171,6 +221,7 @@ CONTEXTS: dict[str, ContextProfile] = {
     "combustion": _COMBUSTION, "biomass": _COMBUSTION,
     "water": _WATER, "wastewater": _WATER,
     "food": _FOOD, "wine": _FOOD, "beverage": _FOOD,
+    "uronium": _URONIUM, "urea-cims": _URONIUM, "urea": _URONIUM,
     "none": _NONE,
 }
 
@@ -185,7 +236,14 @@ def get_context(name: str) -> ContextProfile:
 def filter_by_context(formula: str, context: str = "ambient-air") -> tuple[bool, str | None]:
     """Return (keep, reason). Composes the universal structural gates from
     chemistry.dbe_ok with the context-specific bounds."""
-    profile = get_context(context)
+    return filter_by_profile(formula, get_context(context))
+
+
+def filter_by_profile(formula: str, profile: "ContextProfile") -> tuple[bool, str | None]:
+    """Return (keep, reason) for a formula against an explicit profile. Same
+    rules as filter_by_context but takes the profile directly -- used by the
+    degeneracy audit with a relaxed profile (the contaminant families the
+    pipeline can open raise the strict ambient F/Si caps)."""
     cnt = C.parse_formula(formula)
     nC = cnt.get("C", 0); nH = cnt.get("H", 0); nN = cnt.get("N", 0)
     nO = cnt.get("O", 0); nS = cnt.get("S", 0); nP = cnt.get("P", 0)
