@@ -112,6 +112,10 @@ def load_context(out_dir: str, *, tag: str, label: str, ts_path: str | None = No
             if iso:
                 pbc["isotopologue"] = iso
             ctx["ppm_by_cat"] = pbc
+        if "adduct" in a.columns:                     # signal share per ion channel
+            asig = a[a["role"] == "M0"].groupby("adduct")["h"].sum()
+            tot = float(asig.sum()) or 1.0
+            ctx["adduct_signal"] = {k: float(v) / tot for k, v in asig.items()}
 
     # whole-spectrum coverage (TS bins explained vs unexplained, count + signal)
     if ts_path and os.path.exists(os.path.expanduser(ts_path)):
@@ -222,7 +226,7 @@ _ADDUCT_DESC = {
     "[M+H]+": "protonated", "[M-H]-": "deprotonated",
     "[M+Br]-": "Br- cluster", "[M+HBr+Br]-": "di-bromide cluster", "[M+Br2]-": "Br2 cluster",
     "[M+CO3]-": "CO3- cluster", "[M+HBr+CO3]-": "HBr.CO3- cluster", "[M+HSO4]-": "HSO4- cluster",
-    "[M+(CH4N2O)H]+": "urea cluster (+ureaH+)", "[M+Na]+": "Na+ adduct", "[M+NH4]+": "NH4+ adduct",
+    "[M+(CH4N2O)H]+": "urea cluster", "[M+Na]+": "Na+ adduct", "[M+NH4]+": "NH4+ adduct",
     "[M+Cl]-": "Cl- cluster", "[M+I]-": "I- cluster",
 }
 
@@ -365,7 +369,7 @@ def coverage(ctx, pdf):
     ax3.set_title("Assigned vs unassigned", loc="left", fontsize=11)
 
     # (d) assignments by ACTUAL ion channel (which adduct each peak was assigned on)
-    adc = ctx.get("adduct_counts", {})
+    adc = ctx.get("adduct_counts", {}); asig = ctx.get("adduct_signal", {})
     items = sorted(adc.items(), key=lambda kv: kv[1], reverse=True)
     ax4 = fig.add_axes([0.58, 0.47, 0.34, 0.17])
     y = list(range(len(items)))[::-1]
@@ -373,8 +377,9 @@ def coverage(ctx, pdf):
     ax4.set_yticks(y); ax4.set_yticklabels([k for k, _ in items], fontsize=8, family="monospace")
     xmax = max([v for _, v in items], default=1)
     for yi, (k, v) in zip(y, items):
-        ax4.text(v + xmax * 0.02, yi, f"{v} · {_ADDUCT_DESC.get(k, '')}", va="center", fontsize=7.5)
-    ax4.set_xlim(0, xmax * 1.5); ax4.set_xlabel("M0 count", fontsize=9)
+        st = f" · {asig[k] * 100:.0f}% sig" if k in asig else ""
+        ax4.text(v + xmax * 0.02, yi, f"{v} · {_ADDUCT_DESC.get(k, '')}{st}", va="center", fontsize=6.8)
+    ax4.set_xlim(0, xmax * 1.9); ax4.set_xlabel("M0 count (a compound can appear in several channels)", fontsize=7.5)
     ax4.set_title("Reagent / ion channels assigned on", loc="left", fontsize=11)
 
     idn = ctx["tiers"].get("Identified", 0); cn = ctx["tiers"].get("Candidate", 0)
@@ -383,12 +388,14 @@ def coverage(ctx, pdf):
                    "isotope-scored compound match (0-1)."),
              ("b", "• Mass accuracy: ppm error of the matched peaks (boxes = IQR, line = median; "
                    "near 0 = well calibrated)."),
-             ("b", "• Ion channel names the adduct each compound was assigned on (deprotonated, "
-                   "Br- / urea cluster, ...)."),
+             ("b", "• Ion channel names the adduct each compound was assigned on. It counts a "
+                   "compound once per adduct, so bright species recur across channels — read the"),
+             ("b", "  signal % on the bars (e.g. protonation usually dominates the signal)."),
              ("b", "• Unexplained peaks are a third of the m/z bins but only a few % of the signal "
                    "(dim, near-noise)."),
-             ("dim", "Peak roles (M0 / iso_child / reagent / artifact / unexplained) are defined "
-                     "on the Methods page.")]
+             ("dim", "[M+NH4]+ is mass/isotope-identical to [M+H]+ of the +NH3 amine -- labelled NH4"),
+             ("dim", "only when the base compound is also seen in another channel (a prior, not a"),
+             ("dim", "measurement). Peak roles are defined on the Methods page.")]
     _text_lines(fig, lines, y0=0.36, dy=0.029)
     _close(pdf, fig)
 
