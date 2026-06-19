@@ -45,8 +45,8 @@ with tempfile.TemporaryDirectory() as d:
     check("load_context: heteroatom side-counts Si + F",
           ctx["hetero"]["Si-bearing"] == 1 and ctx["hetero"]["F-bearing"] == 1,
           ctx.get("hetero"))
-    check("load_context: adduct-channel breakdown present", bool(ctx.get("adduct_cat")),
-          ctx.get("adduct_cat"))
+    check("load_context: per-adduct channel counts present", bool(ctx.get("adduct_counts")),
+          ctx.get("adduct_counts"))
     check("load_context: role breakdown present", "unexplained" in ctx.get("role_count", {}),
           ctx.get("role_count"))
 

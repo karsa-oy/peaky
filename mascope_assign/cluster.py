@@ -211,6 +211,82 @@ def render_panels(rows, grid, traces_z, traces_raw, item_label, out, *,
     return out
 
 
+def render_a4(rows, grid, traces_z, traces_raw, item_label, out_prefix, *,
+              mode="raw", ylim=None, title="", labels=True, base_color=0):
+    """Render cluster panels onto A4 PORTRAIT pages: each panel spans the A4 text
+    width, panels are packed top-down by height and a new page starts when the page
+    is full (a panel never straddles a page). A clear GAP separates each trace from
+    its formula/m-z list. Returns the list of A4 page PNG paths."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    if not rows:
+        return []
+    PAGE_W, PAGE_H = 8.27, 11.69
+    L, R, TOPM, BOTM = 0.62, 0.30, 0.70, 0.40
+    UW, UH = PAGE_W - L - R, PAGE_H - TOPM - BOTM
+    TRACE_H, GAP_TL, LINE_H, PANEL_GAP, WRAP = 1.30, 0.36, 0.165, 0.55, 96
+
+    pan = []
+    for row in rows:
+        w = _wrap([item_label(m) for m in row[1]], width=WRAP) if labels else []
+        lab_h = (0.05 + len(w) * LINE_H) if w else 0.0
+        pan.append((row, w, TRACE_H + (GAP_TL + lab_h if w else 0.0), lab_h))
+
+    pages, cur, curh = [], [], 0.0
+    for p in pan:
+        if cur and curh + PANEL_GAP + p[2] > UH:
+            pages.append(cur); cur, curh = [], 0.0
+        curh += (PANEL_GAP if cur else 0.0) + p[2]
+        cur.append(p)
+    if cur:
+        pages.append(cur)
+
+    paths, idx = [], base_color
+    for pi, page in enumerate(pages, 1):
+        fig = plt.figure(figsize=(PAGE_W, PAGE_H))
+        t = title + (f"   (page {pi}/{len(pages)})" if len(pages) > 1 else "")
+        fig.text(L / PAGE_W, (PAGE_H - 0.40) / PAGE_H, t, fontsize=12.5, weight="bold", color="#222")
+        ytop = PAGE_H - TOPM
+        for k, (row, w, h, lab_h) in enumerate(page):
+            cid, mem, rbar, sh, ph = row
+            ax = fig.add_axes([L / PAGE_W, (ytop - TRACE_H) / PAGE_H, UW / PAGE_W, TRACE_H / PAGE_H])
+            col = PALETTE[idx % len(PALETTE)]; idx += 1
+            al = 0.6 if len(mem) <= 12 else (0.4 if len(mem) <= 30 else 0.25)
+            M = []
+            for m in mem:
+                y = (traces_z[m].values if mode == "z" else traces_raw[m].values).astype(float)
+                yy = y if mode == "z" else np.where(y > 0, y, np.nan)
+                ax.plot(grid, yy, color=col, lw=0.8, alpha=al); M.append(yy)
+            with np.errstate(all="ignore"):
+                med = smooth(np.nanmean(np.array(M), axis=0)) if mode == "z" \
+                    else np.nanmedian(np.array(M), axis=0)
+            ax.plot(grid, med, color="#111", lw=2.2, alpha=0.9, zorder=5)
+            if mode == "z":
+                ax.set_ylim(-3.3, 2.7); ax.set_ylabel("z", fontsize=9)
+            else:
+                ax.set_yscale("log"); ax.set_ylabel("cps", fontsize=9)
+                if ylim:
+                    ax.set_ylim(*ylim)
+            ax.set_xlim(0, float(grid[-1])); ax.grid(alpha=0.18, which="both"); ax.tick_params(labelsize=9)
+            rbar_s = f"r̄={rbar:.2f} · " if rbar == rbar else ""
+            head = f"{cid} · n={len(mem)}" if isinstance(cid, str) else f"cluster {cid} · n={len(mem)}"
+            ax.set_title(f"{head} · {rbar_s}{sh} (peak~h{ph:.1f})", fontsize=10.5, loc="left")
+            if k == len(page) - 1:
+                ax.set_xlabel("hour of experiment (UTC)", fontsize=9)
+            if w:
+                ty = ytop - TRACE_H - GAP_TL
+                tx = fig.add_axes([L / PAGE_W, (ty - lab_h) / PAGE_H, UW / PAGE_W, lab_h / PAGE_H])
+                tx.axis("off")
+                tx.text(0, 1, "\n".join(w), va="top", ha="left", fontsize=8.8,
+                        family="monospace", color="#333", transform=tx.transAxes)
+            ytop -= (h + PANEL_GAP)
+        out = f"{out_prefix}_p{pi}.png"
+        fig.savefig(out, dpi=200); plt.close(fig)
+        paths.append(out)
+    return paths
+
+
 def remaining_row(cols, lab, big, traces_raw, grid):
     """A single overview 'cluster' of every peak NOT in a >=MIN_MEMBERS cluster
     (singletons + <3-member groups) so ALL signal is plotted. Returns (row, members)
@@ -227,15 +303,20 @@ def remaining_row(cols, lab, big, traces_raw, grid):
 
 
 def render_clusters(rows, grid, traces_z, traces_raw, item_label, out_prefix, *,
-                    remaining=None, per_page=10, title="", **kw):
-    """Paged cluster panels (labelled) PLUS an optional final 'remaining' overview
-    panel (one panel, no per-member labels) so every peak is plotted. Returns paths."""
-    paths = render_paged(rows, grid, traces_z, traces_raw, item_label, out_prefix,
-                         per_page=per_page, title=title, **kw)
-    if remaining is not None:
-        out = f"{out_prefix}_p{len(paths) + 1}.png"
-        render_panels([remaining], grid, traces_z, traces_raw, item_label, out,
-                      labels=False, title=f"{title} — remaining peaks (singletons / <3-member)",
-                      **kw)
-        paths.append(out)
-    return paths
+                    remaining=None, per_chunk=36, title="", **kw):
+    """A4-portrait cluster pages PLUS the remaining peaks (singletons / <3-member)
+    split into LABELLED overview panels of <=per_chunk each, so every peak is both
+    plotted and listed. `remaining` is the member list (or None). Returns paths."""
+    all_rows = list(rows)
+    if remaining:
+        rem = list(remaining)
+        for i in range(0, len(rem), per_chunk):
+            chunk = rem[i:i + per_chunk]
+            Lg = np.log10(traces_raw[chunk].clip(lower=1e-9))
+            Z = (Lg - Lg.mean()) / Lg.std()
+            mz = smooth(Z.mean(axis=1).values)
+            ph = float(grid[int(np.nanargmax(mz))])
+            lbl = f"remaining {i + 1}-{i + len(chunk)} of {len(rem)} (singletons / <3-member)"
+            all_rows.append((lbl, chunk, float("nan"), shape_of(mz), ph))
+    return render_a4(all_rows, grid, traces_z, traces_raw, item_label, out_prefix,
+                     title=title, **kw)
