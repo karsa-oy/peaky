@@ -224,7 +224,8 @@ def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
         reagent: str = "auto", context: str | None = None,
         n_time: int = SS.N_TIME, include_max_tic: bool = True,
         out_dir: str, tol_ppm: float = DEFAULT_TOL_PPM,
-        sample_ids: list | None = None, log=print, **assign_kw) -> dict:
+        sample_ids: list | None = None, ts_peaks=None, amine_r_min: float = 0.7,
+        log=print, **assign_kw) -> dict:
     """Assign the representative subset of a batch and combine, keeping per-file
     ledgers. Provide EITHER `peaks` (a batch peak/sample table) OR `batch` (a
     batch name; the per-sample list is fetched fresh from the live server, which
@@ -283,7 +284,7 @@ def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
     # MERGED level where cross-channel corroboration is complete.
     if prof.polarity == "+":
         from . import cleanup
-        cleanup.prefer_amine_over_ammonium(merged, log=log)
+        cleanup.prefer_amine_over_ammonium(merged, ts_peaks=ts_peaks, r_min=amine_r_min, log=log)
     merged.to_csv(os.path.join(out_dir, "merged_ledger.csv"), index=False)
     jitter.to_csv(os.path.join(out_dir, "jitter.csv"), index=False)
 

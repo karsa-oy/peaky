@@ -407,36 +407,39 @@ def run_cleanup(client, sample_id, ledger, profile, cfg, *, log=print) -> dict:
             "artifacts": art["flagged"], "reclaimed_satellites": sat["reclaimed"]}
 
 
-def prefer_amine_over_ammonium(ledger: pd.DataFrame, *, log=print) -> dict:
+def prefer_amine_over_ammonium(ledger: pd.DataFrame, *, ts_peaks=None, r_min: float = 0.7,
+                               log=print) -> dict:
     """Uronium / positive urea-CIMS: a [M+NH4]+ adduct of a CHO neutral X is mass-
     AND isotope-identical to [M+H]+ of the amine X+NH3 (the SAME ion formula), so
     the data cannot distinguish them. In an N-rich urea source the protonated amine
     is the simpler explanation than an ammonium side-adduct, so RE-READ each
     [M+NH4]+ assignment as [M+H]+ of X+NH3 -- UNLESS:
 
-      * X is CORROBORATED -- the SAME neutral X is independently assigned as [M+H]+
-        or [M+(CH4N2O)H]+ (urea cluster) elsewhere; then the molecule is really
-        present and the NH4 adduct is well supported, so KEEP it; or
+      * X is CORROBORATED. Without a time series (`ts_peaks=None`) corroboration is
+        PRESENCE-based: X is also assigned as [M+H]+ or [M+(CH4N2O)H]+. With a batch
+        time series it is the stronger CO-VARIATION test: the NH4 trace must
+        correlate (log Pearson r >= r_min) with the [M+H]+ OR urea-cluster trace of
+        the SAME m/z -- a faint NH4 peak that does not track the parent is NOT
+        corroboration; or
       * the amine X+NH3 is valence-impossible (saturated X -> negative DBE); the
         NH4 adduct is then the only valid reading and is FORCED/kept.
 
     Only neutral_formula + adduct change (the ion, m/z, score, tier, ppm are
-    identical for the two readings). Relabels in place; returns a summary.
+    identical). Relabels in place; returns a summary.
     """
     if not {"neutral_formula", "adduct"} <= set(ledger.columns):
         return {"relabeled": 0, "kept_corroborated": 0, "forced_nh4": 0}
-    # works on a per-sample ledger (role column) or a merged M0-only frame (no role)
     is_m0 = (ledger["role"] == L.ROLE_M0) if "role" in ledger.columns \
         else pd.Series(True, index=ledger.index)
-    corrob = set(ledger.loc[ledger["adduct"].isin(["[M+H]+", "[M+(CH4N2O)H]+"]),
-                            "neutral_formula"].dropna().astype(str))
+
+    keeps = _make_corroboration_test(ledger, ts_peaks, r_min)
+
     relabeled = kept = forced = 0
-    idx = ledger.index[is_m0 & (ledger["adduct"] == "[M+NH4]+")]
-    for i in idx:
+    for i in ledger.index[is_m0 & (ledger["adduct"] == "[M+NH4]+")]:
         X = str(ledger.at[i, "neutral_formula"] or "")
         if not X or X == "nan":
             continue
-        if X in corrob:                                   # strong evidence -> keep NH4
+        if keeps(X):                                      # corroborated -> keep NH4
             kept += 1
             continue
         cnt = C.parse_formula(X)
@@ -453,6 +456,51 @@ def prefer_amine_over_ammonium(ledger: pd.DataFrame, *, log=print) -> dict:
                 str(ledger.at[i, "tier_reason"] or "")
                 + " | NH4-adduct re-read as protonated +NH3 amine (uronium parsimony)").strip(" |")
         relabeled += 1
-    log(f"[uronium-amine] {relabeled} [M+NH4]+ re-read as [M+H]+ amine; "
+    mode = f"co-variation r>={r_min}" if ts_peaks is not None else "presence"
+    log(f"[uronium-amine] ({mode}) {relabeled} [M+NH4]+ re-read as [M+H]+ amine; "
         f"kept {kept} corroborated NH4 adducts; {forced} forced (no valid amine)")
     return {"relabeled": relabeled, "kept_corroborated": kept, "forced_nh4": forced}
+
+
+def _make_corroboration_test(ledger, ts_peaks, r_min):
+    """Return keeps(neutral) -> bool. Presence-based unless a time series is given,
+    then NH4 is kept only when its trace co-varies (log r>=r_min) with the [M+H]+ or
+    urea-cluster trace."""
+    if ts_peaks is None:
+        corrob = set(ledger.loc[ledger["adduct"].isin(["[M+H]+", "[M+(CH4N2O)H]+"]),
+                                "neutral_formula"].dropna().astype(str))
+        return lambda X: X in corrob
+
+    import numpy as np
+    from . import timeseries as TS
+    mat, bin_mz = TS.build_matrix(ts_peaks)
+    bm = bin_mz.sort_values(); arr = bm.to_numpy(); idx = bm.index.to_numpy()
+
+    def _logtrace(neutral, adduct):
+        try:
+            mz = C.ion_mz(neutral, adduct)
+        except Exception:
+            return None
+        i = np.searchsorted(arr, mz); best = None
+        for j in (i - 1, i):
+            if 0 <= j < len(arr):
+                ppm = abs(arr[j] - mz) / mz * 1e6
+                if ppm <= 8 and (best is None or ppm < best[1]):
+                    best = (idx[j], ppm)
+        if best is None:
+            return None
+        return np.log10(mat[best[0]].clip(lower=1).to_numpy())
+
+    def keeps(X):
+        nh4 = _logtrace(X, "[M+NH4]+")
+        if nh4 is None:
+            return False
+        for ref in ("[M+H]+", "[M+(CH4N2O)H]+"):
+            t = _logtrace(X, ref)
+            if t is None:
+                continue
+            ok = np.isfinite(nh4) & np.isfinite(t)
+            if ok.sum() >= 6 and np.corrcoef(nh4[ok], t[ok])[0, 1] >= r_min:
+                return True
+        return False
+    return keeps
