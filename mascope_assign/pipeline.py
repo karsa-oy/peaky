@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pandas as pd
 
@@ -31,8 +31,9 @@ STAGES = ("matrix", "assign", "cluster", "validate")
 # run versioning: every set of outputs goes in its OWN timestamped folder so a
 # re-run never overwrites a previous one. The folder name = the run id = the
 # batch slug + date + time, and that same id is stamped on the report cover.
-# Pass `when` explicitly (one datetime.now() per run) so the folder name, the run
-# id and the report's "generated" line all agree.
+# Timestamps are in UTC (explicitly marked Z / "UTC") — the run environment's
+# local clock can differ from the user's, so UTC is unambiguous for sharing.
+# Pass `when` explicitly (one now() per run) so folder/id/cover all agree.
 # ---------------------------------------------------------------------------
 def slugify(name: str) -> str:
     """Filesystem-safe batch slug: 'Orange peeling (Ur+ CIMS)' -> 'Orange-peeling-Ur-CIMS'."""
@@ -40,9 +41,14 @@ def slugify(name: str) -> str:
 
 
 def run_stamp(when: datetime | None = None) -> tuple[str, str]:
-    """(folder stamp 'YYYY-MM-DD_HHMMSS', human 'YYYY-MM-DD HH:MM') for `when` (now if None)."""
-    when = when or datetime.now()
-    return when.strftime("%Y-%m-%d_%H%M%S"), when.strftime("%Y-%m-%d %H:%M")
+    """(folder stamp 'YYYY-MM-DDTHHMMSSZ', human 'YYYY-MM-DD HH:MM UTC') in UTC.
+    `when`: None -> now (UTC); a tz-aware datetime is converted to UTC; a naive
+    datetime is assumed to already be UTC."""
+    if when is None:
+        when = datetime.now(timezone.utc)
+    elif when.tzinfo is not None:
+        when = when.astimezone(timezone.utc)
+    return when.strftime("%Y-%m-%dT%H%M%SZ"), when.strftime("%Y-%m-%d %H:%M UTC")
 
 
 def run_id(batch_name: str, when: datetime | None = None) -> str:

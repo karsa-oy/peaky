@@ -56,9 +56,12 @@ that clears after 15-30 min of NO traffic (polling EXTENDS it). For a blocked li
   `channel_agreement_<tag>.csv` QC output. The families report page notes members=ion-channels.
 - **RUN VERSIONING (NEW, user 2026-06-20):** every set of outputs goes in its OWN timestamped folder
   so a re-run never overwrites a prior one. `pipeline.slugify/run_stamp/run_id/make_run_dir` →
-  `~/mascope-output/peaky/<batch-slug>_<YYYY-MM-DD_HHMMSS>/` (folder name == run id; pass ONE
-  `datetime.now()` per run so folder/id/cover all agree). `pdf_report.build(run_id=)` stamps the cover
-  (title page) with the Report ID and a date+TIME `generated` line. Orchestrator `run_peaky.py <tag>`
+  `~/mascope-output/peaky/<batch-slug>_<YYYY-MM-DDTHHMMSSZ>/` (folder name == run id; pass ONE
+  `datetime.now(timezone.utc)` per run so folder/id/cover all agree). **Timestamps are UTC** (folder
+  `…Z`, cover `… UTC`) — user 2026-06-20 caught that the run env clock was UTC+3 (EEST) while theirs was
+  UTC+1, so a local-time stamp came out 2h off the file dates; UTC is unambiguous. `run_stamp` converts a
+  tz-aware `when` to UTC and assumes naive = UTC. `pdf_report.build(run_id=)` stamps the cover (title
+  page) with the Report ID and a date+TIME-UTC `generated` line. Orchestrator `run_peaky.py <tag>`
   (scratch) picks the timestamp once, copies the assignment inputs from the canonical `orange-assign/
   <tag>/` into the run folder, then runs clusters+VK+report into it via `PEAKY_OUT/PEAKY_RUN_ID/
   PEAKY_GENERATED` env (run_clusters/run_vankrevelen/run_report honour PEAKY_OUT; default = canonical
