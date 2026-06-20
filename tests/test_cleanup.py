@@ -150,5 +150,10 @@ check("amine: saturated X (no valid amine) -> NH4 forced/kept",
 check("amine: summary counts", outa == {"relabeled": 1, "kept_corroborated": 1, "forced_nh4": 1}, outa)
 check("amine: relabel noted in tier_reason", "re-read" in str(leda.loc[0, "tier_reason"]))
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

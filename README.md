@@ -46,12 +46,14 @@ as a thin forwarder; `python3 -m mascope_assign …` is equivalent to the script
 ## Test loop
 
 ```bash
-for t in tests/test_*.py; do echo "== $t =="; python3 "$t" || break; done
+python3 tests/test_smoke.py          # 2s "install OK" check (no creds, no network)
+pytest tests/                        # or: for t in tests/test_*.py; do python3 "$t"; done
 ```
-768 offline assertions across 27 files, no network. Live smoke for io_mascope:
+833 offline assertions across 30 files, no network. Live smoke for io_mascope:
 `MASCOPE_LIVE=1 python3 tests/test_io_mascope.py`. **Rule: every code change
-ships with a test; keep the suite green.** Tests use plain asserts (no pytest),
-exit non-zero on failure.
+ships with a test; keep the suite green.** Tests use plain asserts and run as
+scripts (exit non-zero on failure); each also exposes a validating `test_all`
+so `pytest tests/` collects and passes them. CI runs the suite with no creds.
 
 ## Design invariants (don't regress)
 

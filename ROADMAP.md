@@ -40,12 +40,21 @@ config-expandable; Orange Ur+Br shareable as the offline demo. Data path LIVE-VE
   yet LIVE-validated end-to-end (needs a ~40-min live assign run; WAF-prone) — once it is, DELETE the
   orange-assign scratch shims. Deferred: thread assign_batch's computed maps through its return (the file-based
   inter-stage contract is deterministic + verified, so low priority).
-- **NEXT = Phase 3 (test compat / CI / determinism):** guard the test-runner tails so `pytest tests/` works
-  (today it INTERNALERRORs on the module-level `sys.exit`), add a no-network `test_smoke.py`, add a GitHub
-  Actions CI run with NO creds (enforces the offline guarantee), add a PDF/PNG determinism regression test.
-  Then Phase 4 (QUICKSTART, `--demo` offline data from the Orange batches, an NO3⁻ profile + config-driven
-  `--reagent-config`, `ClusterConfig`, polarity-aware `cleanup.py`). Keep the suite green + report bytes stable.
-  **Nothing committed yet (commit on the user's request), then create the private GitHub remote.**
+- **Phase 3 DONE — pytest-compat + smoke + determinism + CI.** Each tests/test_*.py now exposes a validating
+  `test_all()` guarded by `if __name__=='__main__'`, so `pytest tests/` collects + passes (was INTERNALERROR on
+  the module-level sys.exit) while `python3 tests/x.py` still works. NEW `test_smoke.py` (no-network install
+  check — public API + every submodule imports, deps resolve, flatten_match_tree, xlsx round-trip; ~2s) +
+  `test_determinism.py` (locks the SOURCE_DATE_EPOCH contract: byte-identical PDF/PNG at a fixed epoch, different
+  bytes when it changes). `.github/workflows/test.yml` = matrix 3.11–3.13, install from public PyPI, assert NO
+  Mascope creds, run smoke + pytest. requires-python>=3.11 (matches the pandas 3.0 lock). **Suite 833/30 green;
+  pytest 30/30.** Phases 0–2 committed (4dd8233); Phase 3 committed.
+- **NEXT = Phase 4 (onboarding + reuse polish):** QUICKSTART.md (clone → creds → `list` → `assign` → `batch`),
+  `--demo` offline mode from a bundled Orange parquet (NB `.gitignore` excludes `*.parquet` → needs a carve-out
+  or Git LFS), an NO3⁻ `ReagentProfile` + config-driven `--reagent-config` (the user will test NO3⁻ before ship),
+  a `ClusterConfig` for cluster.py's tuning constants, polarity-aware `cleanup.py` (drive RECOVERY_ADDUCTS /
+  reagent_element from the profile so non-Br reagents get a working recovery pass). PLUS: LIVE-validate
+  `mascope-assign batch` end-to-end, then DELETE the orange-assign scratch shims. Keep the suite green + report
+  bytes stable. **Create the private GitHub remote when ready.**
 
 **REPORT CRITICAL-REVIEW FIXES (session 3, 2026-06-20) — committed, reports regenerated.**
 A 6-dimension adversarial review of the Ur/Br PDFs surfaced two genuinely misleading

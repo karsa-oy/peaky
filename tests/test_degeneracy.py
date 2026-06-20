@@ -97,5 +97,10 @@ D.apply_degeneracy(led2, cal=(0.0, 1.0), box=TINY, adducts=("[M-H]-",))
 check("apply_degeneracy stamps degeneracy_note on M0",
       led2.loc[led2.peak_id == "U", "degeneracy_note"].notna().all())
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

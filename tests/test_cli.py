@@ -78,5 +78,10 @@ with tempfile.TemporaryDirectory() as d:
     check("`gka` writes an HTML file", os.path.exists(out) and "<html" in Path(out).read_text())
     check("--env sets MASCOPE_ENV", os.environ.get("MASCOPE_ENV") == os.path.join(d, "creds.env"))
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

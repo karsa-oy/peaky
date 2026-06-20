@@ -7,7 +7,7 @@ name = "mascope-assign"
 version = "0.3.0"
 description = "Multi-pass chemical-formula assignment for high-resolution mass-spec peaks (Mascope / Karsa CIMS)."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [{ name = "Aleksei Scherbinin" }]
 keywords = ["mass-spectrometry", "CIMS", "peak-assignment", "van-krevelen", "mascope", "kendrick"]
 

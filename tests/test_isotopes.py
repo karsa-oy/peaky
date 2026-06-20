@@ -124,5 +124,10 @@ p4 = ISO.isotope_pattern("CBr4", min_rel=0.05, max_shift=12.0)
 check("CBr4 keeps its M+8 (~8 Da) line under max_shift=12",
       max(d for d, _, _ in p4) > 7.5, max(d for d, _, _ in p4))
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

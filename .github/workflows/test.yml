@@ -1,0 +1,42 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # mascope-sdk + the rest are on public PyPI, so a clean install needs no
+      # private index and no Mascope account.
+      - name: Install package + dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # Enforce the no-network guarantee: the offline suite must pass with NO
+      # Mascope credentials and the live smoke disabled.
+      - name: Assert no Mascope credentials present
+        run: |
+          if [ -n "${MASCOPE_LIVE:-}" ]; then echo "MASCOPE_LIVE must be unset in CI"; exit 1; fi
+          if [ -f "$HOME/.mascope/.env" ]; then echo "~/.mascope/.env must not exist in CI"; exit 1; fi
+          if [ -n "${MASCOPE_ACCESS_TOKEN:-}" ]; then echo "MASCOPE_ACCESS_TOKEN must be unset in CI"; exit 1; fi
+
+      - name: Smoke test (install OK, no network)
+        run: python tests/test_smoke.py
+
+      - name: Full offline suite
+        run: pytest tests/ -q

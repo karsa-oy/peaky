@@ -66,5 +66,10 @@ with tempfile.TemporaryDirectory() as d:
           bool(list(Path(d).glob("clusters_changing_T_p*.png"))))
     check("wrote the per-cluster workbook", os.path.exists(os.path.join(d, "clusters_changing_T.xlsx")))
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

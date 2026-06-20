@@ -110,5 +110,10 @@ esel = SS.select_representative_samples(empty)
 check("empty peaks -> empty selection with role column",
       len(esel) == 0 and "role" in esel.columns, list(esel.columns))
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

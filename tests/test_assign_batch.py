@@ -65,5 +65,10 @@ me, je = AB.align({})
 check("empty -> empty merged + jitter with schema",
       len(me) == 0 and "n_files" in me.columns and "cluster" in je.columns)
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

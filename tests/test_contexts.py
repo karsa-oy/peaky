@@ -162,5 +162,10 @@ check("PDMS oligomer C12H39NO6Si6 passes uronium", keep_pdms, why_pdms)
 check("shared siloxane family Si cap unchanged at 6",
       X.CONTAMINANT_FAMILIES["siloxane"]["add"]["Si"][1] == 6)
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

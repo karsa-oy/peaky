@@ -58,5 +58,10 @@ with tempfile.TemporaryDirectory() as d:
     check("make_run_context: out_dir created, profile attached",
           os.path.isdir(ctx.out_dir) and ctx.profile is P.BR)
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

@@ -141,5 +141,10 @@ check("urea2 reagent row records ion_formula C2H9N4O2+",
 check("positive analyte peak NOT labeled reagent",
       L.role_of(uled, "org") == L.ROLE_UNEXPLAINED, L.role_of(uled, "org"))
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

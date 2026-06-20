@@ -381,5 +381,10 @@ cal_mix = T._calibrate(m0_mix, kids_mix)
 check("tiers _calibrate median robust to a gross outlier",
       cal_mix is not None and abs(cal_mix[0] + 2.4) < 0.3, cal_mix)
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

@@ -225,5 +225,10 @@ check("BrCl enumeration recovers the Cl neutral via [M+Br]-",
 check("every BrCl candidate carries exactly the pinned halogens",
       all((C.parse_formula(f).get("Cl", 0) == 1) for f in bc), sorted(bc)[:5])
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

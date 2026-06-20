@@ -142,5 +142,10 @@ check("O>9 neighbour gated (no proposal)",
           None, "S", ledo, prof, cfg, ["[M+Br]-"],
           score_fn=lambda *a, **k: pd.DataFrame(), log=lambda *a: None)))
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

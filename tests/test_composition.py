@@ -71,5 +71,10 @@ check("oligomer: high-C high-O flagged, sorted by C desc",
 check("oligomer: excludes siloxane and small species", "C6H18O3Si3" not in flag and "C10H16O2" not in flag, flag)
 check("oligomer: c_max excludes absurd high-C coincidences (C44)", "C44H29NO7" not in flag, flag)
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

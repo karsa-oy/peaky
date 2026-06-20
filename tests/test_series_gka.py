@@ -73,5 +73,10 @@ chains = G.find_homolog_series(series, "CH2", min_len=3)
 check("detects CH2 chain of length 4",
       any(len(ch) == 4 for ch in chains), [len(c) for c in chains])
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

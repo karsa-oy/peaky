@@ -279,10 +279,11 @@ already open. `run_assignment.py` emits one per run.
 
 ## Testing & iteration
 
-`for t in tests/test_*.py; do python3 "$t"; done` — **749 offline assertions across
-26 files**, no network (io_mascope live smoke gated behind `MASCOPE_LIVE=1`). Every
-module has a matching `tests/test_<module>.py`. Add a test with each change; keep the
-suite green.
+`pytest tests/` (or `for t in tests/test_*.py; do python3 "$t"; done`) — **833 offline
+assertions across 30 files**, no network (io_mascope live smoke gated behind
+`MASCOPE_LIVE=1`). `python3 tests/test_smoke.py` is a 2-second no-creds install check.
+Every module has a matching `tests/test_<module>.py`; CI (`.github/workflows/test.yml`)
+runs the suite on 3.11–3.13 with no credentials. Add a test with each change; keep it green.
 Regression: `python3 scripts/check_flagships.py <ledger.csv>` — now **offset-aware**
 (bounds judged vs the median-ppm backbone center, so a copy of the reference at a
 different server calibration still passes). See `README.md` for the dev loop and

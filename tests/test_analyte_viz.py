@@ -117,5 +117,10 @@ check("channel_agreement: anti-phase channels -> 'disagree'",
       ca.loc["C7H16O3", "verdict"] == "disagree" and ca.loc["C7H16O3", "worst_r"] < 0.4,
       ca.loc["C7H16O3"].to_dict())
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

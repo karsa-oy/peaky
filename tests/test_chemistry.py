@@ -130,5 +130,10 @@ check("neutral Br hits cap 0.20", C.complexity_penalty("C10H15BrO4") == 0.20,
 check("penalty monotone: CHON < CHOS",
       C.complexity_penalty("C5H10NO3") < C.complexity_penalty("C5H10O3S"))
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

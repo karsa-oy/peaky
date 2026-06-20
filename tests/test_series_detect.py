@@ -85,5 +85,10 @@ check("chain head is lowest mz", abs(ch8[0][1] - 150.0123) < 1e-3, ch8[0])
 check("chain steps are exactly CF2",
       all(abs(ch8[i + 1][1] - ch8[i][1] - cf2) < 1e-3 for i in range(len(ch8) - 1)))
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

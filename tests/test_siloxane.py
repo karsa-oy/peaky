@@ -120,5 +120,10 @@ s2 = SX.assign_siloxane_ladder(None, "SID", led2, X.get_context("ambient-air"), 
                                score_fn=fake_score, log=lambda *a: None)
 check("inert when context forbids Si (ambient max_Si=1)", s2["committed"] == 0, s2)
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

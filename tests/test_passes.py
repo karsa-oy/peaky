@@ -936,5 +936,10 @@ s_pos = P.run_pass0_known(None, "SID", mk_ledger([("p", 100.0, 500.0)]),
 check("pass0 positive mode commits nothing without calling the oracle",
       s_pos["committed"] == 0, s_pos)
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

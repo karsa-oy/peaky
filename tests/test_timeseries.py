@@ -95,5 +95,10 @@ led3 = led.copy()
 s3 = TS.apply_timeseries(led3, peaks, reagent_mzs=[], log=lambda *a: None)
 check("runs without a reagent normaliser", s3["annotated"] == 6, s3)
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

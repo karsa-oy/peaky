@@ -121,5 +121,10 @@ check("markdown signal explained includes reagent ions", "Signal explained: 100.
 check("markdown reports tiers", "Tiers:" in md, md)
 mdp.unlink(missing_ok=True)
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)
