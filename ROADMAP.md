@@ -38,11 +38,16 @@ no live re-run — regenerated from the canonical orange-assign/<tag>/ ledgers v
   different PYTHONHASHSEED + fixed run-id/SOURCE_DATE_EPOCH, diffed every output. Result: every
   PDF/PNG/CSV byte-identical; the ONLY non-deterministic file was `clusters_changing_*.xlsx` — and
   only its embedded timestamps (openpyxl stamps datetime.now() into docProps/core.xml + every zip
-  member mtime; sheet data identical). FIX: `cluster._make_xlsx_deterministic()` normalises those to
-  a fixed constant. **Both batches now regenerate 100% byte-identical across hash seeds** (verified;
-  test_cluster +1 = 37). The harness lives at `/tmp/determinism_test.py`. **The live `match_compounds`
-  assignment step is the ONLY non-deterministic part of a from-scratch run** (server-side; documented
-  earlier as 294-vs-292 amine re-reads = ±2 between two live runs) — local code is fully deterministic.
+  member mtime; sheet data identical). FIX (commits ac08a33 + 1e873ca): `cluster._make_xlsx_
+  deterministic(when=)` replaces those stamps with the RUN timestamp (resolved from `when` ->
+  SOURCE_DATE_EPOCH env -> now); run_peaky now sets SOURCE_DATE_EPOCH = the run's chosen time so every
+  artifact of one run (xlsx + matplotlib PDF/PNG metadata) shares it. So the bytes are deterministic
+  GIVEN the inputs+time — same-time re-run = byte-identical (0 diffs across hash seeds, verified), a
+  later run carries a later stamp (NOT frozen: folder id / cover / xlsx / PDF all agree, e.g. all
+  ...123822Z). User correction: timestamps & report ids SHOULD differ across runs at different times;
+  only the scientific CONTENT must be reproducible. test_cluster 38. Harness `/tmp/determinism_test.py`.
+  **The live `match_compounds` assignment is the ONLY non-deterministic part of a from-scratch run**
+  (server-side; ±2 amine re-reads between two live runs) — all local code is deterministic given inputs.
 - SECTIONS now `[cover, findings, coverage, composition, scrutiny, gka, families, changers, clusters,
   methods]`. Final reports: `~/mascope-output/peaky/Orange-peeling-{Ur,Br}-CIMS_2026-06-20T1136*Z/`
   (git ac08a33). Full suite green (26 test files). **STILL NOT folded:** enrichment-colored VK
