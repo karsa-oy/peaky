@@ -54,6 +54,17 @@ that clears after 15-30 min of NO traffic (polling EXTENDS it). For a blocked li
   567→801 (still flat); all 33 user IDs demoted. Driver renders only dynamic rows; CSV/workbook = dynamic
   only; flat panel = remainder + flat-cluster members + Si. `cluster_flatness`/`split_flat_clusters`
   tested (cluster 32).
+  **BIG STANDALONE CHANGERS (user 2026-06-20 — "some traces increase by a lot, x10, I'm interested in
+  those, not others"):** the user does NOT want the weak common-mode event tail (rejected TIC-norm:
+  "small changes get exaggerated"); they want the channels that change DRAMATICALLY on their own.
+  `cluster.big_changers(traces, cols, grid, fold_min=BIG_CHANGE_FOLD=3.0)` = single channels whose
+  smoothed(w2) max/median ≥ fold (~≥5-10× raw), no family needed; `render_changers` = small-multiples,
+  one mini-plot per channel (raw cps log y, full-timeline x, titled `formula+adduct  N× · peak h`).
+  Driver pulls them from the flat candidates → `clusters_changers_<tag>.png/.csv`, OUT of the flat
+  panel. New report SECTION `changers` (after families). Br: 4 (C19H28O6−H 7× spike@h0.1, C20H32O7 4×,
+  C3H4O4 3×, C9H16O8 3× — the early-event over-responders); Ur: 1. Threshold tunable (BIG_CHANGE_FOLD).
+  cluster tests 36. NOTE: these are the weak-event-tail over-responders — too noisy to cluster, but
+  individually a big fold, which is what the user cares about.
 - **PER-ION CLUSTERING + CHANNEL-AGREEMENT QC (NEW, user 2026-06-20):** assigned analytes now cluster
   PER ION CHANNEL (formula+adduct), NOT the per-neutral SUM, because a neutral's channels often diverge
   in time — `analyte_viz.channel_agreement` showed **Ur 44% / Br 22%** of multi-channel neutrals have

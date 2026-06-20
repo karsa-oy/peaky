@@ -37,6 +37,8 @@ PEAK_RANGE = 1.7         # smoothed max/median at/above which a trace has a cohe
 FLAT_CLUSTER_RANGE = 1.4  # a cluster whose MEMBER-MEAN smoothed max/median is below this
                           # is a flat family (members co-vary but the family doesn't move)
                           # -> demoted to the flat-background overview
+BIG_CHANGE_FOLD = 3.0    # a single channel whose smoothed max/median is >= this is a "big
+                         # standalone change" (~>=5-10x raw) — surfaced even with no family
 DIST_T = 0.40            # 1-r cut: r > 0.6 merges
 MIN_POINTS = 8           # finite trace points needed to correlate
 MIN_MEMBERS = 3          # smallest reported cluster
@@ -486,6 +488,59 @@ def write_cluster_workbook(rows, out_xlsx, *, meta=None, item_label=None,
                 df = df[[c for c in cols if c in df.columns]]
             df.to_excel(xw, sheet_name=_sheet_name(cid, used), index=False)
     return out_xlsx
+
+
+def big_changers(traces: pd.DataFrame, cols, grid, *, fold_min=BIG_CHANGE_FOLD, smooth_w=2):
+    """Channels that change A LOT on their own — smoothed max/median >= fold_min
+    (~>=5-10x raw) — regardless of whether they co-vary with anything. These are
+    individually interesting (e.g. a single peak that spikes 10x during an event)
+    but have no family, so they'd otherwise sit unnoticed in the flat panel.
+    Returns [(col, fold, peak_hour), ...] sorted by fold, largest first."""
+    out = []
+    for c in cols:
+        if c not in traces.columns:
+            continue
+        ys = smooth(pd.to_numeric(traces[c], errors="coerce").to_numpy(), smooth_w)
+        pos = ys[np.isfinite(ys) & (ys > 0)]
+        if len(pos) < MIN_POINTS:
+            continue
+        med = np.median(pos)
+        fold = float(np.max(pos) / med) if med > 0 else 0.0
+        if fold >= fold_min:
+            ph = float(grid[int(np.nanargmax(np.where(np.isfinite(ys), ys, -np.inf)))])
+            out.append((c, fold, ph))
+    out.sort(key=lambda t: -t[1])
+    return out
+
+
+def render_changers(items, traces_raw, grid, out, item_label, *, ncol=4, cap=48,
+                    title="", dpi=150):
+    """Small-multiples of the big standalone changers — one mini-plot per channel
+    (raw cps, log y) titled `formula+adduct  Nx · peak hour`, so each interesting
+    trace is shown on its own. `items` = big_changers() output. Returns the path."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    items = list(items)[:cap]
+    if not items:
+        return None
+    nrow = (len(items) + ncol - 1) // ncol
+    fig, axes = plt.subplots(nrow, ncol, figsize=(3.0 * ncol, 1.7 * nrow), squeeze=False)
+    for i, (c, fold, ph) in enumerate(items):
+        ax = axes[i // ncol][i % ncol]
+        y = traces_raw[c].to_numpy(float)
+        ax.plot(grid, np.where(y > 0, y, np.nan), color="#1D9E75", lw=1.1, marker="o", ms=2)
+        ax.set_yscale("log"); ax.set_xlim(0, float(grid[-1]))
+        ax.grid(alpha=0.2, which="both"); ax.tick_params(labelsize=7)
+        ax.set_title(f"{item_label(c)}   {fold:.0f}× · h{ph:.1f}", fontsize=7.5, loc="left")
+        if i // ncol == nrow - 1:
+            ax.set_xlabel("hour (UTC)", fontsize=7)
+    for j in range(len(items), nrow * ncol):
+        axes[j // ncol][j % ncol].axis("off")
+    fig.suptitle(title, fontsize=12, y=1 - 0.15 / (1.7 * nrow), x=0.02, ha="left")
+    fig.tight_layout(rect=[0, 0, 1, 1 - 0.5 / (1.7 * nrow)])
+    fig.savefig(out, dpi=dpi); plt.close(fig)
+    return out
 
 
 def render_flat_panel(cols, traces_raw, grid, out, item_label, *,

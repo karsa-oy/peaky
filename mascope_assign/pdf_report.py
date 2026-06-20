@@ -148,6 +148,7 @@ def load_context(out_dir: str, *, tag: str, label: str, ts_path: str | None = No
         ctx["fig"]["vk"] = vk           # single (scatter)
     # cluster figures are PAGED (clusters_<set>_<tag>_p<i>.png) — collect ALL pages
     for key, stem in [("changing", f"clusters_changing_{tag}"),
+                      ("changers", f"clusters_changers_{tag}"),
                       ("flat", f"clusters_flat_{tag}"),
                       ("unassigned", f"clusters_unassigned_{tag}")]:
         paged = sorted(glob.glob(f"{out_dir}/{stem}_p*.png"),
@@ -481,6 +482,13 @@ def families(ctx, pdf):
     _close(pdf, fig)
 
 
+def changers(ctx, pdf):
+    """Large standalone changes: single channels that change a lot (>= fold) with no
+    family — pulled out so they're not buried in the flat panel (user-requested)."""
+    for p in ctx["fig"].get("changers", []):
+        _image_page(pdf, p, "", native=True, src_dpi=150)   # small-multiples, own title
+
+
 def clusters(ctx, pdf):
     for p in ctx["fig"].get("flat", []) + ctx["fig"].get("unassigned", []):
         _image_page(pdf, p, "")                         # A4-portrait pages, own titles
@@ -519,7 +527,7 @@ def methods(ctx, pdf):
     _close(pdf, fig)
 
 
-SECTIONS = [cover, coverage, composition, gka, families, clusters, methods]
+SECTIONS = [cover, coverage, composition, gka, families, changers, clusters, methods]
 
 
 def build(out_dir: str, *, tag: str, label: str, ts_path: str | None = None,

@@ -137,6 +137,9 @@ file otherwise falls back to `[M-H]-` = wrong polarity). For positive urea-CIMS,
   `cluster.split_flat_clusters` (via `cluster_flatness` = smoothed max/median of the member-MEAN trace,
   `FLAT_CLUSTER_RANGE`) DEMOTES clusters that co-vary but whose family mean is flat into the flat panel.
   The non-clustering remainder + flat clusters + Si = the flat panel; only dynamic families are shown.
+  **Big standalone changers:** `cluster.big_changers` (per-channel smoothed max/median ≥ `BIG_CHANGE_FOLD`,
+  ~≥5-10× raw, no family needed) + `render_changers` (small-multiples) pull dramatically-changing single
+  channels into their own report section (the `changers` SECTION), out of the flat panel.
 - **`analyte_viz.render_van_krevelen_full`** — every assigned peak by CHO/CHON/CHOS
   backbone (Si/F/halogen folded into the backbone, not split out).
 - **`pdf_report.build(out_dir, tag=, label=, ts_path=, batch_name=, run_id=, generated=)`** — the

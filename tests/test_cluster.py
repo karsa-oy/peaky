@@ -122,6 +122,21 @@ dyn, flatd = CL.split_flat_clusters(rows_in, tf)
 check("split_flat_clusters: rising stays dynamic, flat family demoted",
       [r[0] for r in dyn] == [2] and [r[0] for r in flatd] == [1], (dyn, flatd))
 
+# --- big_changers: surface single channels that change a lot ------------------
+gridc = np.linspace(0, 1.6, 20)
+spike = np.full(20, 300.0); spike[2:5] = [1500, 4000, 2200]      # ~13x spike
+flatc = 1000.0 + 8 * np.cos(np.arange(20))                       # ~flat
+tc = pd.DataFrame({"BIG": spike, "DULL": flatc})
+ch = CL.big_changers(tc, ["BIG", "DULL"], gridc, fold_min=CL.BIG_CHANGE_FOLD)
+check("big_changers: picks the big spiker, not the flat one",
+      [c[0] for c in ch] == ["BIG"], ch)
+check("big_changers: reports a large fold and a peak hour in the spike window",
+      ch and ch[0][1] >= CL.BIG_CHANGE_FOLD and gridc[1] <= ch[0][2] <= gridc[5], ch)
+with tempfile.TemporaryDirectory() as d:
+    out = CL.render_changers(ch, tc, gridc, f"{d}/ch.png", lambda c: str(c), title="t")
+    check("render_changers: writes a PNG", bool(out) and os.path.exists(out) and os.path.getsize(out) > 4000)
+    check("render_changers([]) -> None", CL.render_changers([], tc, gridc, f"{d}/x.png", str) is None)
+
 # --- per-cluster workbook (one tab per cluster) ------------------------------
 wb_rows = [(1, ["A", "B", "C"], 0.9, "rise", 0.5),
            ("remaining (singletons)", ["D", "E"], float("nan"), "n/a", 0.0)]
