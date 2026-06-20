@@ -25,12 +25,29 @@ no live re-run — regenerated from the canonical orange-assign/<tag>/ ledgers v
   fixes the 65-vs-68 jitter-vs-ledger mismatch. (5) composition page: count + signal-weighted +
   two-way shadow disclosure; text now BEFORE the VK figure. (6) methods page documents the amine
   re-read + a parameters line (tol 6.0ppm · cluster r>0.6 · amine r≥0.7) + reagent-signal caveat.
-- SECTIONS now `[cover, findings, coverage, composition, gka, families, changers, clusters, methods]`.
-  Both reports rebuilt → `~/mascope-output/peaky/Orange-peeling-{Ur,Br}-CIMS_2026-06-20T1105*Z/`.
-  Full suite green (25 files). **NOT yet folded:** the enrichment(event/tail)-colored VK (still
-  scratch), formula priors (N-cap/H-C floor/halogen-in-Ur guard for the N-monsters + C10H18Br2O12),
-  background-family tagging (saturated diester/glycol leak into co-varying families), and the
-  batch_summary offsets_ppm=null (IO.estimate_offset returns None; jitter has the real offsets).
+- ROUND 2 (commit 086ac54): **NEW `plausibility.py`** (test 18) — `scan()` flags Candidate-only
+  neutrals that look like mass coincidences (N≥3 & O/C≥1, N≥4 & O≥8, H/C<0.35, or a halogen in a
+  positive-mode neutral); Identified (isotope-scored) never flagged. New report SECTION `scrutiny`
+  lists them (Ur 5 incl. dibromo C10H18Br2O12; Br 10 incl. C35H4/C8N2O14). **REGRESSION FIXED:** the
+  amine shadow note + findings "amine re-reads" line are now GATED to positive mode (`ctx['positive']`
+  = any adduct ends '+') — they had leaked onto the Br negative report (which runs no re-read).
+  Background-family tagging deliberately NOT added (a formula signature can't separate lab glycols
+  from real small acids — it mislabels CH2O2 formic acid, the #1 Br analyte; that's a temporal call).
+- ROUND 3 — **DETERMINISM (commit ac08a33).** Ran the full OFFLINE generation pipeline (run_clusters
+  + run_vankrevelen + run_report, all read the saved `{tag}_ts.parquet`, NO live call) TWICE with
+  different PYTHONHASHSEED + fixed run-id/SOURCE_DATE_EPOCH, diffed every output. Result: every
+  PDF/PNG/CSV byte-identical; the ONLY non-deterministic file was `clusters_changing_*.xlsx` — and
+  only its embedded timestamps (openpyxl stamps datetime.now() into docProps/core.xml + every zip
+  member mtime; sheet data identical). FIX: `cluster._make_xlsx_deterministic()` normalises those to
+  a fixed constant. **Both batches now regenerate 100% byte-identical across hash seeds** (verified;
+  test_cluster +1 = 37). The harness lives at `/tmp/determinism_test.py`. **The live `match_compounds`
+  assignment step is the ONLY non-deterministic part of a from-scratch run** (server-side; documented
+  earlier as 294-vs-292 amine re-reads = ±2 between two live runs) — local code is fully deterministic.
+- SECTIONS now `[cover, findings, coverage, composition, scrutiny, gka, families, changers, clusters,
+  methods]`. Final reports: `~/mascope-output/peaky/Orange-peeling-{Ur,Br}-CIMS_2026-06-20T1136*Z/`
+  (git ac08a33). Full suite green (26 test files). **STILL NOT folded:** enrichment-colored VK
+  (scratch); the offsets_ppm=null in batch_summary (IO.estimate_offset returns None — jitter_summary
+  has the real per-file offsets; live-path only, low priority).
 
 **Data path:** SDK-over-shell, creds at `~/.mascope/.env`; `io_mascope.connect()` reads the
 live file (the `mcp__mascope__*` tools hold a stale token). **<server> is behind a Cloudflare
