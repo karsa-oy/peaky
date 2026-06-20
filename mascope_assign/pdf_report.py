@@ -426,6 +426,23 @@ def composition(ctx, pdf):
     _close(pdf, fig)
 
 
+def gka(ctx, pdf):
+    """GKA homologous-series findings — a small-multiple grid of Kendrick
+    mass-defect plots, one per repeat-unit family (alkyl / oxidation / alkoxylate
+    / siloxane / fluorinated), each rotated to flatten its own series into
+    horizontal ladders. The print counterpart of the interactive rotating-GKA
+    widget. Rendered on demand from the merged ledger (neutral_formula only)."""
+    from . import gka_figure as GK
+    merged = ctx.get("merged")
+    if merged is None or "neutral_formula" not in getattr(merged, "columns", []) \
+            or not len(merged):
+        return
+    png = os.path.join(ctx["out_dir"], f"gka_{ctx['tag']}.png")
+    GK.render_gka(merged, png, title=ctx.get("batch_name") or ctx["label"])
+    ctx["fig"]["gka"] = png
+    _image_page(pdf, png, "")           # figure carries its own title
+
+
 def families(ctx, pdf):
     for p in ctx["fig"].get("changing", []):
         _image_page(pdf, p, "")                         # A4-portrait page, own title
@@ -440,14 +457,18 @@ def families(ctx, pdf):
     big = [c for c in sizes.index if sizes[c] >= 3]      # only the PLOTTED clusters
     singletons = int((sizes < 3).sum())
     lines = [("h", f"Co-varying clusters ({len(big)} with >=3 members)"), ("gap", 0.3),
-             ("m", "  cluster   n   median O/C   top members (by intensity)"),
+             ("dim", "members = ion channels (a neutral's [M+H]+ / cluster / adduct ions are clustered "
+                     "separately — they often don't co-vary; see the per-cluster workbook for the breakdown)"),
+             ("gap", 0.3),
+             ("m", "  cluster   n   median O/C   top neutral formulas (by intensity)"),
              ("gap", 0.2)]
     for cid in big:
         g = cc[cc.cluster == cid]
         ocs = [cnt.get("O", 0) / cnt.get("C", 1) for cnt in
                (C.parse_formula(str(f)) for f in g["neutral_formula"]) if cnt.get("C", 0)]
         oc = np.median(ocs) if ocs else float("nan")
-        top = ", ".join(g.sort_values("median_cps", ascending=False)["neutral_formula"].head(4))
+        top = ", ".join(g.sort_values("median_cps", ascending=False)["neutral_formula"]
+                        .drop_duplicates().head(4))
         lines.append(("m", f"  {int(cid):>5}   {len(g):>2}     {oc:>5.2f}      {top}"))
     if singletons:
         lines += [("gap", 0.5),
@@ -495,7 +516,7 @@ def methods(ctx, pdf):
     _close(pdf, fig)
 
 
-SECTIONS = [cover, coverage, composition, families, clusters, methods]
+SECTIONS = [cover, coverage, composition, gka, families, clusters, methods]
 
 
 def build(out_dir: str, *, tag: str, label: str, ts_path: str | None = None,

@@ -21,14 +21,50 @@ that clears after 15-30 min of NO traffic (polling EXTENDS it). For a blocked li
   fell back to [M-H]- = wrong polarity).
 - `cluster.py` — TIC/reagent-norm log-correlation, COMPLETE linkage r>0.6, signed distance
   (anti-phase stays apart) → `render_a4` A4-portrait paginated panels (ALL clusters + a
-  "remaining peaks" overview); `cluster_rows(maxc=None)`.
+  "remaining peaks" overview); `cluster_rows(maxc=None)`. **FLATNESS GATE (NEW, user 2026-06-20):**
+  `split_varying(traces, cols, cv_min=FLAT_CV)` pulls flat traces (cv<`FLAT_CV`=0.30) OUT before
+  correlation clustering — flat traces have no reliable shape so their pairwise r is noise and they
+  shattered into many spurious n3-4 clusters. The flat set is bunched into ONE `render_flat_panel`
+  overview (overlaid traces + median; lists members if ≤72 else count + CSV). Wired in `run_clusters.py`
+  for the FLAT set (was 42 intensity-band clusters → 1 panel) and the UNASSIGNED set (had NO cv gate →
+  Ur 40 clusters → 5 real clusters r̄0.81-0.96 + 1 flat panel; 365/408 bins were flat noise). The
+  CHANGING set is already cv≥0.30 so it IS the varying side (unchanged). `FLAT_CV` is the tunable knob
+  (unassigned median cv 0.16, so 0.30 is aggressive — keeps only clear movers; lower it to keep weak
+  coherent families). Driver also nukes stale `clusters_*_p*.png` first (shorter run can't orphan pages).
+- **PER-ION CLUSTERING + CHANNEL-AGREEMENT QC (NEW, user 2026-06-20):** assigned analytes now cluster
+  PER ION CHANNEL (formula+adduct), NOT the per-neutral SUM, because a neutral's channels often diverge
+  in time — `analyte_viz.channel_agreement` showed **Ur 44% / Br 22%** of multi-channel neutrals have
+  their TWO BRIGHTEST channels disagree (r<0.4); reagent-cluster ions (urea/Br-cluster) track
+  analyte×reagent so they part from the direct [M+H]+/[M-H]- channel when reagent drifts (many anti-
+  correlate, e.g. Ur C10H22O4 r=-0.77). `analyte_viz.ion_traces` (one trace per ion, no summing) +
+  `ion_label`/`ADDUCT_SUFFIX` (C6H14O4+Ur⁺). Driver clusters per-ion → Ur 51 neutrals now split their
+  channels across different clusters (the divergence, correctly separated). Legend = formula+adduct
+  (match-score), ion-count DROPPED. `cluster.write_cluster_workbook` → per-cluster XLSX (summary sheet +
+  ONE TAB PER CLUSTER: neutral_formula / channel / m/z / match_score / tier / median_cps / cv).
+  `channel_agreement_<tag>.csv` QC output. The families report page notes members=ion-channels.
 - `analyte_viz.py` — Van Krevelen (organic + `render_van_krevelen_full` = every assigned peak by
   CHO/CHON/CHOS backbone, Si/F/halogen folded in) + `attach_dynamics(bin_minutes=)` (short-batch).
-- `pdf_report.py` — STANDARD ITERABLE report: `SECTIONS=[cover, coverage, composition, families,
-  clusters, methods]`, ctx loaded once by `load_context`. "Assignment quality" page = match-score-
-  by-tier + mass-accuracy box (Id/Cand/isotopologue) + assigned-vs-unassigned + per-ADDUCT channels
-  with signal%. Cover has batch name + skill version (git sha). Cluster legend = `formula
-  (ion-channels / isotope-peaks / match-score)`.
+- `pdf_report.py` — STANDARD ITERABLE report: `SECTIONS=[cover, coverage, composition, gka,
+  families, clusters, methods]`, ctx loaded once by `load_context`. "Assignment quality" page =
+  match-score-by-tier + mass-accuracy box (Id/Cand/isotopologue) + assigned-vs-unassigned +
+  per-ADDUCT channels with signal%. Cover has batch name + skill version (git sha). Cluster legend
+  = `formula (ion-channels / isotope-peaks / match-score)`. The `gka` section renders
+  `gka_figure.render_gka` on demand from the merged ledger (also drops a standalone `gka_<tag>.png`).
+- `gka_figure.py` (NEW, session 3 2026-06-20) — STATIC GKA findings page, the print counterpart of
+  the rotating-GKA widget (`scripts/gka_widget.py`). Small-multiple grid of Kendrick mass-defect
+  plots, ONE PER repeat-unit FAMILY (alkyl CH2 / oxidation O,CO,CO2,H2O,C2H2O / alkoxylate
+  C2H4O,C3H6O / siloxane C2H6OSi / fluorinated CF2), each rotated to its own base so that family's
+  homologous series FLATTEN into horizontal ladders, over a grey cloud of every assigned neutral +
+  a family-rollup bar. Format chosen w/ user: grey cloud (not DBE/backbone-coloured), per-family
+  small-multiples (not 1 CH2 panel, not coloured-by-family ladders), full y-range. Pure
+  `detect_series` / `family_summary` / `kmd`; needs only `neutral_formula` (merged OR single-file
+  ledger). CH2-over-detection handled by highlighting only the longest `top_chains=10` series
+  ≥`highlight_min_len=5` per panel. Test `tests/test_gka_figure.py` (13 checks). Built into Orange
+  Ur+Br reports (`~/mascope-output/gka-iter/` has the iteration PNGs v1→v5). **v5 (user review):**
+  each panel now highlights ONLY its own base-unit series (every ladder horizontal by construction —
+  a TILTED line had meant a folded-in non-base unit, e.g. C3H6O under the C2H4O base); EMPTY families
+  (siloxane/CF2 on orange) are DROPPED via a dynamic ceil((n+1)/2)×2 grid; the rollup bar is now
+  base-unit-consistent with the panels (oxidation = 72 O-series, not the 251 O+CO+CO2+H2O family count).
 - `cleanup.prefer_amine_over_ammonium(ledger, ts_peaks=, r_min=0.7)` — positive urea-CIMS: re-read
   [M+NH4]+ as [M+H]+ of the +NH3 amine (SAME ion) UNLESS the NH4 trace co-varies (r>=0.7) with the
   [M+H]+/urea parent OR the amine is valence-impossible (forced). Wired in assign_batch (merged level).
@@ -53,8 +89,9 @@ deferred_rerun, all in `~/mascope-output/orange-assign/`.
    → create the GitHub remote + push (none yet; .env is outside the repo, .gitignore covers parquet/log/npy).
 4. Binning max-width split guard in `timeseries.build_matrix` (single-linkage chains on dense/drifting data).
 
-**Tests: 22 files green** (sampling 19, assign_batch 12, cluster 14, pdf_report 10, cleanup 29,
-analyte_viz 11, io_mascope 21, …). Run `python3 tests/test_*.py`. WAF: don't run scoring CONCURRENTLY.
+**Tests: 23 files green** (sampling 19, assign_batch 12, cluster 25, pdf_report 10, cleanup 29,
+analyte_viz 15, io_mascope 21, gka_figure 13, …). Run `python3 tests/test_*.py`. WAF: don't run
+scoring CONCURRENTLY.
 
 ---
 

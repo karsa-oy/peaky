@@ -156,6 +156,129 @@ def time_traces(ts_peaks: pd.DataFrame, formulas, adducts, *, mode: str = "raw",
     return grid, pd.DataFrame(out)
 
 
+# compact per-ion channel labels (formula + adduct suffix), e.g. C6H14O4+Ur⁺
+ADDUCT_SUFFIX = {
+    "[M+H]+": "+H⁺", "[M-H]-": "−H⁻",
+    "[M+(CH4N2O)H]+": "+Ur⁺", "[M+NH4]+": "+NH₄⁺", "[M+Na]+": "+Na⁺",
+    "[M+Br]-": "+Br⁻", "[M+HBr+Br]-": "+Br₂H⁻", "[M+Br2]-": "+Br₂⁻",
+    "[M+CO3]-": "+CO₃⁻", "[M+HBr+CO3]-": "+HBrCO₃⁻", "[M+HSO4]-": "+HSO₄⁻",
+    "[M+Cl]-": "+Cl⁻", "[M+I]-": "+I⁻",
+}
+
+
+def ion_label(formula, adduct) -> str:
+    """Compact ion name: neutral formula + a short adduct suffix (C6H14O4+Ur⁺)."""
+    return f"{formula}{ADDUCT_SUFFIX.get(str(adduct), ' ' + str(adduct))}"
+
+
+def _bin_for_mz(arr, idx, cols_set, mz, tol=8.0):
+    """Index of the single TS bin closest to `mz` within `tol` ppm, or None."""
+    i = bisect.bisect_left(arr, mz)
+    best, bestd = None, tol
+    for j in (i - 1, i):
+        if 0 <= j < len(arr):
+            d = abs(arr[j] - mz) / mz * 1e6
+            if d <= bestd and idx[j] in cols_set:
+                best, bestd = idx[j], d
+    return best
+
+
+def ion_traces(ts_peaks: pd.DataFrame, ion_mz_map: dict, *, mode: str = "raw",
+               bin_minutes: int = DEFAULT_BIN_MIN, reagent_mzs=None
+               ) -> tuple[np.ndarray, pd.DataFrame]:
+    """One trace PER ION (no summing across adducts — the opposite of time_traces).
+    `ion_mz_map` maps an arbitrary key -> the ion's measured m/z; each key gets the
+    binned-median trace of the single TS bin matching that m/z (<=8 ppm). Keeping
+    channels separate lets divergent ion channels of one neutral cluster apart."""
+    ts_peaks = ts_peaks.copy()
+    ts_peaks["datetime_utc"] = pd.to_datetime(ts_peaks["datetime_utc"], utc=True)
+    tstamp = ts_peaks.groupby("sample_item_id")["datetime_utc"].first()
+    mat, bin_mz = TS.build_matrix(ts_peaks)
+    mat = mat.reindex(tstamp.sort_values().index)
+    hr = (tstamp.reindex(mat.index) - tstamp.min()).dt.total_seconds().values / 3600.0
+    bm = bin_mz.sort_values(); arr = bm.values; idx = bm.index.values
+    cols_set = set(mat.columns)
+    if mode == "reagent" and reagent_mzs:
+        rt = TS.reagent_total(mat, bin_mz, reagent_mzs)
+    elif mode == "tic":
+        rt = mat.sum(axis=1)
+    else:
+        rt = None
+    grid = np.arange(0, np.nanmax(hr) + bin_minutes / 60.0, bin_minutes / 60.0)
+    digit = np.digitize(hr, grid)
+    out = {}
+    for key, mz in ion_mz_map.items():
+        b = _bin_for_mz(arr, idx, cols_set, float(mz))
+        if b is None:
+            out[key] = pd.Series(np.nan, index=range(1, len(grid) + 1))
+            continue
+        s = mat[b]
+        if rt is not None:
+            s = s / rt.replace(0, np.nan)
+        out[key] = pd.Series(s.values).groupby(digit).median().reindex(range(1, len(grid) + 1))
+    return grid, pd.DataFrame(out)
+
+
+def _logcorr(a, b, min_points: int = 8):
+    """log10 Pearson r over the time points where BOTH traces are positive."""
+    df = pd.DataFrame({"a": np.asarray(a, float), "b": np.asarray(b, float)})
+    df = df[(df > 0).all(axis=1)]
+    if len(df) < min_points:
+        return np.nan, len(df)
+    lg = np.log10(df)
+    return float(lg["a"].corr(lg["b"])), len(df)
+
+
+def channel_agreement(ts_peaks: pd.DataFrame, ion_table: pd.DataFrame, *,
+                      floor: float = 150.0, min_points: int = 8,
+                      bin_minutes: int = DEFAULT_BIN_MIN) -> pd.DataFrame:
+    """QC: do the ion channels of the SAME neutral track in time? (We otherwise
+    SUM them — `time_traces`.) For every neutral with >=2 testable channels
+    (>=min_points finite points AND median >= floor cps), correlate every channel
+    pair (log10). Returns one row per neutral: n_channels, worst_r (least-agreeing
+    pair), top2_r (the two BRIGHTEST channels — the pair that dominates the sum),
+    channels (list), verdict ('agree' r>=0.7 / 'marginal' / 'disagree' r<0.4 on
+    worst_r). `ion_table` needs neutral_formula, adduct, mz."""
+    t = ion_table.dropna(subset=["neutral_formula"]).copy()
+    t = t[t["neutral_formula"].astype(str) != ""]
+    t["ckey"] = t["neutral_formula"].astype(str) + "|" + t["adduct"].astype(str)
+    grid, traces = ion_traces(ts_peaks, dict(zip(t["ckey"], t["mz"])),
+                              mode="raw", bin_minutes=bin_minutes)
+    rows = []
+    for f, g in t.groupby("neutral_formula"):
+        chans = []
+        for r in g.itertuples():
+            tr = traces[r.ckey] if r.ckey in traces else None
+            if tr is None:
+                continue
+            med = float(np.nanmedian(tr.values.astype(float)))
+            if tr.notna().sum() >= min_points and med >= floor:
+                chans.append((str(r.adduct), tr.values.astype(float), med))
+        if len(chans) < 2:
+            continue
+        prs = []
+        for i in range(len(chans)):
+            for j in range(i + 1, len(chans)):
+                rr, _ = _logcorr(chans[i][1], chans[j][1], min_points)
+                if not np.isnan(rr):
+                    prs.append(rr)
+        if not prs:
+            continue
+        top2 = sorted(chans, key=lambda c: -c[2])[:2]
+        t2, _ = _logcorr(top2[0][1], top2[1][1], min_points)
+        worst = float(min(prs))
+        rows.append({"neutral_formula": str(f), "n_channels": len(chans),
+                     "worst_r": round(worst, 3),
+                     "top2_r": (round(float(t2), 3) if not np.isnan(t2) else None),
+                     "channels": ", ".join(f"{a}~{m:.0f}" for a, _, m in
+                                           sorted(chans, key=lambda c: -c[2])),
+                     "verdict": "agree" if worst >= 0.7 else
+                                ("marginal" if worst >= 0.4 else "disagree")})
+    return pd.DataFrame(rows).sort_values("worst_r").reset_index(drop=True) if rows \
+        else pd.DataFrame(columns=["neutral_formula", "n_channels", "worst_r",
+                                   "top2_r", "channels", "verdict"])
+
+
 def attach_dynamics(analytes: pd.DataFrame, ts_peaks: pd.DataFrame, adducts, *,
                     mode: str = "raw", reagent_mzs=None,
                     bin_minutes: int = DEFAULT_BIN_MIN) -> pd.DataFrame:

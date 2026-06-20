@@ -28,6 +28,9 @@ from scipy.spatial.distance import squareform
 __version__ = "0.1.0"
 
 CHANGING = 0.30          # cv at/above which a trace is "changing"
+FLAT_CV = CHANGING       # cv BELOW which a trace is "flat / non-varying" and is
+                         # bunched out of correlation clustering (the gate knob —
+                         # lower it to keep weak-but-coherent families as clusters)
 DIST_T = 0.40            # 1-r cut: r > 0.6 merges
 MIN_POINTS = 8           # finite trace points needed to correlate
 MIN_MEMBERS = 3          # smallest reported cluster
@@ -79,6 +82,30 @@ def cluster(cm: pd.DataFrame, *, dist_t=DIST_T, link=LINK, min_members=MIN_MEMBE
     sizes = lab.value_counts()
     big = [int(c) for c in sizes.index if sizes[c] >= min_members]
     return lab, big
+
+
+def trace_cv(traces: pd.DataFrame, col) -> float:
+    """Coefficient of variation (std/mean) of a trace over its finite positive
+    points. 0.0 if the trace is empty/flat-at-zero. This is the 'does it vary'
+    metric — the same one the driver uses to split changing vs flat analytes."""
+    if col not in traces:
+        return 0.0
+    tr = pd.to_numeric(traces[col], errors="coerce").to_numpy()
+    tr = tr[np.isfinite(tr) & (tr > 0)]
+    m = tr.mean() if len(tr) else 0.0
+    return float(tr.std() / m) if m > 0 else 0.0
+
+
+def split_varying(traces: pd.DataFrame, cols, *, cv_min=FLAT_CV):
+    """Partition `cols` into (varying, flat) by trace CV. A flat trace (cv < cv_min)
+    has no reliable SHAPE — its pairwise correlation with anything is dominated by
+    noise, so flat traces spuriously shatter into many tiny clusters. Pull them out
+    BEFORE correlation clustering and bunch them into one 'flat / non-varying' group
+    instead. Returns (varying, flat) preserving input order, deduped."""
+    varying, flat = [], []
+    for c in dict.fromkeys(cols):
+        (varying if trace_cv(traces, c) >= cv_min else flat).append(c)
+    return varying, flat
 
 
 def threshold_scan(cm: pd.DataFrame, ts=(0.3, 0.4, 0.5, 0.6, 0.7), link=LINK):
@@ -310,6 +337,103 @@ def remaining_row(cols, lab, big, traces_raw, grid):
     mz = smooth(Z.mean(axis=1).values)
     ph = float(grid[int(np.nanargmax(mz))])
     return (f"remaining {len(rem)} peaks", rem, float("nan"), shape_of(mz), ph), rem
+
+
+def _sheet_name(cid, used: set) -> str:
+    """A valid, unique Excel sheet name (<=31 chars, no []:*?/\\)."""
+    base = (f"c{int(cid)}" if not isinstance(cid, str)
+            else "".join(ch for ch in cid if ch not in "[]:*?/\\")[:28]) or "cluster"
+    name = base[:31]
+    k = 1
+    while name in used:
+        suf = f"_{k}"; name = base[:31 - len(suf)] + suf; k += 1
+    used.add(name)
+    return name
+
+
+def write_cluster_workbook(rows, out_xlsx, *, meta=None, item_label=None,
+                           member_cols=None, title="clusters"):
+    """Per-cluster Excel workbook: a 'summary' sheet (one row per cluster: id, n,
+    shape, peak hour, mean r) + ONE sheet PER CLUSTER listing its members. `rows`
+    is the cluster_rows output [(cid, members, rbar, shape, peak_hr), ...]; `meta`
+    maps a member key -> a dict of columns (e.g. neutral_formula / channel / m_z /
+    match_score / tier). `member_cols` orders/selects those columns. Returns the
+    path (or None if no rows)."""
+    if not rows:
+        return None
+    summary = pd.DataFrame([{
+        "cluster": (cid if isinstance(cid, str) else int(cid)), "n": len(mem),
+        "shape": sh, "peak_hour": round(ph, 2),
+        "mean_r": (round(rbar, 3) if rbar == rbar else None),
+    } for cid, mem, rbar, sh, ph in rows])
+    used: set = set()
+    with pd.ExcelWriter(out_xlsx, engine="openpyxl") as xw:
+        summary.to_excel(xw, sheet_name="summary", index=False)
+        for cid, mem, rbar, sh, ph in rows:
+            recs = []
+            for m in mem:
+                d = {"member": (item_label(m) if item_label else str(m))}
+                if meta:
+                    d.update(meta.get(m, {}))
+                recs.append(d)
+            df = pd.DataFrame(recs)
+            if member_cols:
+                cols = ["member"] + [c for c in member_cols if c in df.columns]
+                df = df[[c for c in cols if c in df.columns]]
+            df.to_excel(xw, sheet_name=_sheet_name(cid, used), index=False)
+    return out_xlsx
+
+
+def render_flat_panel(cols, traces_raw, grid, out, item_label, *,
+                      label="flat / non-varying", ylim=None, list_max=72, title=""):
+    """One A4-portrait page: a SINGLE overview panel of every 'flat / non-varying'
+    trace overlaid (raw cps, log y) + their median. These were pulled OUT of
+    correlation clustering (flat traces have no reliable shape, so they only
+    bloat the cluster count). If few enough (<= list_max) the members are listed
+    below; otherwise just the count (the full membership is in the set's CSV).
+    Returns the path, or None for an empty set."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    if cols is None or not len(cols):
+        return None
+    listing = len(cols) <= list_max
+    PAGE_W, PAGE_H = 8.27, 11.69
+    fig = plt.figure(figsize=(PAGE_W, PAGE_H))
+    fig.text(0.075, 0.955, f"{title}", fontsize=12, weight="bold", color="#222")
+    fig.text(0.075, 0.935, f"n={len(cols)} · cv < {FLAT_CV:g} — pulled from correlation "
+             "clustering (flat traces have no reliable shape, so they only bloat the cluster count)",
+             fontsize=8.5, color="#666")
+    # taller panel when there's no member list to show below it
+    ax = (fig.add_axes([0.10, 0.50, 0.86, 0.36]) if listing
+          else fig.add_axes([0.10, 0.34, 0.86, 0.52]))
+    import warnings
+    M = []
+    for c in cols:
+        y = traces_raw[c].values.astype(float)
+        yy = np.where(y > 0, y, np.nan)
+        ax.plot(grid, yy, color="#888780", lw=0.6, alpha=0.30)
+        M.append(yy)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)   # all-NaN time bins are fine
+        med = np.nanmedian(np.array(M), axis=0)
+    ax.plot(grid, med, color="#111", lw=2.2, alpha=0.9, zorder=5, label="median")
+    ax.set_yscale("log"); ax.set_xlim(0, float(grid[-1]))
+    if ylim:
+        ax.set_ylim(*ylim)
+    ax.set_ylabel("cps", fontsize=9); ax.set_xlabel("hour of experiment (UTC)", fontsize=9)
+    ax.grid(alpha=0.18, which="both"); ax.tick_params(labelsize=9)
+    ax.legend(fontsize=9, loc="upper right")
+    if listing:
+        w = _wrap([item_label(c) for c in cols], width=96)
+        tx = fig.add_axes([0.075, 0.06, 0.89, 0.40]); tx.axis("off")
+        tx.text(0, 1, "\n".join(w), va="top", ha="left", fontsize=8.8,
+                family="monospace", color="#333")
+    else:
+        fig.text(0.075, 0.30, f"{len(cols)} peaks — full membership in the set CSV.",
+                 fontsize=9, color="#666")
+    fig.savefig(out, dpi=200); plt.close(fig)
+    return out
 
 
 def render_clusters(rows, grid, traces_z, traces_raw, item_label, out_prefix, *,

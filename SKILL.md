@@ -123,13 +123,28 @@ file otherwise falls back to `[M-H]-` = wrong polarity). For positive urea-CIMS,
 - **`cluster.py`** — TIC/reagent-normalised log-correlation, COMPLETE linkage at r>0.6
   (signed distance keeps anti-phase apart) → `render_a4` A4-portrait paginated panel
   figures (all clusters + a "remaining peaks" overview, panel legend = `formula
-  (ion-channels / isotope-peaks / match-score)`).
+  (ion-channels / isotope-peaks / match-score)`). **Flatness gate:** `split_varying(traces,
+  cols, cv_min=FLAT_CV)` pulls flat traces (cv<0.30, no reliable shape) OUT of clustering and
+  `render_flat_panel` bunches them into ONE overview (so flat noise doesn't shatter into spurious
+  n3-4 clusters). `FLAT_CV` is the tunable knob. **Per-ion:** assigned analytes cluster PER ION
+  CHANNEL (formula+adduct), not the per-neutral sum (`analyte_viz.ion_traces`), because channels
+  often diverge in time (`analyte_viz.channel_agreement` QC: Ur 44% / Br 22% of multi-channel
+  neutrals' brightest pair disagree). Legend = `formula+adduct (score)`. `cluster.write_cluster_workbook`
+  emits a per-cluster XLSX (one tab per cluster: formula / channel / m/z / match_score / tier).
 - **`analyte_viz.render_van_krevelen_full`** — every assigned peak by CHO/CHON/CHOS
   backbone (Si/F/halogen folded into the backbone, not split out).
 - **`pdf_report.build(out_dir, tag=, label=, ts_path=, batch_name=)`** — the STANDARD
-  iterable PDF report. Structure = `SECTIONS = [cover, coverage, composition, families,
+  iterable PDF report. Structure = `SECTIONS = [cover, coverage, composition, gka, families,
   clusters, methods]`, each a `section(ctx, pdf)` fn over a context loaded once by
   `load_context`. To change the report, edit/reorder a section — nothing else couples.
+  The `gka` section renders `gka_figure.render_gka` on demand from the merged ledger.
+- **`gka_figure.render_gka(ledger, png, …)`** — STATIC GKA findings page (print
+  counterpart of the rotating-GKA widget): a small-multiple grid of Kendrick mass-defect
+  plots, one per repeat-unit FAMILY (alkyl CH2 / oxidation O,CO,CO2,H2O / alkoxylate
+  C2H4O,C3H6O / siloxane / fluorinated CF2), each rotated to its own base so that family's
+  homologous series flatten into horizontal ladders, over a grey cloud of every assigned
+  neutral. Pure data fns: `detect_series` / `family_summary` / `kmd`. Needs only
+  `neutral_formula` (works on the merged ledger or a single-file ledger).
 
 Reference drivers (live, scratch — fold into a package CLI when sharing) live in
 `~/mascope-output/orange-assign/`: `run_orange.py` (assign), `run_clusters.py`,
@@ -212,8 +227,9 @@ already open. `run_assignment.py` emits one per run.
 | `cleanup.py` | residual cleanup: isotope-confirmed recovery, bromide-cluster labelling, ringing-artifact flagging, satellite reclaim, **`prefer_amine_over_ammonium`** (positive: re-read uncorroborated/non-co-varying `[M+NH4]+` as the `[M+H]+` amine) |
 | **`sampling.py`** | THE RULE — `select_representative_samples` (5 evenly-time-spaced + max-TIC) for batch assignment |
 | **`assign_batch.py`** | `run(batch\|peaks, ts_peaks=, amine_r_min=)` — assign the reps, keep per-file ledgers, offset-aware merge (`align`) + jitter table; applies the positive amine gate at merge level |
-| **`cluster.py`** | correlation clustering (log-corr, COMPLETE linkage r>0.6, signed distance) → `render_a4` A4-portrait paginated panels + remaining-peaks overview |
-| **`pdf_report.py`** | STANDARD iterable PDF report — `build()` over `SECTIONS=[cover, coverage, composition, families, clusters, methods]`, ctx loaded once |
+| **`cluster.py`** | correlation clustering (log-corr, COMPLETE linkage r>0.6, signed distance) → `render_a4` A4-portrait paginated panels + remaining-peaks overview. **Flatness gate** `split_varying`/`render_flat_panel` (cv<`FLAT_CV` bunched, not clustered) |
+| **`pdf_report.py`** | STANDARD iterable PDF report — `build()` over `SECTIONS=[cover, coverage, composition, gka, families, clusters, methods]`, ctx loaded once |
+| **`gka_figure.py`** | STATIC GKA findings page: per-family small-multiple Kendrick mass-defect plots (`render_gka`), each rotated to flatten its homologous series into horizontal ladders. Pure `detect_series`/`family_summary`/`kmd`. Print counterpart of `scripts/gka_widget.py` |
 | `profiles.py` | `ReagentProfile` (Br/Ur: polarity/adducts/normaliser/context) + `resolve('auto')` |
 | `timeseries.py` | **time-resolved disposition** (optional, `--ts-batch`): reagent-normalise a batch's per-sample peaks, cv_norm + family co-variation -> classify each M0 inlet-flat-background vs ambient analyte, demote flat di-bromide/CO3 background |
 | `tiers.py` | Identified/Candidate tiering (margin, density, lattice/BrCl, **mass-error gate, CO₃-channel gate, degeneracy-aware**) |

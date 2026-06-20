@@ -80,5 +80,42 @@ check("ts payload lists only the changing analyte(s), with channel(s)",
 g2, tr2 = V.time_traces(ts, ["C40H80O2"], ["[M+H]+"])   # not in the synthetic ts
 check("unmatched formula -> all-NaN trace (no crash)", tr2["C40H80O2"].isna().all())
 
+# --- per-ion: ion_label / ion_traces / channel_agreement ---------------------
+check("ion_label uses compact adduct suffix",
+      V.ion_label("C6H14O4", "[M+H]+") == "C6H14O4+H⁺"
+      and V.ion_label("C6H14O4", "[M+(CH4N2O)H]+") == "C6H14O4+Ur⁺")
+
+# two neutrals, each in two channels: one neutral's channels co-vary (AGREE),
+# the other's anti-phase (DISAGREE) -> exactly the divergence per-ion exposes.
+nN = 12
+hrs = [f"2025-10-02 {i:02d}:00:00" for i in range(nN)]
+rise = np.linspace(1e3, 5e4, nN); fall = np.linspace(5e4, 1e3, nN)
+ION = lambda f, a: C.ion_mz(f, a)
+recs = []
+for i, t in enumerate(hrs):
+    recs += [  # AGREE: both channels of C9H19NO rise together
+        dict(sample_item_id=f"x{i}", datetime_utc=t, mz=ION("C9H19NO", "[M+H]+"), height=rise[i]),
+        dict(sample_item_id=f"x{i}", datetime_utc=t, mz=ION("C9H19NO", "[M+Na]+"), height=rise[i] * 0.5),
+        # DISAGREE: C7H16O3 [M+H]+ rises while [M+Na]+ falls
+        dict(sample_item_id=f"x{i}", datetime_utc=t, mz=ION("C7H16O3", "[M+H]+"), height=rise[i]),
+        dict(sample_item_id=f"x{i}", datetime_utc=t, mz=ION("C7H16O3", "[M+Na]+"), height=fall[i])]
+ts2 = pd.DataFrame(recs)
+ion_tab = pd.DataFrame([
+    dict(neutral_formula="C9H19NO", adduct="[M+H]+", mz=ION("C9H19NO", "[M+H]+")),
+    dict(neutral_formula="C9H19NO", adduct="[M+Na]+", mz=ION("C9H19NO", "[M+Na]+")),
+    dict(neutral_formula="C7H16O3", adduct="[M+H]+", mz=ION("C7H16O3", "[M+H]+")),
+    dict(neutral_formula="C7H16O3", adduct="[M+Na]+", mz=ION("C7H16O3", "[M+Na]+"))])
+imap = {f"{r.neutral_formula}|{r.adduct}": r.mz for r in ion_tab.itertuples()}
+g3, itr = V.ion_traces(ts2, imap, bin_minutes=60)
+check("ion_traces: one separate trace per ION (no summing)",
+      set(itr.columns) == set(imap) and itr["C9H19NO|[M+H]+"].notna().sum() >= 8)
+ca = V.channel_agreement(ts2, ion_tab, floor=10, bin_minutes=60).set_index("neutral_formula")
+check("channel_agreement: co-varying channels -> 'agree'",
+      ca.loc["C9H19NO", "verdict"] == "agree" and ca.loc["C9H19NO", "worst_r"] > 0.7,
+      ca.loc["C9H19NO"].to_dict())
+check("channel_agreement: anti-phase channels -> 'disagree'",
+      ca.loc["C7H16O3", "verdict"] == "disagree" and ca.loc["C7H16O3", "worst_r"] < 0.4,
+      ca.loc["C7H16O3"].to_dict())
+
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)
