@@ -133,9 +133,10 @@ check("big_changers: picks the big spiker, not the flat one",
 check("big_changers: reports a large fold and a peak hour in the spike window",
       ch and ch[0][1] >= CL.BIG_CHANGE_FOLD and gridc[1] <= ch[0][2] <= gridc[5], ch)
 with tempfile.TemporaryDirectory() as d:
-    out = CL.render_changers(ch, tc, gridc, f"{d}/ch.png", lambda c: str(c), title="t")
-    check("render_changers: writes a PNG", bool(out) and os.path.exists(out) and os.path.getsize(out) > 4000)
-    check("render_changers([]) -> None", CL.render_changers([], tc, gridc, f"{d}/x.png", str) is None)
+    out = CL.render_changers(ch, tc, gridc, f"{d}/ch", lambda c: str(c), title="t")
+    check("render_changers: writes A4 page PNG(s) (list of paths)",
+          isinstance(out, list) and out and os.path.exists(out[0]) and os.path.getsize(out[0]) > 4000, out)
+    check("render_changers([]) -> []", CL.render_changers([], tc, gridc, f"{d}/x", str) == [])
 
 # --- per-cluster workbook (one tab per cluster) ------------------------------
 wb_rows = [(1, ["A", "B", "C"], 0.9, "rise", 0.5),
@@ -173,6 +174,21 @@ with tempfile.TemporaryDirectory() as d:
     check("workbook byte-identical for same data + same run time", H(a) == H(b),
           f"{H(a)[:12]} vs {H(b)[:12]}")
     check("workbook differs when the run time differs (stamp not frozen)", H(a) != H(c))
+
+    # render_changers: A4-PORTRAIT page(s) so the section keeps the report's format
+    cg = np.linspace(0, 1.6, 40)
+    ctr = pd.DataFrame({"C10H16O2|[M+H]+": np.r_[np.full(30, 600.0), np.linspace(600, 2400, 10)],
+                        "C9H14O5|[M-H]-": np.r_[np.full(20, 800.0), np.linspace(800, 200, 20)]})
+    cpaths = CL.render_changers([("C10H16O2|[M+H]+", 4.0, 1.6), ("C9H14O5|[M-H]-", 4.0, 0.1)],
+                                ctr, cg, f"{d}/chg", lambda k: k.split("|")[0],
+                                title="Large standalone changes — 2 channels")
+    check("render_changers returns a list of page paths",
+          isinstance(cpaths, list) and len(cpaths) == 1 and os.path.exists(cpaths[0]), cpaths)
+    import matplotlib.image as _mpimg
+    cimg = _mpimg.imread(cpaths[0])
+    check("render_changers page is A4 portrait (taller than wide)", cimg.shape[0] > cimg.shape[1],
+          cimg.shape)
+    check("render_changers([]) -> []", CL.render_changers([], ctr, cg, f"{d}/e", str) == [])
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

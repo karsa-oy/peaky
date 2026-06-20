@@ -677,9 +677,10 @@ def families(ctx, pdf):
 
 def changers(ctx, pdf):
     """Large standalone changes: single channels that change a lot (>= fold) with no
-    family — pulled out so they're not buried in the flat panel (user-requested)."""
+    family — pulled out so they're not buried in the flat panel (user-requested).
+    A4-portrait pages (own title), embedded like the other cluster figures."""
     for p in ctx["fig"].get("changers", []):
-        _image_page(pdf, p, "", native=True, src_dpi=150)   # small-multiples, own title
+        _image_page(pdf, p, "")             # fit-to-A4 (the PNG is already A4 portrait)
 
 
 def clusters(ctx, pdf):

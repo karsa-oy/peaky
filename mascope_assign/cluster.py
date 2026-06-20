@@ -563,16 +563,16 @@ def big_changers(traces: pd.DataFrame, cols, grid, *, fold_min=BIG_CHANGE_FOLD, 
     return out
 
 
-def render_changers(items, traces_raw, grid, out, item_label, *, ncol=4, cap=48,
-                    title="", dpi=150):
-    """Small-multiples of the big standalone changers — one mini-plot per channel
-    (raw cps, log y) titled `formula+adduct  Nx · peak hour`, so each interesting
-    trace is shown on its own. `items` = big_changers() output. Returns the path.
-
-    The column count is capped at the number of channels (so a single changer is a
-    clean square panel, not a wide strip with empty cells), and the log y-axis snaps
-    to whole decades with only major ticks labelled — a near-flat trace otherwise
-    crams colliding 2..9x10^n minor labels into a short panel."""
+def render_changers(items, traces_raw, grid, out_prefix, item_label, *, cap=48,
+                    title="", dpi=200):
+    """A4-PORTRAIT small-multiples of the big standalone changers, so this section
+    keeps the report's A4 page format (it used to embed a native-sized strip that
+    broke it). One mini-plot per channel (raw cps, log y) titled `formula+adduct
+    Nx · peak hour`; panels are packed top-down at a FIXED legible size (1 column for
+    <=2 channels, else 2) and paginated when an A4 page fills. The log y-axis snaps to
+    whole decades with only MAJOR ticks labelled (a near-flat trace otherwise crams
+    colliding 2..9x10^n minor labels). Writes <out_prefix>_p<i>.png; returns the
+    list of page paths (matching render_a4)."""
     import math
 
     import matplotlib
@@ -581,39 +581,47 @@ def render_changers(items, traces_raw, grid, out, item_label, *, ncol=4, cap=48,
     import matplotlib.ticker as mticker
     items = list(items)[:cap]
     if not items:
-        return None
-    ncol = max(1, min(ncol, len(items)))             # no empty trailing columns
-    nrow = (len(items) + ncol - 1) // ncol
-    PW, PH = 3.7, 2.5                                 # per-panel inches (legible, square-ish)
-    fig, axes = plt.subplots(nrow, ncol, figsize=(PW * ncol, PH * nrow), squeeze=False)
-    for i, (c, fold, ph) in enumerate(items):
-        ax = axes[i // ncol][i % ncol]
-        y = traces_raw[c].to_numpy(float)
-        yp = np.where(y > 0, y, np.nan)
-        ax.plot(grid, yp, color="#1D9E75", lw=1.2, marker="o", ms=2.5)
-        ax.set_yscale("log"); ax.set_xlim(0, float(grid[-1]))
-        finite = yp[np.isfinite(yp)]
-        if finite.size:                              # snap y-limits to whole decades
-            lo, hi = float(np.nanmin(finite)), float(np.nanmax(finite))
-            c0 = 10.0 ** math.floor(math.log10(lo)) if lo > 0 else 1.0
-            c1 = 10.0 ** math.ceil(math.log10(hi)) if hi > 0 else c0 * 10
-            ax.set_ylim(c0, max(c1, c0 * 10))
-        ax.yaxis.set_major_locator(mticker.LogLocator(base=10, numticks=6))
-        ax.yaxis.set_minor_formatter(mticker.NullFormatter())   # kill colliding 2..9x labels
-        ax.grid(alpha=0.2, which="both"); ax.tick_params(labelsize=7)
-        ax.set_title(f"{item_label(c)}   {fold:.0f}× · h{ph:.1f}", fontsize=7.5, loc="left")
-        if i // ncol == nrow - 1:
-            ax.set_xlabel("hour (UTC)", fontsize=7)
-    for j in range(len(items), nrow * ncol):
-        axes[j // ncol][j % ncol].axis("off")
-    # size the suptitle to the FIGURE WIDTH so it never clips on a narrow (few-panel)
-    # figure — a single changer makes a ~3.7in-wide page the full 11pt title overruns.
-    figw = PW * ncol
-    fs = max(7.0, min(11.0, 0.92 * figw * 72.0 / (0.58 * max(len(title), 1))))
-    fig.suptitle(title, fontsize=fs, y=1 - 0.10 / (PH * nrow), x=0.02, ha="left")
-    fig.tight_layout(rect=[0, 0, 1, 1 - 0.42 / (PH * nrow)])
-    fig.savefig(out, dpi=dpi); plt.close(fig)
-    return out
+        return []
+    W, H = 8.27, 11.69                                    # A4 portrait (inches)
+    L, RM, TOPM, BOTM, GUT = 0.62, 0.40, 0.80, 0.45, 0.55
+    ncol = 1 if len(items) <= 2 else 2
+    panel_w = (W - L - RM - GUT * (ncol - 1)) / ncol
+    PANEL_H = 2.15 if ncol == 1 else 1.70                 # trace height (in)
+    TITLE_H, XLAB_H, VGAP = 0.30, 0.34, 0.24
+    pitch = TITLE_H + PANEL_H + XLAB_H + VGAP
+    rows_pp = max(1, int((H - TOPM - BOTM) // pitch))
+    per_page = rows_pp * ncol
+    pages = [items[i:i + per_page] for i in range(0, len(items), per_page)]
+    paths = []
+    for pi, page in enumerate(pages, 1):
+        fig = plt.figure(figsize=(W, H))
+        fig.text(L / W, (H - 0.45) / H, title, fontsize=11, weight="bold", color="#222")
+        if len(pages) > 1:
+            fig.text(1 - RM / W, (H - 0.45) / H, f"page {pi}/{len(pages)}",
+                     fontsize=10, color="#777", ha="right")
+        for k, (c, fold, ph) in enumerate(page):
+            r, cc = divmod(k, ncol)
+            ax_l = (L + cc * (panel_w + GUT)) / W
+            ax_b = (H - TOPM - r * pitch - TITLE_H - PANEL_H) / H
+            ax = fig.add_axes([ax_l, ax_b, panel_w / W, PANEL_H / H])
+            yp = np.where(traces_raw[c].to_numpy(float) > 0, traces_raw[c].to_numpy(float), np.nan)
+            ax.plot(grid, yp, color="#1D9E75", lw=1.2, marker="o", ms=2.5)
+            ax.set_yscale("log"); ax.set_xlim(0, float(grid[-1]))
+            finite = yp[np.isfinite(yp)]
+            if finite.size:                              # snap y-limits to whole decades
+                lo, hi = float(np.nanmin(finite)), float(np.nanmax(finite))
+                c0 = 10.0 ** math.floor(math.log10(lo)) if lo > 0 else 1.0
+                c1 = 10.0 ** math.ceil(math.log10(hi)) if hi > 0 else c0 * 10
+                ax.set_ylim(c0, max(c1, c0 * 10))
+            ax.yaxis.set_major_locator(mticker.LogLocator(base=10, numticks=6))
+            ax.yaxis.set_minor_formatter(mticker.NullFormatter())   # kill 2..9x labels
+            ax.grid(alpha=0.2, which="both"); ax.tick_params(labelsize=7.5)
+            ax.set_xlabel("hour (UTC)", fontsize=7.5); ax.set_ylabel("cps", fontsize=7.5)
+            ax.set_title(f"{item_label(c)}   {fold:.0f}× · h{ph:.1f}", fontsize=8.5, loc="left")
+        out = f"{out_prefix}_p{pi}.png"
+        fig.savefig(out, dpi=dpi); plt.close(fig)
+        paths.append(out)
+    return paths
 
 
 def render_flat_panel(cols, traces_raw, grid, out, item_label, *,
