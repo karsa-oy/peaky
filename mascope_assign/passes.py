@@ -45,7 +45,7 @@ class PassConfig:
     # can never be scored); match_compounds keeps its 5 ppm window so it still
     # attributes real 29Si/81Br satellites, and the z-gate owns ppm rejection.
     search_ppm: float = 3.0          # grid enumeration tolerance
-    height_cutoff: float = 500.0
+    height_cutoff: float = 100.0
     limit_per_peak: int = 25
     workers: int = 12
     # confidence thresholds (on the RAW min(ion,compound) score)
@@ -672,6 +672,17 @@ def _known_species(polarity: str = "negative") -> dict:
             "contaminant:silanediol": contam}
 
 
+# ³⁷Cl - ³⁵Cl mass spacing (for ledger-side ³⁷Cl-envelope confirmation).
+_D37CL = 1.9970499
+# Pass-0 known-species families whose identity is ISOTOPE-confirmable (a Cl/Br/S
+# envelope), so a real isotope-laddered peak may be committed even when the
+# server's aggregate compound_score is too low to anchor it (the ¹⁵N-phantom /
+# wide-envelope score depression documented for ¹⁵N-labelled poly-Cl). The
+# monoisotopic F/P families (perfluoroacid, organophosphate) are deliberately NOT
+# recoverable -- they have no isotope twin to corroborate a mass coincidence.
+_RECOVERABLE_KNOWN_FAMS = {"chlorinated_paraffin"}
+
+
 def run_pass0_known(client, sample_id: str, ledger: pd.DataFrame,
                     profile, cfg: PassConfig, adducts: list[str], *,
                     score_fn=None, log=print) -> dict:
@@ -808,7 +819,128 @@ def run_pass0_known(client, sample_id: str, ledger: pd.DataFrame,
                     continue
         except L.LedgerError:
             continue
+    # isotope-confirmed RECOVERY of known species the server scored too low to
+    # anchor (e.g. ¹⁵N-labelled chlorinated paraffins, whose aggregate score
+    # collapses so the base ion comes back UNANCHORED and the main loop above --
+    # which iterates only server-anchored bases -- never sees it).
+    rec = _recover_isotope_locked_known(ledger, scored, label_of, cfg, log=log)
+    for k, v in rec.items():
+        out[k] = out.get(k, 0) + v
     log(f"[pass0] {out}")
+    return out
+
+
+def _recover_isotope_locked_known(ledger: pd.DataFrame, scored: pd.DataFrame,
+                                  label_of: dict, cfg: PassConfig, *,
+                                  anchor_tol: float = 2.0, sat_ppm: float = 7.0,
+                                  min_sats: int = 2, height_floor: float = 20.0,
+                                  log=print) -> dict:
+    """Recover an isotope-confirmable KNOWN species (Cl/Br/S family) whose server
+    compound_score was too low to anchor a real peak.
+
+    For ¹⁵N-labelled poly-Cl the server's aggregate match_score collapses (the
+    ¹⁴N phantom lines + the wide Cl envelope drag it under possible_match_
+    threshold), so ``match_compounds`` returns the base ion UNANCHORED
+    (sample_peak_id / ppm NaN). ``run_pass0_known``'s main loop only iterates
+    server-anchored bases, so those congeners never reach the ³⁷Cl confirmation
+    and are left unexplained -- exactly the "too low score on the server" miss.
+
+    Re-anchor against the LEDGER by exact mass (the server's theoretical M0 mz)
+    and commit ONLY when BOTH hold:
+
+      * a real, still-unexplained ledger peak sits within ``anchor_tol`` ppm of
+        the theoretical M0 mass (offset-aware, like the main loop), AND
+      * >= ``min_sats`` ³⁷Cl satellites (M0 + k·Δ³⁷Cl) are present in the ledger.
+
+    This is the SAME isotope evidence the committed congeners passed; only the
+    server's depressed aggregate score is bypassed. It cannot fabricate: no real
+    peak, or no ³⁷Cl envelope, means no commit. Returns counter deltas
+    (committed / locked / iso_attached / recovered) for the caller to fold in."""
+    out = {"committed": 0, "locked": 0, "iso_attached": 0, "recovered": 0}
+    if scored is None or len(scored) == 0 or "is_base" not in scored.columns:
+        return out
+    fam_of = {f: fam for f, (fam, _lbl) in label_of.items()}
+    is_base = scored["is_base"].fillna(False)
+    recoverable = scored["compound_formula"].map(
+        lambda f: fam_of.get(f) in _RECOVERABLE_KNOWN_FAMS)
+    bases = scored[is_base & recoverable]
+    if not len(bases):
+        return out
+    mzs = ledger["mz"]
+    for _, r in bases.iterrows():
+        cf = r["compound_formula"]
+        theo = r.get("theo_mz")
+        if theo is None or pd.isna(theo):
+            continue
+        theo = float(theo)
+        # offset-aware exact-mass anchor onto a still-unexplained ledger peak
+        i = _peak_near(mzs, theo * (1 + cfg.prior_offset * 1e-6), ppm=anchor_tol)
+        if i is None:
+            continue
+        pid = ledger.at[i, "peak_id"]
+        try:
+            if L.role_of(ledger, pid) != L.ROLE_UNEXPLAINED:
+                continue
+        except L.LedgerError:
+            continue
+        bh = ledger.at[i, "height"]
+        if pd.isna(bh) or float(bh) < height_floor:
+            continue
+        led_ppm = (float(ledger.at[i, "mz"]) - theo) / theo * 1e6
+        # ³⁷Cl envelope confirmation against the LEDGER (NOT the server iso_score,
+        # which is itself depressed). Server satellite theo_mz preferred, with the
+        # M0 + k·Δ³⁷Cl ladder as a fallback; count DISTINCT, still-unexplained
+        # ledger peaks so a server/ladder mz that resolve to one peak count once.
+        sib = scored[(scored["compound_formula"] == cf)
+                     & (scored["ion_formula"] == r["ion_formula"])
+                     & (~scored["is_base"].fillna(False))]
+        sat_theos = {round(float(tm), 3) for tm in sib["theo_mz"].dropna()
+                     if float(tm) > theo + 0.5}
+        sat_theos.update(round(theo + k * _D37CL, 3) for k in (1, 2, 3, 4))
+        sat_pids: list = []
+        for tm in sorted(sat_theos):
+            j = _peak_near(mzs, tm, ppm=sat_ppm)
+            if j is None:
+                continue
+            jh = ledger.at[j, "height"]
+            if pd.isna(jh) or float(jh) < height_floor * 0.5:
+                continue
+            jpid = ledger.at[j, "peak_id"]
+            if jpid == pid or jpid in sat_pids:
+                continue
+            try:
+                if L.role_of(ledger, jpid) == L.ROLE_UNEXPLAINED:
+                    sat_pids.append(jpid)
+            except L.LedgerError:
+                continue
+        if len(sat_pids) < min_sats:
+            continue
+        fam, lbl = label_of[cf]
+        sc = _f(r.get("ion_score"))
+        adduct = _mech_to_adduct(r)
+        L.commit_assignment(
+            ledger, pid, neutral_formula=cf, adduct=adduct,
+            ion_formula=r["ion_formula"], ion_score=(0.0 if sc is None else float(sc)),
+            compound_score=_f(r.get("compound_score")), ppm_error=float(led_ppm),
+            pass_no=0, method=f"known:{fam}",
+            confidence="Good (chlorinated-paraffin, recovered)",
+            commentary=(f"Pass 0 (known chlorinated-paraffin, RECOVERED): {cf} "
+                        f"{adduct} = {lbl}, ppm {led_ppm:.2f}; the server "
+                        f"compound_score ({_f(r.get('compound_score'))}) was too low "
+                        "to anchor a peak (¹⁵N-phantom / wide-envelope depression), "
+                        "so it was exact-mass anchored to the ledger and "
+                        f"isotope-locked on its ³⁷Cl envelope ({len(sat_pids)} "
+                        "satellites)."))
+        out["committed"] += 1
+        out["recovered"] += 1
+        L.lock_peaks(ledger, [pid])
+        out["locked"] += 1
+        for spid in sat_pids:
+            try:
+                L.attach_isotopologue(ledger, spid, pid, iso_label="37Cl")
+                out["iso_attached"] += 1
+            except L.LedgerError:
+                continue
     return out
 
 
@@ -1187,6 +1319,13 @@ def demote_carbon_inconsistent(ledger: pd.DataFrame, cfg: PassConfig, *,
         h0 = float(r["height"])
         if not (h0 > 0 and h_sat > 0):
             continue
+        # only clamp on a RELIABLY-measured 13C satellite (>= the peak-detection
+        # floor). Below it the ratio is noise: a genuine low-intensity M0 whose
+        # weak/peak-picker-lost 13C reads as too-few-carbons would be falsely
+        # cleared (the real [M+15NO3]- M0s at ~2k cps whose ~150 cps 13C sits
+        # near the floor). The over-claim O-monster always has a BRIGHT 13C.
+        if h_sat < cfg.height_cutoff:
+            continue
         c_est = (h_sat / h0) / _R13C
         if abs(c_est - n_c) > max(2.5, 0.35 * n_c):
             try:
@@ -1273,13 +1412,23 @@ def audit_isotopes(ledger: pd.DataFrame, cfg: PassConfig, *, log=print) -> dict:
                     continue
                 n_br = C.parse_formula(str(lt.ion_formula)).get("Br", 0)
                 if n_br >= 1:
+                    # the lighter formula genuinely carries Br -> a ~1:1 twin
+                    # 1.998 above IS its ⁸¹Br isotopologue (valid regardless of
+                    # the reagent system).
                     L.clear_assignment(ledger, hv.peak_id,
                                        reason=f"isotope audit: 81Br twin of "
                                               f"{lt.mz:.4f} (ratio {hr:.2f})")
                     L.attach_isotopologue(ledger, hv.peak_id, lt.peak_id,
                                           iso_label="81Br")
                     out["doublet_child"] += 1
-                else:
+                elif cfg.reagent_element == "Br":
+                    # clear-both ONLY in Br-CIMS. There a ~1:1 1.998 doublet is
+                    # strong evidence of an (unassigned) bromine, so two non-Br
+                    # formulas are both wrong. With any OTHER reagent (e.g.
+                    # ¹⁵N-nitrate) bromine is not in play: unrelated CHON
+                    # compounds routinely sit ~1.998 apart at ~1:1, and the
+                    # spacing is NOT halogen evidence -- clearing both destroys
+                    # real M0s (54 genuine [M+¹⁵NO₃]⁻ M0s on the ¹⁵NO₃⁻ batch).
                     L.clear_assignment(
                         ledger, lt.peak_id,
                         reason=f"isotope audit: Br doublet with {hv.mz:.4f} "
@@ -1316,8 +1465,15 @@ def audit_isotopes(ledger: pd.DataFrame, cfg: PassConfig, *, log=print) -> dict:
                 except L.LedgerError:
                     pass
         if len(k):
-            c_est = (float(k.iloc[0]["height"]) / float(r["height"])) / _R13C
-            if n_c >= 8 and abs(c_est - n_c) > max(2.5, 0.35 * n_c):
+            h_sat = float(k.iloc[0]["height"])
+            c_est = (h_sat / float(r["height"])) / _R13C
+            # clamp ONLY on a reliably-measured 13C satellite (>= the detection
+            # floor). A sub-floor 13C ratio is noise and under-reads carbon,
+            # which would falsely clear genuine low-intensity M0s (the ~2k cps
+            # [M+15NO3]- compounds whose ~150 cps 13C sits near the floor). The
+            # over-claim O-monster case always carries a BRIGHT 13C, so it fires.
+            if n_c >= 8 and h_sat >= cfg.height_cutoff \
+                    and abs(c_est - n_c) > max(2.5, 0.35 * n_c):
                 try:
                     L.clear_assignment(
                         ledger, r["peak_id"],

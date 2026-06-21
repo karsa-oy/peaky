@@ -530,23 +530,48 @@ check("audit: Br-doublet heavy M0 demoted to 81Br child",
 check("audit: 13C satellite swept up as evidence",
       L.role_of(led, "X") == L.ROLE_ISO and s["c13_attached"] == 1, s)
 
-# doublet where NEITHER formula carries Br -> both cleared
+# doublet where NEITHER formula carries Br -> both cleared, but ONLY in Br-CIMS
+# (where a ~1:1 1.998 doublet is strong evidence of an unassigned bromine).
+ACFG_BR = P.PassConfig(height_cutoff=100.0, reagent_element="Br")
 led = mk_ledger([("Lc", 284.0501, 641.0), ("Hd", 286.0480, 543.0)])
 commit(led, "Lc", "C9H20NO4", "C9H20NO4-")    # no Br anywhere
 commit(led, "Hd", "C14H10O3", "C15H10O6-")
-s = P.audit_isotopes(led, ACFG, log=lambda *a: None)
-check("audit: no-Br doublet clears both formulas",
+s = P.audit_isotopes(led, ACFG_BR, log=lambda *a: None)
+check("audit: no-Br doublet clears both formulas (Br-CIMS)",
       L.role_of(led, "Lc") == L.ROLE_UNEXPLAINED
       and L.role_of(led, "Hd") == L.ROLE_UNEXPLAINED
       and s["doublet_cleared"] == 2, s)
 
-# 13C clamp: formula claims C19, satellite measures ~C11
+# SAME doublet under a NON-bromine reagent (e.g. ¹⁵N-nitrate, reagent_element
+# None): the 1.998 spacing is NOT halogen evidence -- two unrelated CHON
+# compounds routinely fall ~1.998 apart -- so neither M0 may be cleared.
+led = mk_ledger([("Lc", 284.0501, 641.0), ("Hd", 286.0480, 543.0)])
+commit(led, "Lc", "C9H20NO4", "C9H20NO4-")
+commit(led, "Hd", "C14H10O3", "C15H10O6-")
+s = P.audit_isotopes(led, ACFG, log=lambda *a: None)   # reagent_element=None
+check("audit: non-Br reagent does NOT clear a 1.998 doublet of two non-Br M0s",
+      L.role_of(led, "Lc") == L.ROLE_M0
+      and L.role_of(led, "Hd") == L.ROLE_M0
+      and s["doublet_cleared"] == 0, s)
+
+# 13C clamp: formula claims C19, satellite measures ~C11 (bright satellite -> fires)
 led = mk_ledger([("M", 444.9861, 4761.0), ("K", 445.9895, 564.0)])
 commit(led, "M", "C19H15N2O4S", "C19H14BrN2O4S-")
 L.attach_isotopologue(led, "K", "M", iso_label="13C")
 s = P.audit_isotopes(led, ACFG, log=lambda *a: None)
 check("audit: 13C carbon clamp clears C19-vs-C11",
       L.role_of(led, "M") == L.ROLE_UNEXPLAINED and s["c13_clamp"] == 1, s)
+
+# 13C clamp guard: a low-intensity M0 whose 13C satellite is BELOW the detection
+# floor must NOT be clamped -- the sub-floor ratio is noise (under-reads carbon),
+# which falsely cleared genuine ~2k cps [M+15NO3]- M0s. Same C8-vs-~C4 ratio as
+# the false positive, but the satellite (90 cps) is < height_cutoff (100).
+led = mk_ledger([("Lm", 280.0440, 2000.0), ("Lk", 281.0474, 90.0)])
+commit(led, "Lm", "C8H11NO6", "C8H11NO9^N-", conf="Good", score=0.87)
+L.attach_isotopologue(led, "Lk", "Lm", iso_label="13C")
+s = P.audit_isotopes(led, ACFG, log=lambda *a: None)
+check("audit: 13C clamp SKIPS a sub-floor (noisy) 13C satellite",
+      L.role_of(led, "Lm") == L.ROLE_M0 and s["c13_clamp"] == 0, s)
 
 # 13C missing: big peak, formula predicts a visible satellite, none exists
 led = mk_ledger([("N", 168.9505, 10300.0)])
@@ -977,6 +1002,75 @@ _ledcp0 = mk_ledger([("cp0", _cpmz, 5000.0)])
 P.run_pass0_known(None, "SID", _ledcp0, PROF5, ACFG, ADD5, score_fn=_fake_cp0, log=lambda *a: None)
 check("pass0 refuses a ³⁷Cl-unconfirmed chlorinated paraffin (n_kids<2)",
       L.role_of(_ledcp0, "cp0") == L.ROLE_UNEXPLAINED)
+
+# pass0 RECOVERY: a chlorinated paraffin the server scored too low to ANCHOR
+# (base unanchored: no sample_peak_id, ppm NaN -- the "too low score on the
+# server" miss) is recovered from the ledger by exact mass + a real ³⁷Cl envelope.
+_rmz = 422.939
+def _cp_unanchored(c, s, forms, *, mechanism_ids=None, **kw):
+    if "C11H18Cl6" not in forms:
+        return pd.DataFrame([])
+    rows = [iso_row(compound_formula="C11H18Cl6", compound_score=0.12,
+                    ion_formula="C11H18Cl6O3^N-", isotope_formula="C11H18Cl6O3^N-",
+                    iso_label="M0", is_base=True, theo_mz=_rmz, sample_peak_id=None,
+                    sample_peak_mz=_rmz, sample_peak_intensity=0.0,
+                    ppm_error=None, ion_score=0.12)]
+    for k, lab in ((1, "37Cl+15N"), (2, "37Cl2+15N")):   # server can't confirm them either
+        rows.append(iso_row(compound_formula="C11H18Cl6", ion_formula="C11H18Cl6O3^N-",
+                            iso_label=lab, is_base=False, theo_mz=_rmz + k * P._D37CL,
+                            sample_peak_id=None, sample_peak_mz=None,
+                            sample_peak_intensity=0.0, ppm_error=None, iso_score=0.1))
+    return pd.DataFrame(rows)
+_ledr = mk_ledger([("r0", _rmz, 5000.0), ("r1", _rmz + P._D37CL, 6000.0),
+                   ("r2", _rmz + 2 * P._D37CL, 4000.0)])
+sr = P.run_pass0_known(None, "SID", _ledr, PROF5, ACFG, ADD5,
+                       score_fn=_cp_unanchored, log=lambda *a: None)
+check("pass0 RECOVERS a low-score chlorinated paraffin via the ledger ³⁷Cl envelope",
+      L.role_of(_ledr, "r0") == L.ROLE_M0
+      and _ledr.loc[_ledr.peak_id == "r0", "neutral_formula"].iloc[0] == "C11H18Cl6"
+      and _ledr.loc[_ledr.peak_id == "r0", "method"].iloc[0] == "known:chlorinated_paraffin"
+      and sr.get("recovered", 0) == 1, sr)
+check("pass0 recovery locks the M0 and attaches its ³⁗Cl satellites",
+      L.is_locked(_ledr, "r0")
+      and L.role_of(_ledr, "r1") == L.ROLE_ISO
+      and L.role_of(_ledr, "r2") == L.ROLE_ISO)
+check("pass0 recovery flags the depressed-score recovery in the confidence label",
+      "recovered" in str(_ledr.loc[_ledr.peak_id == "r0", "confidence"].iloc[0]))
+
+# no real peak at the mass -> recovery must NOT fabricate
+_ledr_none = mk_ledger([("x", 200.0, 5000.0)])
+sr0 = P.run_pass0_known(None, "SID", _ledr_none, PROF5, ACFG, ADD5,
+                        score_fn=_cp_unanchored, log=lambda *a: None)
+check("pass0 recovery does NOT fabricate when no real peak exists at the mass",
+      sr0.get("recovered", 0) == 0 and L.role_of(_ledr_none, "x") == L.ROLE_UNEXPLAINED)
+
+# real M0 peak but only ONE ³⁷Cl satellite -> envelope unconfirmed, no commit
+_ledr1 = mk_ledger([("r0", _rmz, 5000.0), ("r1", _rmz + P._D37CL, 6000.0)])
+sr1 = P.run_pass0_known(None, "SID", _ledr1, PROF5, ACFG, ADD5,
+                        score_fn=_cp_unanchored, log=lambda *a: None)
+check("pass0 recovery refuses a single-satellite (³⁷Cl envelope unconfirmed)",
+      sr1.get("recovered", 0) == 0 and L.role_of(_ledr1, "r0") == L.ROLE_UNEXPLAINED)
+
+# safety: a monoisotopic-F family (perfluoroacid) is NOT recoverable even if the
+# ledger happens to carry peaks at the right masses -- no isotope twin corroborates
+_pmz = 412.9664
+def _pfca_unanchored(c, s, forms, *, mechanism_ids=None, **kw):
+    if "C8HF15O2" not in forms:
+        return pd.DataFrame([])
+    rows = [iso_row(compound_formula="C8HF15O2", compound_score=0.1,
+                    ion_formula="C8F15O2-", isotope_formula="C8F15O2-", iso_label="M0",
+                    is_base=True, theo_mz=_pmz, sample_peak_id=None, ppm_error=None,
+                    ion_score=0.1)]
+    rows += [iso_row(compound_formula="C8HF15O2", ion_formula="C8F15O2-",
+                     iso_label="37Cl", is_base=False, theo_mz=_pmz + k * P._D37CL,
+                     sample_peak_id=None, ppm_error=None, iso_score=0.1) for k in (1, 2)]
+    return pd.DataFrame(rows)
+_ledp = mk_ledger([("p0", _pmz, 5000.0), ("p1", _pmz + P._D37CL, 6000.0),
+                   ("p2", _pmz + 2 * P._D37CL, 4000.0)])
+spf = P.run_pass0_known(None, "SID", _ledp, PROF5, ACFG, ADD5,
+                        score_fn=_pfca_unanchored, log=lambda *a: None)
+check("pass0 recovery does NOT apply to monoisotopic-F families (perfluoroacid)",
+      spf.get("recovered", 0) == 0 and L.role_of(_ledp, "p0") == L.ROLE_UNEXPLAINED)
 
 # TEP (C6H15O4P) seen in BOTH [M+H]+ and [M+(urea)H]+ -> cross-channel corroborated
 _mzH = CH.ion_mz("C6H15O4P", "[M+H]+")

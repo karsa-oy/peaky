@@ -328,7 +328,7 @@ def main(argv=None):
     ap.add_argument("--context", default="ambient-air")
     ap.add_argument("--ppm", type=float, default=1.0)
     ap.add_argument("--search-ppm", type=float, default=3.0)
-    ap.add_argument("--height-cutoff", type=float, default=500.0)
+    ap.add_argument("--height-cutoff", type=float, default=100.0)
     ap.add_argument("--no-cache", action="store_true")
     ap.add_argument("--no-pass2", action="store_true")
     ap.add_argument("--no-pass3", action="store_true")

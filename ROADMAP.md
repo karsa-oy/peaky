@@ -30,6 +30,53 @@ apply_tiers). See SKILL.md "Halogen / heteroatom policy" + memory `agent-peaky` 
 MS2 for the degenerate halogen families; fold the zero-event ambient discriminant into
 clustering. ¹⁵NO₃⁻ ~57% signal explained (rest = mass-degenerate + reagent background).
 
+### CP RECOVERY — known species the server scores too low to anchor (2026-06-21, follow-up)
+User asked: chlorinated paraffins that fail on a low server score should still assign "with
+user override." Root-caused live: for ¹⁵N-labelled poly-Cl the server's aggregate
+`compound_score` collapses (¹⁴N phantom lines + wide Cl envelope), so under `possible_match_
+threshold` (0.4) `match_compounds` returns the base ion **UNANCHORED** (no `sample_peak_id`,
+ppm NaN). `run_pass0_known`'s main loop iterates only server-anchored bases, so those
+congeners never reach the ³⁷Cl check → left unexplained. (Checked: most truly-missing
+formulas have NO real peak within 5 ppm — the server was right to score them ~0; blind
+formula-forcing would fabricate.) **Fix = evidence-gated AUTO-recovery** (chosen over a blind
+force-list): `passes._recover_isotope_locked_known` runs after the main pass-0 loop, re-anchors
+each `_RECOVERABLE_KNOWN_FAMS` (={`chlorinated_paraffin`}) base to a real, still-unexplained
+ledger peak by **exact mass** (offset-aware, `theo_mz`), and commits ONLY when ≥2 ³⁷Cl
+satellites (M0+k·`_D37CL`) are present in the **ledger** (not the depressed server `iso_score`).
+Cannot fabricate (no peak / no envelope → no commit); monoisotopic F/P families excluded (no
+isotope twin). Commits Identified (method `known:chlorinated_paraffin`), confidence `Good
+(chlorinated-paraffin, recovered)`, commentary records the depressed score + satellite count.
+Live-verified on <sample>: +5 recovered (C14H26Cl4, C12H21Cl5, C10H16Cl6, C13H23Cl5, C10H15Cl7;
+±0.6 ppm, 2–5 sats); C14H26Cl4 & C10H15Cl7 were absent from the prior merged ledger.
+test_passes +6 (recover / no-peak-no-fabricate / single-satellite-refuse / F-family-excluded);
+suite green. **TODO:** re-run `mascope-assign batch --reagent NO3_15N` to fold recoveries into a
+fresh merged ledger + report; a manual analyst force-list was deferred (auto-recovery covers the
+real cases). NOT yet committed.
+
+### AUDIT OVER-CLEARING — identified peaks wrongly dumped to unexplained (2026-06-21, follow-up 2)
+User: "isotopologues that weren't assigned even though they were identified ended in unexplained."
+Quantified on the ¹⁵NO₃⁻ batch: ~4.3% of unexplained SIGNAL was server-`[15N]`-tagged peaks our
+pipeline left unexplained. Per-pass checkpoint trace (assign.run `checkpoint_dir=`) on <sample> found
+TWO over-aggressive audit clears (both in `passes.audit_isotopes` / `demote_carbon_inconsistent`):
+  1. **Br-doublet "clear-both"** (`audit_isotopes` step 1): two committed M0s ~1.998 Da apart at
+     ~1:1 height with neither formula carrying Br → BOTH cleared, on the premise "a 1.998 doublet
+     proves Br." Valid ONLY in Br-CIMS. In ¹⁵N-nitrate (no Br reagent, `cfg.reagent_element=None`)
+     unrelated CHON compounds routinely fall ~1.998 apart → it destroyed **27 pairs / 54 real
+     M0s** (e.g. C5H6O6+C8H4O4). FIX: gate the clear-both branch on `cfg.reagent_element=="Br"`
+     (the lighter-has-Br→⁸¹Br-child branch is valid regardless, kept).
+  2. **¹³C carbon-clamp** (`audit_isotopes` step 3 + `demote_carbon_inconsistent`): cleared an M0
+     when its measured ¹³C ratio implied a carbon count far from the formula. Fired on genuine
+     ~2k cps `[M+¹⁵NO₃]⁻` M0s (C8H11NO6, C10H18N2O8, C9H13NO6) whose ~90–150 cps ¹³C sits near the
+     noise floor → ratio reads ~half the carbons → false clear. FIX: clamp ONLY when the ¹³C
+     satellite is `>= cfg.height_cutoff` (reliably measured); the over-claim O-monster always has a
+     BRIGHT ¹³C, so it still fires (C19-vs-C11 test preserved).
+Impact (<sample> full pipeline): M0 **350→577**, unexplained signal **−16%**, `[15N]` leak
+**15,805→8,087 (−49%)**, M0 signal fraction ~57%→**70%**. test_passes +2 (non-Br doublet not
+cleared; sub-floor ¹³C clamp skipped); suite 31 files green. **Residual** `[15N]` (~8k, led by
+C3H4N2O3 @5005cps) is NOT a clearing bug: it's `_context_filter` plausibility (high-N-density small
+formulas) + sub-`height_cutoff` peaks (e.g. C15H26O4 @180cps) — a separate tuning/chemistry call.
+NOT yet committed. Diagnostic checkpoints in ~/mascope-output/_ckpt/ (scratch).
+
 
 **SESSION 4 — SHAREABILITY REFACTOR (2026-06-20). Goal: a small group `pip install`s + validates on
 THEIR machines.** A 7-dimension review (48 findings) produced a 5-phase plan. DECISIONS: ship as BOTH a
