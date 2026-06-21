@@ -645,8 +645,18 @@ def _known_species(polarity: str = "negative") -> dict:
     }
     contam = {f: "dimethylsilanediol oligomer (PDMS hydrolysis, inlet/tubing)"
               for f in _silanediol_series()}
+    # Perfluorocarboxylic acids CnHF(2n-1)O2 -- ubiquitous environmental / lab
+    # contaminants and a classic CIMS signal (TFA, PFPrA, PFBA, ... PFOA). They are
+    # F-rich so the organic grid (max_F=0, or pass-4's clamped-F path) misses the
+    # clean low-F ones (TFA was the brightest peak in the ¹⁵NO₃⁻ batch yet went
+    # unexplained). The PFCA formula is HIGHLY specific (high negative mass defect),
+    # so supply the series as known formulas; only those present + on-cal commit.
+    # In a narrow high-m/z window TFA's [M-H]- (112.99) is out of range and it is
+    # seen ONLY as the reagent adduct, so do NOT require the deprotonation channel.
+    perfluoroacid = {f"C{n}HF{2 * n - 1}O2": f"perfluoro-C{n} acid (PFCA)"
+                     for n in range(2, 13)}
     return {"atmospheric": atmos, "nitroaromatic": nitroaromatic,
-            "contaminant:silanediol": contam}
+            "perfluoroacid": perfluoroacid, "contaminant:silanediol": contam}
 
 
 def run_pass0_known(client, sample_id: str, ledger: pd.DataFrame,
@@ -728,6 +738,7 @@ def run_pass0_known(client, sample_id: str, ledger: pd.DataFrame,
             tag = ("atmospheric" if fam == "atmospheric"
                    else "nitroaromatic" if fam == "nitroaromatic"
                    else "organophosphate" if fam == "organophosphate"
+                   else "perfluoroacid" if fam == "perfluoroacid"
                    else "contaminant")
             fam_kids = kids[kids["compound_formula"] == r["compound_formula"]]
             n_kids = int((fam_kids["sample_peak_id"] != pid).sum())
@@ -751,7 +762,10 @@ def run_pass0_known(client, sample_id: str, ledger: pd.DataFrame,
                                else "; organophosphate contaminant (P off the grid); "
                                f"corroborated across {ope_channels.get(r['compound_formula'], 0)} "
                                "ion channels (monoisotopic P, no isotope twin)"
-                               if fam == "organophosphate" else "")))
+                               if fam == "organophosphate"
+                               else "; perfluorocarboxylic acid (F off the grid); "
+                               "known PFCA series formula, exact-mass committed"
+                               if fam == "perfluoroacid" else "")))
             out["committed"] += 1
             L.lock_peaks(ledger, [pid])
             out["locked"] += 1

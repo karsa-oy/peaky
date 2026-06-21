@@ -940,6 +940,9 @@ check("_known_species(positive) carries the organophosphate family",
       and "C6H15O4P" in P._known_species("positive")["organophosphate"])
 check("_known_species(negative) keeps the atmospheric list",
       "atmospheric" in P._known_species("negative"))
+check("_known_species(negative) carries the PFCA (perfluoroacid) series incl TFA",
+      "perfluoroacid" in P._known_species("negative")
+      and "C2HF3O2" in P._known_species("negative")["perfluoroacid"])
 
 # TEP (C6H15O4P) seen in BOTH [M+H]+ and [M+(urea)H]+ -> cross-channel corroborated
 _mzH = CH.ion_mz("C6H15O4P", "[M+H]+")
