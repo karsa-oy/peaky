@@ -601,7 +601,25 @@ def _known_species(polarity: str = "negative") -> dict:
     # silanediol series would be scored under the wrong (anion) ion form -- so
     # pass 0 is a no-op and the grid + pass-3 families carry the sample.
     if str(polarity) == "positive":
-        return {}
+        # Positive (urea-CIMS): the N-base / oxygenated-VOC analytes are reachable
+        # by the organic grid, so most of pass 0 is a no-op. EXCEPTION:
+        # ORGANOPHOSPHATE esters / phosphine oxides -- ubiquitous lab & indoor
+        # contaminants that ionise well as [M+H]+ / [M+(urea)H]+ but are INVISIBLE
+        # to the CHNOS grid (P is off by default; opening the P grid floods mass-
+        # degeneracy with P2/P3, N-rich monsters). Supply them as explicit known
+        # formulas. P is monoisotopic -> no isotope twin to confirm, so the commit
+        # is gated on CROSS-CHANNEL corroboration (>=2 ion channels) in pass 0.
+        organophosphate = {
+            "C6H15O4P":  "triethyl phosphate (TEP)",
+            "C9H21O4P":  "tripropyl phosphate (TPrP)",
+            "C12H27O4P": "tri-n-butyl phosphate (TBP / TiBP)",
+            "C18H15O4P": "triphenyl phosphate (TPhP)",
+            "C18H15OP":  "triphenylphosphine oxide (TPPO)",
+            "C18H39O7P": "tris(2-butoxyethyl) phosphate (TBEP)",
+            "C24H51O4P": "tris(2-ethylhexyl) phosphate (TEHP)",
+            "C21H21O4P": "tricresyl phosphate (TMPP / TCrP)",
+        }
+        return {"organophosphate": organophosphate}
     atmos = {
         # small atmospheric acids / radicals detected as Br- adducts -- the
         # PRIMARY analytes of a Br-CIMS, all invisible to the organic grid:
@@ -658,6 +676,14 @@ def run_pass0_known(client, sample_id: str, ledger: pd.DataFrame,
         return out
     base = scored[scored["is_base"] & scored["sample_peak_id"].notna()
                   & scored["ion_score"].notna()]
+    # cross-channel corroboration count (on-cal): how many distinct ion channels
+    # each known formula matches. Monoisotopic-P organophosphates require >=2.
+    if "mechanism_id" in base.columns:
+        _onc = base[(pd.to_numeric(base["ppm_error"], errors="coerce")
+                     - cfg.prior_offset).abs() <= 2.0]
+        ope_channels = _onc.groupby("compound_formula")["mechanism_id"].nunique().to_dict()
+    else:
+        ope_channels = {}
     kids = scored[(~scored["is_base"]) & scored["sample_peak_id"].notna()
                   & (pd.to_numeric(scored["iso_score"], errors="coerce")
                      .fillna(0) > 0.4)]
@@ -692,8 +718,16 @@ def run_pass0_known(client, sample_id: str, ledger: pd.DataFrame,
                         f"(composite or wrong claim)")
                     continue
             fam, lbl = label_of[r["compound_formula"]]
+            # organophosphates are monoisotopic in P -> require >=2 ion channels
+            # (e.g. [M+H]+ AND [M+(urea)H]+) before locking, since there is no
+            # isotope twin to confirm a single-channel mass coincidence.
+            if fam == "organophosphate" and ope_channels.get(r["compound_formula"], 0) < 2:
+                log(f"[pass0] skip {r['compound_formula']} @{float(r['sample_peak_mz']):.4f}: "
+                    f"single ion channel (monoisotopic P needs >=2 to corroborate)")
+                continue
             tag = ("atmospheric" if fam == "atmospheric"
                    else "nitroaromatic" if fam == "nitroaromatic"
+                   else "organophosphate" if fam == "organophosphate"
                    else "contaminant")
             fam_kids = kids[kids["compound_formula"] == r["compound_formula"]]
             n_kids = int((fam_kids["sample_peak_id"] != pid).sum())
@@ -713,7 +747,11 @@ def run_pass0_known(client, sample_id: str, ledger: pd.DataFrame,
                                "inorganic)" if fam == "atmospheric"
                                else "; H-poor nitroaromatic blocked by the ambient "
                                "VK floor/DBE ceiling -- assigned as a known BrC tracer"
-                               if fam == "nitroaromatic" else "")))
+                               if fam == "nitroaromatic"
+                               else "; organophosphate contaminant (P off the grid); "
+                               f"corroborated across {ope_channels.get(r['compound_formula'], 0)} "
+                               "ion channels (monoisotopic P, no isotope twin)"
+                               if fam == "organophosphate" else "")))
             out["committed"] += 1
             L.lock_peaks(ledger, [pid])
             out["locked"] += 1

@@ -934,21 +934,49 @@ r_ovr = P.build_ranges(PROF_URO, None, include_N=True, c_max=20, o_max=10)
 check("explicit c_max/o_max overrides the profile",
       r_ovr["C"][1] == 20 and r_ovr["O"][1] == 10, (r_ovr["C"], r_ovr["O"]))
 
-# ---------- positive polarity: pass 0 known-species is a no-op ----------
-check("_known_species(positive) is empty", P._known_species("positive") == {})
+# ---------- positive polarity: pass 0 knows the organophosphate contaminants ----
+check("_known_species(positive) carries the organophosphate family",
+      "organophosphate" in P._known_species("positive")
+      and "C6H15O4P" in P._known_species("positive")["organophosphate"])
 check("_known_species(negative) keeps the atmospheric list",
       "atmospheric" in P._known_species("negative"))
 
+# TEP (C6H15O4P) seen in BOTH [M+H]+ and [M+(urea)H]+ -> cross-channel corroborated
+_mzH = CH.ion_mz("C6H15O4P", "[M+H]+")
+_mzU = CH.ion_mz("C6H15O4P", "[M+(CH4N2O)H]+")
+def _ope_row(ion, mz, pid, mech):
+    return dict(compound_formula="C6H15O4P", compound_score=0.92, ion_formula=ion,
+                ion_score=0.92, iso_label="M0", is_base=True, theo_mz=mz,
+                rel_abundance=1.0, iso_score=0.92, sample_peak_id=pid,
+                sample_peak_mz=mz, sample_peak_intensity=5000.0, ppm_error=0.0,
+                abundance_error=0.0, mechanism_id=mech)
+def fake_ope2(client, sid, formulas, *, mechanism_ids=None, **kw):
+    if "C6H15O4P" not in formulas:
+        return pd.DataFrame([])
+    return pd.DataFrame([_ope_row("C6H16O4P+", _mzH, "tepH", "mH"),
+                         _ope_row("C7H20N2O5P+", _mzU, "tepU", "mU")])
+led_ope = mk_ledger([("tepH", _mzH, 5000.0), ("tepU", _mzU, 4000.0)])
+s_ope = P.run_pass0_known(None, "SID", led_ope, PROF_URO, ACFG,
+                          ["[M+H]+", "[M+(CH4N2O)H]+"], score_fn=fake_ope2,
+                          log=lambda *a: None)
+check("pass0 commits TEP across both ion channels (cross-channel corroborated)",
+      s_ope["committed"] == 2
+      and led_ope.loc[led_ope.peak_id == "tepH", "neutral_formula"].iloc[0] == "C6H15O4P"
+      and led_ope.loc[led_ope.peak_id == "tepH", "method"].iloc[0] == "known:organophosphate", s_ope)
+check("pass0 labels the TEP urea channel adduct correctly",
+      led_ope.loc[led_ope.peak_id == "tepU", "adduct"].iloc[0] == "[M+(CH4N2O)H]+")
 
-def _boom(*a, **k):
-    raise AssertionError("pass0 must not score the oracle in positive mode")
-
-
-s_pos = P.run_pass0_known(None, "SID", mk_ledger([("p", 100.0, 500.0)]),
-                          PROF_URO, ACFG, ["[M+H]+", "[M+(CH4N2O)H]+"],
-                          score_fn=_boom, log=lambda *a: None)
-check("pass0 positive mode commits nothing without calling the oracle",
-      s_pos["committed"] == 0, s_pos)
+# single-channel TEP -> NOT committed (monoisotopic P needs >=2 channels)
+def fake_ope1(client, sid, formulas, *, mechanism_ids=None, **kw):
+    if "C6H15O4P" not in formulas:
+        return pd.DataFrame([])
+    return pd.DataFrame([_ope_row("C6H16O4P+", _mzH, "tepH", "mH")])
+led_ope1 = mk_ledger([("tepH", _mzH, 5000.0)])
+s_ope1 = P.run_pass0_known(None, "SID", led_ope1, PROF_URO, ACFG,
+                           ["[M+H]+", "[M+(CH4N2O)H]+"], score_fn=fake_ope1,
+                           log=lambda *a: None)
+check("pass0 refuses a single-channel organophosphate (no cross-channel support)",
+      s_ope1["committed"] == 0, s_ope1)
 
 def test_all():
     assert FAIL == 0, f"{FAIL} checks failed"
