@@ -104,6 +104,19 @@ check("score_candidates allow_partial records failures",
       len(partial.attrs.get("match_batch_failures", [])) == 1,
       partial.attrs)
 
+# ---------- fetch_batch_peaks escapes regex metacharacters in the batch name -----
+# The ^ in a '^Nitrate' (¹⁵N) batch name is a regex anchor; the TS loader must
+# escape it (like fetch_batch_samples) or the SDK str.contains matches nothing.
+class _LP:
+    seen = None
+    def load_peaks(self, *, dataset, batches):
+        _LP.seen = batches
+        return pd.DataFrame({"mz": [100.0], "height": [1.0], "sample_item_id": ["s"]})
+_name = "<nitrate-batch>"
+IO.fetch_batch_peaks(_LP(), "DS", _name)
+check("fetch_batch_peaks escapes the ^ regex anchor in the batch name",
+      _LP.seen == IO.escape_batch(_name) and r"\^" in _LP.seen, _LP.seen)
+
 # ---------- estimate_offset: rough offset from the sample's own matches ----------
 from mascope_assign import chemistry as _C  # noqa: E402
 # build a synthetic match table at a uniform -1.9 ppm offset (Br-CIMS)

@@ -140,7 +140,10 @@ def fetch_batch_peaks(client, dataset: str, batch: str, *, save_path: str | None
     """Load the per-sample peak time-series for a whole batch (the TS / cluster /
     correlation layer). Distinct from fetch_peaks (one assignment sample). Uses the
     SDK batch loader (dataset=, not the deprecated workspace=)."""
-    peaks = client.load_peaks(dataset=dataset, batches=batch)
+    # batches= is resolved as a case-insensitive REGEX (str.contains), so a literal
+    # name with metacharacters (e.g. the ^ in '... ^Nitrate ...' or '(Ur+ CIMS)')
+    # must be escaped or it silently matches nothing -- same as fetch_batch_samples.
+    peaks = client.load_peaks(dataset=dataset, batches=escape_batch(batch))
     if peaks is None or len(peaks) == 0:
         raise RuntimeError(f"no peaks for batch {batch!r} in dataset {dataset!r}")
     if save_path:
