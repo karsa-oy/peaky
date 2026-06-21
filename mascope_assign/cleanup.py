@@ -395,6 +395,62 @@ def reclaim_satellites(ledger: pd.DataFrame, *, ppm: float = 6.0, log=print) -> 
     return {"reclaimed": n}
 
 
+def reclaim_envelope_tails(ledger: pd.DataFrame, *, ppm: float = 6.0, log=print) -> dict:
+    """Attach the DEEP multi-halogen isotope envelope (k>=2 of ³⁷Cl / ⁸¹Br) of a
+    poly-halogen M0 to leaked unexplained peaks. reclaim_satellites only does the
+    single k=1 step, so a chlorinated paraffin's M+4/M+6/... ³⁷Cl tail -- which for
+    many Cl is BRIGHTER than M0 -- leaks into 'unexplained' (the dominant satellite
+    leak measured on the ¹⁵NO₃⁻ batch). Walk k=2..nX from each M0 and accept an
+    unexplained peak whose intensity ratio matches the binomial C(nX,k)(p/q)^k.
+    Touches only unexplained rows; the ratio gate (and exact +k·Δ mass) prevent
+    grabbing an unrelated neighbour. p/q: ³⁷Cl 0.3199, ⁸¹Br 0.9728."""
+    from math import comb
+    from . import isotopes as ISO
+    m0 = ledger[ledger["role"] == L.ROLE_M0].dropna(subset=["mz"]).sort_values("mz")
+    if not len(m0):
+        return {"tails": 0}
+    mz = m0["mz"].to_numpy(); pid = m0["peak_id"].to_numpy()
+    ionf = m0["ion_formula"].astype(str).to_numpy(); ph = m0["height"].to_numpy()
+    STEPS = [(ISO.D_37CL, "37Cl", "Cl", 0.3199), (ISO.D_81BR, "81Br", "Br", 0.9728)]
+    n = 0
+    for i in ledger.index[ledger["role"] == L.ROLE_UNEXPLAINED]:
+        cmz = ledger.at[i, "mz"]
+        if pd.isna(cmz):
+            continue
+        cmz = float(cmz); chh = float(ledger.at[i, "height"]) if pd.notna(ledger.at[i, "height"]) else 0.0
+        done = False
+        for D, label, el, pq in STEPS:
+            for k in range(2, 11):
+                t = cmz - k * D; tol = cmz * ppm * 1e-6
+                j = bisect.bisect_left(mz, t - tol); best = None
+                while j < len(mz) and mz[j] <= t + tol:
+                    if best is None or abs(mz[j] - t) < abs(mz[best] - t):
+                        best = j
+                    j += 1
+                if best is None:
+                    continue
+                nX = C.parse_formula(ionf[best]).get(el, 0)
+                if k > nX or ph[best] <= 0:
+                    continue
+                exp = comb(nX, k) * (pq ** k)            # binomial intensity vs M0
+                ratio = chh / ph[best]
+                if 0.35 * exp <= ratio <= 2.8 * exp:
+                    try:
+                        L.attach_isotopologue(ledger, ledger.at[i, "peak_id"], pid[best],
+                                              iso_label=f"{k}x{label}")
+                        ledger.at[i, "commentary"] = (
+                            f"reclaimed {k}x{label} envelope tail of {ionf[best]} "
+                            f"(ratio {ratio:.2f} vs binomial {exp:.2f})")
+                        n += 1; done = True
+                    except L.LedgerError:
+                        pass
+                    break
+            if done:
+                break
+    log(f"[cleanup] reclaimed {n} deep halogen-envelope tails (k>=2)")
+    return {"tails": n}
+
+
 F_DEMOTE_MIN = 4   # F count above which an unanchored, non-PFCA fit is an F-monster
 
 
@@ -444,12 +500,14 @@ def run_cleanup(client, sample_id, ledger, profile, cfg, *, log=print) -> dict:
     clu = label_bromide_clusters(ledger, client, sample_id, log=log)
     art = flag_ringing_artifacts(ledger, log=log)
     sat = reclaim_satellites(ledger, log=log)
+    tails = reclaim_envelope_tails(ledger, log=log)   # deep poly-halogen envelope (k>=2)
     # NB: demote_unconfirmed_fluorine is NOT called here -- it must run AFTER
     # tiers.apply_tiers (which recomputes tier and would re-promote the F-monster).
     # assign.run calls it post-tiering.
     return {"recovered": rec["recovered"], "clusters": clu["labelled"],
             "cluster_covalent_ties": clu.get("covalent_ties", 0),
-            "artifacts": art["flagged"], "reclaimed_satellites": sat["reclaimed"]}
+            "artifacts": art["flagged"], "reclaimed_satellites": sat["reclaimed"],
+            "envelope_tails": tails["tails"]}
 
 
 def prefer_amine_over_ammonium(ledger: pd.DataFrame, *, ts_peaks=None, r_min: float = 0.7,

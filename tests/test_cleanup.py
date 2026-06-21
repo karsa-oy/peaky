@@ -126,6 +126,20 @@ check("reclaim: isolated peak untouched", L.role_of(ledr, "far") == L.ROLE_UNEXP
 check("reclaim: parent M0 untouched", L.role_of(ledr, "par") == L.ROLE_M0)
 check("reclaim: ledger valid", L.validate(ledr) == [])
 
+# ---- reclaim_envelope_tails: deep multi-³⁷Cl tail of a poly-Cl M0 (chlorinated paraffin) ----
+# C11H18Cl6 [M-H]- @358.9467; M+4 (2×³⁷Cl) ratio C(6,2)·0.32²=1.54, M+6 (3×³⁷Cl)=0.66
+ledt = mk([("par", 358.94668, 1000.0), ("m4", 362.94078, 1535.0),
+           ("m6", 364.93783, 655.0), ("far", 400.0, 100.0)])
+L.commit_assignment(ledt, "par", neutral_formula="C11H18Cl6", adduct="[M-H]-",
+    ion_formula="C11H17Cl6-", ion_score=0.9, ppm_error=0.5, pass_no=0,
+    method="known:chlorinated_paraffin", confidence="Good (chlorinated-paraffin)", commentary="test")
+rest = CU.reclaim_envelope_tails(ledt, log=lambda *a: None)
+check("envelope-tail: M+4 (2×³⁷Cl) -> iso_child", L.role_of(ledt, "m4") == L.ROLE_ISO)
+check("envelope-tail: M+6 (3×³⁷Cl) -> iso_child", L.role_of(ledt, "m6") == L.ROLE_ISO)
+check("envelope-tail: count == 2", rest["tails"] == 2, rest)
+check("envelope-tail: isolated peak untouched", L.role_of(ledt, "far") == L.ROLE_UNEXPLAINED)
+check("envelope-tail: ledger valid", L.validate(ledt) == [])
+
 # --- prefer_amine_over_ammonium (uronium NH4 -> protonated amine) -----------
 leda = pd.DataFrame([
     dict(peak_id="a", mz=186.15, neutral_formula="C10H16O2", adduct="[M+NH4]+",
