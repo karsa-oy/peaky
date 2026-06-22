@@ -19,6 +19,7 @@ keywords = ["mass-spectrometry", "CIMS", "peak-assignment", "van-krevelen", "mas
 dependencies = [
     "mascope-sdk>=2026.5",
     "pandas>=2.1",
+    "pyarrow>=14",          # parquet engine — the per-batch TS (*_ts.parquet) is read/written across the pipeline
     "numpy>=1.24",
     "scipy>=1.10",
     "matplotlib>=3.7",
