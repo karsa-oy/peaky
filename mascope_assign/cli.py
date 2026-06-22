@@ -198,6 +198,8 @@ def cmd_batch(args) -> None:
     print(f"\n[batch] done -> {ctx.out_dir}")
     if res.get("report_pdf"):
         print(f"  report: {res['report_pdf']}")
+    if res.get("report_pdf_small"):
+        print(f"  report (small): {res['report_pdf_small']}")
 
 
 def cmd_report(args) -> None:
@@ -215,6 +217,8 @@ def cmd_report(args) -> None:
         generated=(args.generated or ""), profile=prof)
     out = PL.generate_report(ctx, os.path.expanduser(args.ts), subject=args.subject)
     print("wrote", out.get("report_pdf"))
+    if out.get("report_pdf_small"):
+        print("wrote", out.get("report_pdf_small"), "(compressed)")
 
 
 def cmd_gka(args) -> None:

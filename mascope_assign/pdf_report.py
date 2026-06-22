@@ -765,3 +765,58 @@ def build(out_dir: str, *, tag: str, label: str, ts_path: str | None = None,
                          fontsize=10, color="#B00020", wrap=True)
                 _close(pdf, fig)
     return out_pdf
+
+
+def compress_pdf(in_pdf: str, out_pdf: str | None = None, *, max_px: int = 850,
+                 quality: int = 58, min_mb: float = 2.0, log=print) -> str | None:
+    """Write a size-reduced COMPANION of a report PDF, for emailing/sharing.
+
+    The bulk of a report is the embedded figure rasters; this downsamples each to
+    `max_px` on its long edge and re-encodes it as JPEG (`quality`), while leaving
+    the page TEXT vector (so formulas/labels stay crisp). The original `in_pdf` is
+    never modified — a sibling `<name>_compressed.pdf` is written and its path
+    returned. Returns None (no-op) when: PyMuPDF/Pillow are not installed (optional
+    deps — `pip install 'mascope-assign[compress]'`), the input is already under
+    `min_mb`, or anything goes wrong. Deliberately kept out of `build()` so the
+    primary report stays byte-for-byte deterministic (see test_determinism)."""
+    if out_pdf is None:
+        out_pdf = (in_pdf[:-4] if in_pdf.lower().endswith(".pdf") else in_pdf) + "_compressed.pdf"
+    try:
+        if os.path.getsize(in_pdf) < min_mb * 1e6:
+            return None
+    except OSError:
+        return None
+    try:
+        import io
+        import fitz                      # PyMuPDF (optional)
+        from PIL import Image            # Pillow (optional)
+    except Exception:
+        log("[report] compress skipped (install 'mascope-assign[compress]' for PyMuPDF+Pillow)")
+        return None
+    try:
+        doc = fitz.open(in_pdf)
+        seen: set = set()
+        for page in doc:
+            for img in page.get_images(full=True):
+                xref = img[0]
+                if xref in seen:
+                    continue
+                seen.add(xref)
+                try:
+                    raw = doc.extract_image(xref)
+                    im = Image.open(io.BytesIO(raw["image"]))
+                    w, h = im.size
+                    if max(w, h) > max_px:
+                        s = max_px / max(w, h)
+                        im = im.resize((max(1, int(w * s)), max(1, int(h * s))), Image.LANCZOS)
+                    buf = io.BytesIO()
+                    im.convert("RGB").save(buf, "JPEG", quality=quality, optimize=True)
+                    page.replace_image(xref, stream=buf.getvalue())
+                except Exception:
+                    pass                  # one bad image must not abort compression
+        doc.save(out_pdf, garbage=4, deflate=True, clean=True)
+        doc.close()
+        return out_pdf
+    except Exception as e:                # never let compression break a run
+        log(f"[report] compress failed ({e}); keeping the full report only")
+        return None

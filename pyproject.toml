@@ -28,6 +28,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+# `pip install mascope-assign[compress]` enables the size-reduced companion PDF
+# (pdf_report.compress_pdf). Absent these, the report still builds; only the
+# `_compressed.pdf` is skipped.
+compress = ["PyMuPDF>=1.23", "Pillow>=9.0"]
 
 [project.scripts]
 mascope-assign = "mascope_assign.cli:main"

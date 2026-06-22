@@ -110,6 +110,33 @@ with tempfile.TemporaryDirectory() as d:
     except ImportError:
         pass
 
+    # --- compress_pdf: optional size-reduced companion ---
+    check("compress_pdf is a no-op when the input is already small (returns None)",
+          R.compress_pdf(out4, min_mb=100.0) is None)
+    try:
+        import io  # noqa: F401
+        import fitz
+        from PIL import Image  # noqa: F401
+        import numpy as np
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from matplotlib.backends.backend_pdf import PdfPages
+        big = os.path.join(d, "big.pdf")
+        with PdfPages(big) as pp:
+            fig, ax = plt.subplots(figsize=(6, 6))
+            ax.imshow(np.random.rand(1600, 1600, 3))     # large embedded raster
+            pp.savefig(fig, dpi=200); plt.close(fig)
+        small = R.compress_pdf(big, min_mb=0.0, max_px=200, quality=40)
+        check("compress_pdf shrinks an image-heavy PDF",
+              bool(small) and os.path.getsize(small) < os.path.getsize(big),
+              f"{os.path.getsize(big)} -> {os.path.getsize(small) if small else None}")
+        check("compressed PDF is valid + keeps the page count",
+              bool(small) and open(small, "rb").read(4) == b"%PDF"
+              and fitz.open(small).page_count == fitz.open(big).page_count)
+    except ImportError:
+        pass
+
 def test_all():
     assert FAIL == 0, f"{FAIL} checks failed"
 
