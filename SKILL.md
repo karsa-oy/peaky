@@ -311,8 +311,9 @@ assertions across 30 files**, no network (io*mascope live smoke gated behind
 `MASCOPE_LIVE=1`). `python3 tests/test_smoke.py` is a 2-second no-creds install check.
 Every module has a matching `tests/test*<module>.py`; CI (`.github/workflows/test.yml`)
 runs the suite on 3.11–3.13 with no credentials. Add a test with each change; keep it green.
-See `README.md`for the dev loop and`ROADMAP.md` for current state + the open
-quality work + lessons.
+See `docs/ARCHITECTURE.md` for the design (ledger model, pass sequence, data
+flow), `README.md` for the dev loop, and `docs/ROADMAP.md` for current state +
+the open quality work + lessons.
 
 ## Gotchas
 

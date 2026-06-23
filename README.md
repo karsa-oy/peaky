@@ -135,9 +135,14 @@ offline suite (850+ assertions across 31 files, no network) must stay green:
 pytest tests/                        # or run any tests/test_*.py as a standalone script
 ```
 
-CI runs the suite on Python 3.11–3.13 with no credentials. Design invariants,
-development history, and the full module map live in **[SKILL.md](SKILL.md)** and
-**[ROADMAP.md](ROADMAP.md)**.
+CI runs the suite on Python 3.11–3.13 with no credentials.
+
+- **How Peaky works** — the ledger model, pass sequence, data flow, and module
+  map: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** (start here).
+- **Claude-Code operating instructions** — reagents, flags, chemistry rules:
+  **[SKILL.md](SKILL.md)**.
+- **Development history + open items**: **[docs/ROADMAP.md](docs/ROADMAP.md)**.
+- **Release notes**: **[CHANGELOG.md](CHANGELOG.md)**.
 
 ## License
 
