@@ -63,7 +63,7 @@ mascope-assign assign --sample-id <ID> --reagent <Br|Ur|NO3|NO3_15N|auto> \
     --height-cutoff 100 --output-dir ~/mascope-output/<name>
 ```
 
-(`python3 -m mascope_assign assign …` and the legacy `scripts/run_assignment.py`
+(`python3 -m peaky assign …` and the legacy `scripts/run_assignment.py`
 forwarder are equivalent.)
 
 Writes `<ID>_<UTC>_{ledger.csv, assignments.xlsx, summary.md, manifest.json,
@@ -272,7 +272,7 @@ tolerance `δGKA ≈ (X/mass(R))·δm`, `δm = ppm·(m/z)·1e-6`. Use it to spot
 structure (CF₂ contaminant ladders, oxidation series) the auto-detector did not
 already open. `run_assignment.py` emits one per run.
 
-## Module map (`mascope_assign/`)
+## Module map (`peaky/`)
 
 | module                | role                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

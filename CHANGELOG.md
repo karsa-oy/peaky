@@ -18,11 +18,19 @@ install, enforced reproducibility, organized outputs, and a design doc.
   endpoints. Additive and gated — modern servers are unaffected.
 
 ### Changed
+- **Import package renamed `mascope_assign` → `peaky`** (matching the dist + CLI
+  name). A `mascope_assign` back-compat shim aliases the old import path — including
+  submodules — to the same `peaky` objects, so existing `import mascope_assign`
+  code keeps working unchanged. Version bumped to 0.4.0.
+- **Single canonical lockfile.** Removed the hand-maintained `requirements.txt`
+  (which had drifted from the real pins); `uv.lock` is now the only pinned source.
+  `pip install -e .` uses the pyproject ranges; `uv sync` uses the exact pins. CI
+  gains a `locked` job that enforces `uv.lock` with `uv sync --frozen`.
 - Moved `ROADMAP.md` → `docs/ROADMAP.md` (kept as development history); README now
   points at `docs/ARCHITECTURE.md` as the entry point for how Peaky works.
+- Repository URL → `github.com/karsa-oy/peaky` (the public home).
 
 <!-- Filled in as the remaining phases land:
-### Changed (packaging)   — import package renamed mascope_assign → peaky (back-compat shim); single canonical lock.
 ### Fixed (reproducibility) — run driver now exports SOURCE_DATE_EPOCH from the run time so figures/PDF are byte-stable.
 ### Changed (outputs)     — run dir organized into figures/ tables/ report/; input time-series no longer copied per run.
 -->

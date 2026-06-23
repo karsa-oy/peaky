@@ -6,11 +6,11 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mascope_assign import cleanup as CU       # noqa: E402
-from mascope_assign import ledger as L         # noqa: E402
-from mascope_assign import chemistry as C      # noqa: E402
-from mascope_assign import contexts as X       # noqa: E402
-from mascope_assign import passes as P         # noqa: E402
+from peaky import cleanup as CU       # noqa: E402
+from peaky import ledger as L         # noqa: E402
+from peaky import chemistry as C      # noqa: E402
+from peaky import contexts as X       # noqa: E402
+from peaky import passes as P         # noqa: E402
 
 PASS = FAIL = 0
 def check(name, cond, detail=""):

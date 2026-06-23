@@ -6,8 +6,8 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mascope_assign import analyte_viz as V  # noqa: E402
-from mascope_assign import chemistry as C    # noqa: E402
+from peaky import analyte_viz as V  # noqa: E402
+from peaky import chemistry as C    # noqa: E402
 
 PASS = FAIL = 0
 

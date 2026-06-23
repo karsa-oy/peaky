@@ -123,7 +123,7 @@ config-expandable; Orange Ur+Br shareable as the offline demo. Data path LIVE-VE
   / PassConfig / get_context / resolve_reagent / ReagentProfile / build_report + __version__), `.env.example`
   (+ `.gitignore` `!.env.example`). Creds docs unified to `~/.mascope/.env` (io_mascope docstring + README +
   SKILL) + `$MASCOPE_ENV` override + an actionable `connect()` error. `pip install -e .` verified from /tmp.
-- **Phase 1 DONE — one CLI + safety.** `mascope_assign/cli.py` + `__main__.py`; `[project.scripts]
+- **Phase 1 DONE — one CLI + safety.** `peaky/cli.py` + `__main__.py`; `[project.scripts]
   mascope-assign`. Subcommands: `list datasets|batches|samples` (discovery — `io_mascope.list_datasets`
   / `list_batches` added), `assign` (+ **`--reagent` / `--adducts` / `--context` / `--env`** — closes the
   silent positive-mode→[M-H]- mis-assignment blocker by forcing the profile's channels), `gka` (offline).
@@ -131,7 +131,7 @@ config-expandable; Orange Ur+Br shareable as the offline demo. Data path LIVE-VE
   back-compat shims. Fail-fast creds preflight + WAF-403 / 401 / stale-404 friendly errors. `test_cli.py`
   (19 checks). **Suite 768 assertions / 27 files green.** README + SKILL run sections rewritten to the CLI;
   SKILL execution language made tool-agnostic (built-in Bash, not the named MCP).
-- **Phase 2 DONE — scratch drivers folded into the package (byte-verified).** `mascope_assign/clustering.py`
+- **Phase 2 DONE — scratch drivers folded into the package (byte-verified).** `peaky/clustering.py`
   `cluster_batch(out_dir, ts, profile)` (lift of run_clusters.py 244 LOC) + `analyte_viz.van_krevelen_batch`
   + `timeseries.auto_bin_minutes` (shared bin heuristic). `pipeline.py` gained `RunContext` / `make_run_context`
   / `generate_report` (offline cluster+VK+report) / `run_batch` (full assign→report) — replacing run_peaky.py's
@@ -171,7 +171,7 @@ config-expandable; Orange Ur+Br shareable as the offline demo. Data path LIVE-VE
 A 6-dimension adversarial review of the Ur/Br PDFs surfaced two genuinely misleading
 headline numbers + a missing science narrative; all fixed in-package (presentation only,
 no live re-run — regenerated from the canonical orange-assign/<tag>/ ledgers via run_peaky.py):
-- **NEW `mascope_assign/composition.py`** (pure; test_composition.py 24): `signal_by_backbone`
+- **NEW `peaky/composition.py`** (pure; test_composition.py 24): `signal_by_backbone`
   (intensity-weighted CHO/CHON/CHOS), `amine_shadow_stats`/`collapsed_composition` (the
   [M+NH4]+(CHO) vs [M+H]+(amine X+NH3) degeneracy — 243 of 414 Ur CHON share an exact NH3-shifted
   CHO twin counted twice → 639 distinct collapsed), `top_species_by_signal`, `oligomer_flag`
@@ -230,7 +230,7 @@ no live re-run — regenerated from the canonical orange-assign/<tag>/ ledgers v
 README.md refreshed (SECTIONS list, composition.py/plausibility.py modules, A4 changers, PDF-name=Report
 ID, determinism note, test count **749 across 26 files**). Tree clean. **NEXT FOCUS = REFACTORING.**
 Prime candidates: (1) fold the scratch drivers `~/mascope-output/orange-assign/run_{orange,clusters,
-vankrevelen,report,peaky}.py` into ONE parameterised package CLI (`mascope_assign/cli.py` or extend
+vankrevelen,report,peaky}.py` into ONE parameterised package CLI (`peaky/cli.py` or extend
 `pipeline.py`) — they're the last copy-paste layer outside the repo and the label/batch/reagent maps are
 duplicated across them; (2) the report drivers re-read per-file ledgers to rebuild the explained-mz /
 ion-label / meta maps that `assign_batch` already computed — thread those through `out['…']` instead of
@@ -244,7 +244,7 @@ WAF** — a burst of live runs trips a 403 HTML block ("Attention Required", NOT
 that clears after 15-30 min of NO traffic (polling EXTENDS it). For a blocked live re-run use
 `~/mascope-output/orange-assign/deferred_rerun.py` (waits it out, then runs).
 
-**PIPELINE — all built + tested this session (`mascope_assign/`):**
+**PIPELINE — all built + tested this session (`peaky/`):**
 - `profiles.py` — ReagentProfile (Br/Ur: polarity/adducts/normaliser/`context`) + `resolve('auto')`.
 - `sampling.py` — THE RULE: assign **5 evenly-TIME-spaced samples + the max-TIC sample**, then
   merge (a single averaged file misses part-of-run analytes). Selecting in TIME not row-index.

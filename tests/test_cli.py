@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mascope_assign import cli, gka_widget, profiles  # noqa: E402
+from peaky import cli, gka_widget, profiles  # noqa: E402
 
 PASS = FAIL = 0
 def check(name, cond, detail=""):

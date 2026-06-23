@@ -5,8 +5,8 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mascope_assign import ledger as L  # noqa: E402
-from mascope_assign import report as R  # noqa: E402
+from peaky import ledger as L  # noqa: E402
+from peaky import report as R  # noqa: E402
 
 PASS = FAIL = 0
 
@@ -108,7 +108,7 @@ except ImportError:
     print("  (openpyxl not installed; skipping excel write)")
 
 # markdown (on a tier-stamped ledger, as assign.run leaves it)
-from mascope_assign import tiers as T  # noqa: E402
+from peaky import tiers as T  # noqa: E402
 T.apply_tiers(led)
 result = {"ledger": led, "stats": L.stats(led), "sample_id": "TEST",
           "context": "ambient-air", "prescan": {"has_Br": False}, "problems": []}

@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mascope_assign import io_mascope as IO  # noqa: E402
+from peaky import io_mascope as IO  # noqa: E402
 
 PASS = FAIL = 0
 HERE = Path(__file__).resolve().parent
@@ -149,7 +149,7 @@ check("flatten does NOT re-anchor a normal (no-^) ion",
       abs(float(_pf[_pf["is_base"]]["theo_mz"].iloc[0]) - 201.076) < 1e-3)
 
 # ---------- estimate_offset: rough offset from the sample's own matches ----------
-from mascope_assign import chemistry as _C  # noqa: E402
+from peaky import chemistry as _C  # noqa: E402
 # build a synthetic match table at a uniform -1.9 ppm offset (Br-CIMS)
 _off_rows = []
 for f, mech in [("C10H16O4", "+Br-"), ("C10H16O3", "+Br-"), ("C5H10O3", "+Br-"),

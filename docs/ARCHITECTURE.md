@@ -208,7 +208,7 @@ See [`SKILL.md`](../SKILL.md#outputs) for the per-file schema.
 
 ## 9. Module map
 
-Grouped by responsibility (full table in [`SKILL.md`](../SKILL.md#module-map-mascope_assign)):
+Grouped by responsibility (full table in [`SKILL.md`](../SKILL.md#module-map-peaky)):
 
 **I/O & scoring** — `io_mascope.py` (the only Mascope I/O: peaks, cheminfo,
 parallel `match_compounds` + per-isotopologue parser, offset estimation; legacy

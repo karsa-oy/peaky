@@ -3,7 +3,7 @@ log time-series, each a self-contained HTML file (canvas + hover tooltip, no
 server, no external library) where hovering a point/trace shows the neutral
 FORMULA and the ION channel(s) it was detected as.
 
-Data comes from mascope_assign.analyte_viz so the figures are computed
+Data comes from peaky.analyte_viz so the figures are computed
 identically for any instrument (one row per neutral, Si excluded, RAW intensity,
 changing = cv>=0.30).
 
@@ -26,7 +26,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from mascope_assign import analyte_viz as V  # noqa: E402
+from peaky import analyte_viz as V  # noqa: E402
 
 
 def html_van_krevelen(payload: dict, title: str) -> str:

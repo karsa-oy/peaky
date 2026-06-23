@@ -7,7 +7,7 @@ Mascope data. For depth see [SKILL.md](SKILL.md); for dev/iteration see
 ## 1. Install
 
 ```bash
-git clone https://github.com/alekseishcherbinin/peaky.git && cd peaky
+git clone https://github.com/karsa-oy/peaky.git && cd peaky
 python3 -m pip install -e .          # pulls mascope-sdk + pandas/numpy/scipy/matplotlib/openpyxl
 ```
 Needs Python ≥ 3.11. Everything (incl. `mascope-sdk`) installs from public PyPI —
@@ -105,7 +105,8 @@ peaky batch --batch "<batch>" --reagent Ac --reagent-config myreagents.json ...
 - **`401` / token errors** — refresh `MASCOPE_ACCESS_TOKEN` in `~/.mascope/.env`.
 - **sample/batch "not found"** — ids go stale when a server copy is renamed;
   re-fetch fresh names with `peaky list`.
-- **`ModuleNotFoundError`** — re-run `pip install -e .` (or `pip install -r requirements.txt`).
+- **`ModuleNotFoundError`** — re-run `pip install -e .` (or, for the exact pinned
+  versions, `uv sync` from the repo root).
 
 The CLI catches these at the boundary and prints an actionable hint rather than a
 raw traceback.

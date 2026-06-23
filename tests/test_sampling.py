@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mascope_assign import sampling as SS  # noqa: E402
+from peaky import sampling as SS  # noqa: E402
 
 PASS = FAIL = 0
 def check(name, cond, detail=""):

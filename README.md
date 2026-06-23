@@ -48,10 +48,15 @@ no private index, and **no Mascope account is needed just to install or to run t
 offline tests.**
 
 ```bash
-git clone https://github.com/alekseishcherbinin/peaky.git
+git clone https://github.com/karsa-oy/peaky.git
 cd peaky
 python3 -m pip install -e .          # registers the `peaky` command (and `mascope-assign` alias)
 ```
+
+`pip install -e .` resolves the conservative version ranges in `pyproject.toml`.
+For the **exact pinned versions** validated in CI, use the lockfile instead:
+`uv sync` (or `uv pip sync` into an existing environment). `uv.lock` is the single
+source of truth for pins — there is no separate `requirements.txt`.
 
 Confirm with the no-network smoke test (≈2 s):
 

@@ -31,7 +31,7 @@ __version__ = "0.3.0"  # + legacy workspace-server support (connect health-check
 # Precedence: --env / $MASCOPE_ENV > a PROJECT-LOCAL .env (the repo root, next to
 # pyproject.toml/the package — clone-and-go — or the current dir) > the home
 # locations (~/.mascope/.env is the canonical shared one).
-_PKG_DIR = os.path.dirname(os.path.abspath(__file__))           # .../mascope_assign
+_PKG_DIR = os.path.dirname(os.path.abspath(__file__))           # .../peaky
 _REPO_ENV = os.path.join(os.path.dirname(_PKG_DIR), ".env")     # repo-root/.env (editable install)
 CANONICAL_ENV = "~/.mascope/.env"
 ENV_SEARCH = [_REPO_ENV, ".env", CANONICAL_ENV, "~/mascope-mcp/.env",

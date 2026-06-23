@@ -48,7 +48,7 @@ def _skill_version() -> str:
         av = assign.__version__
     except Exception:
         av = "?"
-    return f"mascope_assign (assign v{av}) · git {sha}"
+    return f"peaky (assign v{av}) · git {sha}"
 
 
 def load_context(out_dir: str, *, tag: str, label: str, ts_path: str | None = None,
@@ -731,7 +731,7 @@ def methods(ctx, pdf):
                   ("b", "  not a measurement (see Composition for the degeneracy it leaves).")]
     _text_lines(fig, lines, y0=0.88, dy=0.026)
     if ctx.get("generated"):
-        fig.text(0.08, 0.06, f"mascope_assign · generated {ctx['generated']}", fontsize=8, color=GREY)
+        fig.text(0.08, 0.06, f"peaky · generated {ctx['generated']}", fontsize=8, color=GREY)
     _close(pdf, fig)
 
 
