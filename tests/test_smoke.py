@@ -22,8 +22,8 @@ def check(name, cond, detail=""):
 import peaky as ma  # noqa: E402
 
 check("package __version__ present", isinstance(ma.__version__, str) and bool(ma.__version__))
-for name in ("run", "run_batch", "run_pipeline", "PassConfig", "get_context",
-             "resolve_reagent", "ReagentProfile", "build_report"):
+for name in ("run", "run_batch", "run_assign_batch", "run_pipeline", "PassConfig",
+             "get_context", "resolve_reagent", "ReagentProfile", "build_report"):
     check(f"public API exposes {name}", hasattr(ma, name))
 
 # 2) every package submodule imports (NO network — io_mascope's SDK import is lazy)

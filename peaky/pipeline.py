@@ -232,12 +232,18 @@ def generate_report(ctx: RunContext, ts, *, subject: str | None = None,
 def run_batch(*, batch: str, dataset: str | None = None, reagent: str = "auto",
               base_out: str, ts=None, when=None, subject: str | None = None,
               amine_r_min: float = 0.7, do_report=True, config: str | None = None,
+              select: str = "representative", coverage_target: float = 0.85,
+              k_max: int = 10, height_floor: float = 1000.0,
               log=print, **assign_kw) -> dict:
-    """Full batch pipeline in ONE call: representative-sample ASSIGN (live
-    match_compounds) -> merge -> cluster figures -> Van Krevelen -> PDF report,
-    into one versioned run folder. `ts` is the full-batch per-sample peak time
-    series (DataFrame or parquet path); if None it is fetched live and reused for
-    the amine gate + clustering. Returns {ctx, assign, cluster, vk, report_pdf}."""
+    """Full batch pipeline in ONE call: sample-subset ASSIGN (live match_compounds)
+    -> merge -> cluster figures -> Van Krevelen -> PDF report, into one versioned run
+    folder. `ts` is the full-batch per-sample peak time series (DataFrame or parquet
+    path); if None it is fetched live and reused for the amine gate + clustering.
+
+    `select` picks the assigned-sample strategy: 'representative' (THE RULE: 5
+    time-spaced + max-TIC) or 'brightest' (bin all peaks -> assign each significant
+    m/z bin's brightest sample; `coverage_target`/`k_max`/`height_floor` tune it).
+    Returns {ctx, assign, cluster, vk, report_pdf}."""
     from . import assign_batch as AB
 
     ts_src = None
@@ -255,7 +261,8 @@ def run_batch(*, batch: str, dataset: str | None = None, reagent: str = "auto",
 
     res = AB.run(batch=batch, dataset=dataset, reagent=prof.name,
                  out_dir=ctx.out_dir, ts_peaks=ts, amine_r_min=amine_r_min,
-                 log=log, **assign_kw)
+                 select=select, coverage_target=coverage_target, k_max=k_max,
+                 height_floor=height_floor, log=log, **assign_kw)
     gen = generate_report(ctx, ts, subject=subject, do_report=do_report, log=log)
 
     # provenance: pin this run to its exact code + input-data hash + config +
@@ -272,6 +279,8 @@ def run_batch(*, batch: str, dataset: str | None = None, reagent: str = "auto",
         ts_path=ctx.ts_path,
         counts={"merged_M0": summ.get("merged_M0"),
                 "merged_tiers": summ.get("merged_tiers"),
-                "n_samples": summ.get("n_files")},
+                "n_samples": summ.get("n_files"),
+                "select": summ.get("select"),
+                "coverage_target": summ.get("coverage_target")},
         created_utc=ctx.when.isoformat(), log=log)
     return {"ctx": ctx, "assign": res, **gen}

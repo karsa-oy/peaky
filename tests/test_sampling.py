@@ -110,6 +110,63 @@ esel = SS.select_representative_samples(empty)
 check("empty peaks -> empty selection with role column",
       len(esel) == 0 and "role" in esel.columns, list(esel.columns))
 
+# === brightest-coverage strategy (bin-then-assign) ==========================
+def make_binned_batch():
+    """12 samples sharing a dim background; 3 'burst' samples are each the brightest
+    for a distinct, exclusive block of m/z bins (b00:20 bins, b03:10, b07:5)."""
+    t0b = pd.Timestamp("2025-10-01 21:00:00", tz="UTC")
+    rows = []
+    for i in range(12):
+        sid, t = f"b{i:02d}", t0b + pd.Timedelta(minutes=10 * i)
+        rows.append(dict(sample_item_id=sid, sample_item_name=str(t),
+                         datetime_utc=t, mz=150.0, height=50.0))   # shared dim bg (< floor)
+    for sid, mz0, nbin in (("b00", 200.0, 20), ("b03", 300.0, 10), ("b07", 400.0, 5)):
+        t = t0b + pd.Timedelta(minutes=10 * int(sid[1:]))
+        for k in range(nbin):
+            rows.append(dict(sample_item_id=sid, sample_item_name=str(t),
+                             datetime_utc=t, mz=mz0 + k, height=5000.0))   # bright, exclusive
+    return pd.DataFrame(rows)
+
+
+bp = make_binned_batch()
+bsel = SS.select_brightest_coverage_samples(bp, height_floor=1000.0)
+bids = list(bsel["sample_item_id"]); bw = dict(zip(bsel["sample_item_id"], bsel["bins_won"]))
+check("brightest: has sample_item_id + role + bins_won columns",
+      {"sample_item_id", "role", "bins_won"} <= set(bsel.columns), list(bsel.columns))
+check("brightest: the 3 burst samples are all selected (winners)",
+      all(s in bids for s in ("b00", "b03", "b07")), bids)
+check("brightest: bins_won ranks b00 > b03 > b07",
+      bw.get("b00", 0) > bw.get("b03", 0) > bw.get("b07", 0), bw)
+check("brightest: b00 wins the most bins (20)", bw.get("b00") == 20, bw)
+check("brightest: k_min <= n <= k_max", SS.N_TIME + 1 <= len(bsel) <= 10, len(bsel))
+check("brightest: time-ordered", list(bsel["datetime_utc"]) == sorted(bsel["datetime_utc"]))
+# schema parity with the representative selector (assign_batch.run consumes [sample_item_id])
+rsel = SS.select_representative_samples(bp)
+check("brightest: shares sample_item_id/role schema with representative",
+      {"sample_item_id", "role"} <= set(bsel.columns)
+      and {"sample_item_id", "role"} <= set(rsel.columns))
+check("select_brightest_coverage_sample_ids == table ids",
+      SS.select_brightest_coverage_sample_ids(bp, height_floor=1000.0) == bids)
+# coverage_target=1.0 -> all winners present, still <= k_max
+csel = SS.select_brightest_coverage_samples(bp, coverage_target=1.0, height_floor=1000.0)
+check("brightest: coverage_target=1.0 keeps all winners, <= k_max",
+      all(s in set(csel["sample_item_id"]) for s in ("b00", "b03", "b07")) and len(csel) <= 10)
+# floor above every peak -> no significant bins -> padded to k_min (+ <=2 endpoints),
+# all bins_won 0
+hsel = SS.select_brightest_coverage_samples(bp, height_floor=1e9)
+check("brightest: floor above all peaks -> >= k_min, bins_won all 0",
+      SS.N_TIME + 1 <= len(hsel) <= SS.N_TIME + 3 and set(hsel["bins_won"]) == {0},
+      f"{len(hsel)} rows, bins_won={set(hsel['bins_won'])}")
+# k_max caps the winners (k_min clamps to k_max); endpoints add at most +2
+ksel = SS.select_brightest_coverage_samples(bp, coverage_target=1.0, k_max=3, height_floor=1000.0)
+check("brightest: --k-max caps the assigned count (winners + <=2 endpoints)",
+      len(ksel) <= 3 + 2, len(ksel))
+# tiny batch (<= k_min) -> all returned
+tinyb = make_peaks(times[:4], [1e5, 5e5, 2e5, 3e5], sample_ids=["a", "b", "c", "d"])
+tsel = SS.select_brightest_coverage_samples(tinyb)
+check("brightest: n <= k_min -> all returned", len(tsel) == 4, len(tsel))
+
+
 def test_all():
     assert FAIL == 0, f"{FAIL} checks failed"
 

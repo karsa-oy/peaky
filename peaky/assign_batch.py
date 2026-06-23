@@ -224,6 +224,8 @@ def _m0(ledger: pd.DataFrame) -> pd.DataFrame:
 def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
         reagent: str = "auto", context: str | None = None,
         n_time: int = SS.N_TIME, include_max_tic: bool = True,
+        select: str = "representative", coverage_target: float = 0.85,
+        k_max: int = 10, height_floor: float = 1000.0,
         out_dir: str, tol_ppm: float = DEFAULT_TOL_PPM,
         sample_ids: list | None = None, ts_peaks=None, amine_r_min: float = 0.7,
         log=print, **assign_kw) -> dict:
@@ -253,8 +255,19 @@ def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
     prof = P.resolve(reagent, peaks)
     context = context or prof.context
     if sample_ids is None:
-        sel = SS.select_representative_samples(peaks, n_time=n_time,
-                                               include_max_tic=include_max_tic)
+        if select == "brightest":
+            # bin ALL batch peaks -> assign each significant bin's BRIGHTEST sample.
+            # Needs the per-PEAK table (height per peak): the pipeline passes it as
+            # ts_peaks; fall back to `peaks` if it already is per-peak.
+            src = ts_peaks if ts_peaks is not None else peaks
+            sel = SS.select_brightest_coverage_samples(
+                src, coverage_target=coverage_target, k_max=k_max,
+                height_floor=height_floor)
+            log(f"[assign_batch] brightest-coverage: {len(sel)} winner samples "
+                f"(target {coverage_target:.0%}, floor {height_floor:g} cps)")
+        else:
+            sel = SS.select_representative_samples(peaks, n_time=n_time,
+                                                   include_max_tic=include_max_tic)
         sample_ids = sel["sample_item_id"].tolist()
         sel.to_csv(os.path.join(TAB, "selected_samples.csv"), index=False)
     log(f"[assign_batch] {prof.label} context={context!r}: "
@@ -294,6 +307,8 @@ def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
     summary = {
         "reagent": prof.name, "label": prof.label, "context": context,
         "batch_name": batch,
+        "select": select,
+        "coverage_target": (coverage_target if select == "brightest" else None),
         "n_files": len(sample_ids), "sample_ids": sample_ids,
         "tol_ppm": tol_ppm, "offsets_ppm": offsets,
         "merged_M0": int(len(merged)),

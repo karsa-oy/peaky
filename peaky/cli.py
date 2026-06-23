@@ -193,7 +193,9 @@ def cmd_batch(args) -> None:
     res = PL.run_batch(batch=args.batch, dataset=args.dataset, reagent=args.reagent,
                        base_out=os.path.expanduser(args.out_dir), ts=args.ts,
                        subject=args.subject, do_report=not args.no_report,
-                       config=args.reagent_config)
+                       config=args.reagent_config, select=args.select,
+                       coverage_target=args.coverage_target, k_max=args.k_max,
+                       height_floor=args.height_floor)
     ctx = res["ctx"]
     print(f"\n[batch] done -> {ctx.out_dir}")
     if res.get("report_pdf"):
@@ -287,6 +289,17 @@ def build_parser() -> argparse.ArgumentParser:
                     help="cached full-batch TS parquet (else fetched live from the server)")
     pb.add_argument("--subject", default=None, help="optional subject phrase for the VK title")
     pb.add_argument("--no-report", action="store_true", help="skip the PDF report")
+    pb.add_argument("--select", choices=["representative", "brightest"],
+                    default="representative",
+                    help="sample-selection strategy: 'representative' (5 time-spaced + "
+                         "max-TIC) or 'brightest' (bin all peaks, assign each significant "
+                         "m/z bin's brightest sample — better analyte coverage)")
+    pb.add_argument("--coverage-target", type=float, default=0.85,
+                    help="brightest: fraction of significant m/z bins to cover (default 0.85)")
+    pb.add_argument("--k-max", type=int, default=10,
+                    help="brightest: max number of winner samples to assign (default 10)")
+    pb.add_argument("--height-floor", type=float, default=1000.0,
+                    help="brightest: a bin is significant if its max height >= this (cps)")
     pb.set_defaults(func=cmd_batch)
 
     pr = sub.add_parser("report",

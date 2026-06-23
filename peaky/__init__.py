@@ -11,8 +11,8 @@ Public API (import from the package root; internals may move):
     import peaky as ma
 
     ma.run(sample_id, context)        # single-sample assignment -> dict
-    ma.run_batch(batch=..., ...)      # representative-sample batch assignment
-    ma.run_pipeline(batch=..., ...)   # the orchestration spine
+    ma.run_batch(batch=..., ...)      # FULL batch pipeline: assign -> cluster -> VK -> PDF report
+    ma.run_assign_batch(batch=..., ...) # the assign + merge half only (no figures/report)
     ma.PassConfig(...)                # assignment knobs
     ma.get_context("ambient-air")     # context (plausibility + contaminant families)
     ma.resolve_reagent("auto", peaks) # ReagentProfile (Br / Ur / NO3 ...)
@@ -27,9 +27,10 @@ __version__ = "0.4.0"
 
 # public name -> (submodule, attribute)
 _LAZY = {
-    "run": ("assign", "run"),
-    "run_batch": ("assign_batch", "run"),
-    "run_pipeline": ("pipeline", "run"),
+    "run": ("assign", "run"),                       # single-sample assignment
+    "run_batch": ("pipeline", "run_batch"),         # FULL pipeline (assign->cluster->VK->report)
+    "run_assign_batch": ("assign_batch", "run"),    # assign + merge half only
+    "run_pipeline": ("pipeline", "run_batch"),      # back-compat alias of run_batch
     "PassConfig": ("passes", "PassConfig"),
     "get_context": ("contexts", "get_context"),
     "resolve_reagent": ("profiles", "resolve"),

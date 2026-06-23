@@ -37,6 +37,17 @@ check("parse `assign --adducts` (multi)", a.adducts == ["[M+Br]-", "[M-H]-"] and
 a = P.parse_args(["--env", "/tmp/x.env", "list", "datasets"])
 check("top-level --env is parsed", a.env == "/tmp/x.env")
 
+# ---- batch selection strategy flags -----------------------------------------
+a = P.parse_args(["batch", "--batch", "B"])
+check("batch defaults to representative selection",
+      a.func is cli.cmd_batch and a.select == "representative"
+      and a.coverage_target == 0.85 and a.k_max == 10 and a.height_floor == 1000.0)
+a = P.parse_args(["batch", "--batch", "B", "--select", "brightest",
+                  "--coverage-target", "0.9", "--k-max", "8", "--height-floor", "500"])
+check("parse `batch --select brightest` + knobs",
+      a.select == "brightest" and a.coverage_target == 0.9
+      and a.k_max == 8 and a.height_floor == 500.0)
+
 # subcommand is required
 try:
     P.parse_args([])
