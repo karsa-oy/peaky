@@ -1,6 +1,6 @@
 """Deprecated entry point — superseded by the installed console command:
 
-    mascope-assign assign --sample-id <ID> --reagent <Br|Ur|auto> ...
+    peaky assign --sample-id <ID> --reagent <Br|Ur|auto> ...
     (or: python3 -m peaky assign ...)
 
 Kept as a thin forwarder so the old `python3 scripts/run_assignment.py ...` call

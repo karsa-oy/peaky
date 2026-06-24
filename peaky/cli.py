@@ -1,12 +1,13 @@
 """Console entry point for `peaky` (alias: `mascope-assign`).
 
 Subcommands:
-  setup    one-command workspace bootstrap (.env + output/ + verify); run once after install
-  list     discover data on the server (datasets / batches / samples)
-  assign   single-sample multi-pass assignment -> ledger/xlsx/md/json/gka.html
-  batch    whole-batch pipeline: assign subset -> merge -> cluster -> Van Krevelen -> PDF
-  report   regenerate figures + PDF from an existing run folder (offline)
-  gka      build the interactive rotating-GKA HTML from a ledger CSV (offline)
+  setup          one-command workspace bootstrap (.env + output/ + verify)
+  install-skill  register SKILL.md as a Claude Code skill (~/.claude/skills/peaky/)
+  list           discover data on the server (workspaces / datasets / batches / samples)
+  assign         single-sample multi-pass assignment -> ledger/xlsx/md/json/gka.html
+  batch          whole-batch pipeline: assign subset -> merge -> cluster -> Van Krevelen -> PDF
+  report         regenerate figures + PDF from an existing run folder (offline)
+  gka            build the interactive rotating-GKA HTML from a ledger CSV (offline)
 
 Run `peaky <cmd> --help` for each. Heavy work runs on the host Python
 (this package + mascope-sdk). A Mascope account/token is read from ~/.mascope/.env
@@ -341,6 +342,13 @@ def build_parser() -> argparse.ArgumentParser:
                                       "(.env + output/ + verify; run once after install)")
     ps.set_defaults(func=cmd_setup)
 
+    pis = sub.add_parser("install-skill",
+                         help="register SKILL.md as a Claude Code skill (~/.claude/skills/peaky/)")
+    pis.add_argument("--name", default="peaky",
+                     help="skill folder name under the skills dir (default: peaky)")
+    pis.add_argument("--dir", default=None, help="skills dir (default: ~/.claude/skills)")
+    pis.set_defaults(func=cmd_install_skill)
+
     return ap
 
 
@@ -404,8 +412,8 @@ def cmd_setup(args) -> None:
     conn = "not set yet — edit .env (step 1)"
     if os.environ.get("MASCOPE_URL") and os.environ.get("MASCOPE_ACCESS_TOKEN"):
         try:
-            ds = IO.list_datasets(IO.connect())
-            conn = f"connected — {len(ds)} datasets visible"
+            ws = IO.list_workspaces()           # no workspace binding needed
+            conn = f"connected — {len(ws)} workspace(s) visible"
         except Exception as e:
             conn = f"creds present but connection failed ({type(e).__name__})"
 
@@ -414,17 +422,40 @@ Peaky workspace ready:  {repo}/
     .env              your Mascope creds (URL + token){'   <- CREATED, edit it' if created else ''}
     output/           all run outputs land here  (PEAKY_OUTPUT_DIR)
     peaky/  scripts/  the package + helper scripts
-    docs/             ARCHITECTURE / ASSIGNMENT / OUTPUTS  (+ SKILL.md)
+    SKILL.md          Claude Code skill instructions (run `peaky install-skill`)
+    docs/             ARCHITECTURE / ASSIGNMENT / OUTPUTS / ROADMAP
 
 Credentials: {conn}
 
 Next steps:
   1. edit .env   -> MASCOPE_URL + MASCOPE_ACCESS_TOKEN (from the Mascope web app)
-  2. peaky list datasets
-  3. peaky batch --batch "<name>" --dataset "<workspace>" --reagent <Br|Ur|NO3|...>
+  2. peaky list workspaces
+     peaky --workspace "<ws>" list datasets
+     peaky --workspace "<ws>" list batches --dataset "<dataset>"
+  3. peaky --workspace "<ws>" batch --batch "<name>" --dataset "<dataset>" --reagent <Br|Ur|NO3|...>
      -> a versioned run folder under output/ (ledger + figures + PDF report)
      (one sample only? peaky assign --sample-id <ID> --reagent <Br|Ur|...>)
-  (or just ask Claude: "assign formulas for batch <name> with the bromide reagent")""")
+  4. driving with Claude Code? run `peaky install-skill` once, then just ask:
+     "assign formulas for batch <name> with the bromide reagent\"""")
+
+
+def cmd_install_skill(args) -> None:
+    # offline: register SKILL.md as a Claude Code skill at ~/.claude/skills/<name>/.
+    # Copy (not symlink) so it works cross-platform with no admin / Developer Mode,
+    # and stays lean (just SKILL.md, not the whole repo like a clone-symlink).
+    import shutil
+
+    src = Path(_workspace_root()) / "SKILL.md"
+    if not src.is_file():
+        sys.exit(f"SKILL.md not found at {src}. Run `peaky install-skill` from a "
+                 "source checkout (git clone + pip install -e .).")
+    skills_dir = Path(args.dir).expanduser() if args.dir \
+        else Path.home() / ".claude" / "skills"
+    dest = skills_dir / args.name
+    dest.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src, dest / "SKILL.md")
+    print(f"Installed skill {args.name!r} -> {dest / 'SKILL.md'}")
+    print("Restart Claude Code to pick it up. Re-run after editing SKILL.md.")
 
 
 def _force_utf8_io() -> None:

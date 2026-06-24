@@ -21,7 +21,8 @@ peaky/                 ← the workspace (= your clone)
   .env                 your Mascope creds (URL + token)   ← edit this (step 2)
   output/              every run's results land here  (PEAKY_OUTPUT_DIR)
   peaky/  scripts/     the package + helper scripts
-  docs/                ARCHITECTURE / ASSIGNMENT / OUTPUTS  (+ SKILL.md)
+  SKILL.md             Claude Code skill instructions (`peaky install-skill`)
+  docs/                ARCHITECTURE / ASSIGNMENT / OUTPUTS / ROADMAP
 ```
 
 (Driving Peaky with Claude Code? Just point it at the clone and ask it to "install

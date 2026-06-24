@@ -1,6 +1,6 @@
 """Moved into the package -> peaky/gka_widget.py.
 
-Preferred: `mascope-assign gka LEDGER.csv [-o out.html] [--ppm 2]`
+Preferred: `peaky gka LEDGER.csv [-o out.html] [--ppm 2]`
        or  `python3 -m peaky.gka_widget LEDGER.csv ...`
 This shim keeps the old `python3 scripts/gka_widget.py ...` invocation working.
 """
