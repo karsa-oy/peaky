@@ -4,6 +4,51 @@ All notable changes to Peaky are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — 0.5.0 (reference peaklists + chemical-plausibility hardening)
+
+Adds a context-gated literature/contaminant peaklist layer and closes a set of
+chemical-plausibility gaps surfaced by manual review and a cross-pipeline
+(Orbitool) comparison — the pipeline now assigns by mass **and** checks that the
+isotope evidence + ionization chemistry actually support each Identified formula.
+
+### Added
+- **Reference peaklists** (`peaky/reflists.py` + `peaky/data/peaklists/`): a curated,
+  self-describing catalog (metadata + version + references + provenance) of known
+  molecules per chemical system — seeded with α-pinene OH-oxidation HOM (Kang, FZJ
+  E&U 557; 830 neutrals) and the Keller 2008 MS contaminant list (59 neutrals).
+  Used three ways, all soft + provenance-tagged (never overrides an isotope-scored
+  Identified): (1) **selection prior** — a candidate on an active list wins a near-tie
+  in arbitration; (2) **rescue-verify** — unexplained peaks matched by mass are scored
+  with the server and committed if confirmed (or kept as a tentative low-quality
+  Candidate when too dim to confirm); (3) **report** corroboration/rescue section
+  + `tables/reflist_matches_*.csv`. Lists are context-gated by run metadata
+  (contaminants always active).
+- `docs/ASSIGNMENT_DETAIL.md` — exhaustive per-pass / per-gate pipeline reference.
+
+### Changed (chemical-plausibility hardening)
+- **Reagent-halocarbon relabel** — bromomethane reagent fragments mis-read as a bare
+  element + reagent-cluster (e.g. CHBr₂⁻ as "C" via `[M+HBr+Br]-`) are reclassified
+  on the invariant ion composition (CH₂Br₂→reagent, dibromoacetic acid→named).
+- **Confirmed-isotope F-demote exemption** — a high-F formula is exempted only when a
+  Cl/Br/S anchor's diagnostic isotope (³⁴S/³⁷Cl/⁸¹Br) is *confirmed*, not merely in
+  the formula (a reagent-Br adduct's ⁸¹Br does not count).
+- **Si-count intensity gate** (siloxane ladder **and** pass-0 silanediol) — a Si-rich
+  commit requires its ²⁹Si M+1 to *match* the Si count, not just be matched; stops a
+  high-O HOM (e.g. C₁₀H₁₈O₁₁) being claimed as a siloxane on a too-weak envelope.
+- **New tier demotes** (post-tiering, never deletes): carbon-cluster (F-free H/C<0.35),
+  implausible-ionization (heteroatom-free hydrocarbon via an anion channel that needs
+  an acidic/H-bond site), and speculative-residual (residual:* commits resting on
+  off-cal z, uncorroborated multi-N, 0-anchor series, or a sole minor channel).
+- **Scrutiny page** — F-flag wording corrected (¹⁹F is monoisotopic — the F *count* is
+  unconfirmable; any ¹³C/⁸¹Br satellites confirm only carbon/the adduct), per-row
+  evidence (score · ppm · isotopes · sane-alternative), and pagination.
+
+### Fixed
+- Report cover now states the **actual** sample-selection method (single-sample /
+  brightest-coverage / representative) and a peak census (total / assigned /
+  unexplained) from the ledger; reference-list section paginated (no clipping);
+  single-sample reports include the Van Krevelen figure.
+
 ## [Unreleased] — 0.4.0 (public-release refactor)
 
 A refactor pass preparing Peaky for the public `karsa-oy/peaky` repo: cleaner

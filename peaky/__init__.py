@@ -23,7 +23,7 @@ and does not pull matplotlib or the Mascope SDK until a heavy entry point is use
 """
 from __future__ import annotations
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 # public name -> (submodule, attribute)
 _LAZY = {
