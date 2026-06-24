@@ -564,15 +564,14 @@ def _ion_comp(s):
         return None
 
 
-def relabel_reagent_halocarbons(ledger: pd.DataFrame, profile=None, *, log=print) -> dict:
+def relabel_reagent_halocarbons(ledger: pd.DataFrame, *, reagent=None, log=print) -> dict:
     """Reclassify bromomethane reagent-precursor / brominated-background ions that
     the degenerate 'bare element + [M+HBr+Br]-' reading mislabels (see note above).
     Reagent precursors (CH2Br2/CHBr3) -> role=reagent, out of the analyte pool;
     a named brominated background (dibromoacetic acid) keeps M0 but gets its real
-    neutral + a note. Matched on the invariant ion composition. Br-CIMS only."""
-    if "ion_formula" not in ledger.columns:
-        return {"relabeled": 0}
-    if profile is not None and getattr(profile, "name", "") != "Br":
+    neutral + a note. Matched on the invariant ion composition. Br-CIMS only -- gate
+    on the REAGENT ELEMENT (cfg.reagent_element), not the context profile."""
+    if "ion_formula" not in ledger.columns or reagent != "Br":
         return {"relabeled": 0}                    # bromide-reagent specific
     targets = {c: t for t in _REAGENT_HALOCARBONS
                for c in (_ion_comp(t[0]),) if c}
@@ -600,7 +599,8 @@ def run_cleanup(client, sample_id, ledger, profile, cfg, *, log=print) -> dict:
     isn't then mislabelled a cluster/artifact; satellite reclaim last)."""
     rec = recover_isotope_gated(client, sample_id, ledger, profile, cfg, log=log)
     clu = label_bromide_clusters(ledger, client, sample_id, log=log)
-    rhc = relabel_reagent_halocarbons(ledger, profile, log=log)
+    rhc = relabel_reagent_halocarbons(ledger, reagent=getattr(cfg, "reagent_element", None),
+                                      log=log)
     art = flag_ringing_artifacts(ledger, log=log)
     sat = reclaim_satellites(ledger, log=log)
     tails = reclaim_envelope_tails(ledger, log=log)   # deep poly-halogen envelope (k>=2)

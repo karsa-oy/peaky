@@ -199,10 +199,6 @@ check("carbon demote: F-rich skeleton NOT touched here (F-free rule; F-demote ow
       not bool(ledc.loc[3, "below_assignability"]))
 
 # ---- reagent-precursor / brominated-background halocarbon relabel ----
-class _Br:
-    name = "Br"
-class _Ur:
-    name = "Ur"
 ledh = mk([("chbr2", 170.8451, 2e2), ("dbaa", 214.8349, 7e2), ("real", 250.10, 1e4)])
 for pid, neutral, adduct, ionf in [("chbr2", "C", "[M+HBr+Br]-", "CHBr2-"),       # bare-C mis-read
                                    ("dbaa", "C2HBrO2", "[M+Br]-", "C2HBr2O2-"),    # dibromoacetic acid ion
@@ -212,7 +208,7 @@ for pid, neutral, adduct, ionf in [("chbr2", "C", "[M+HBr+Br]-", "CHBr2-"),     
     ledh.at[j, "adduct"] = adduct; ledh.at[j, "ion_formula"] = ionf
     ledh.at[j, "method"] = "seed"; ledh.at[j, "confidence"] = "Good"
     ledh.at[j, "commentary"] = "seed"        # provenance so the M0 rows are I5-valid
-res = CU.relabel_reagent_halocarbons(ledh, _Br(), log=lambda *a: None)
+res = CU.relabel_reagent_halocarbons(ledh, reagent="Br", log=lambda *a: None)
 check("halocarbon: relabeled 2 (CHBr2-, C2HBr2O2-)", res["relabeled"] == 2, res)
 check("halocarbon: CHBr2- (bare-C mis-read) -> reagent", L.role_of(ledh, "chbr2") == L.ROLE_REAGENT)
 _d = ledh[ledh["peak_id"] == "dbaa"].iloc[0]
@@ -227,8 +223,10 @@ check("halocarbon: ledger valid after relabel", L.validate(ledh) == [])
 ledhu = mk([("x", 170.8451, 2e2)])
 _j = ledhu.index[ledhu["peak_id"] == "x"][0]
 ledhu.at[_j, "role"] = L.ROLE_M0; ledhu.at[_j, "ion_formula"] = "CHBr2-"
-CU.relabel_reagent_halocarbons(ledhu, _Ur(), log=lambda *a: None)
-check("halocarbon: non-Br reagent profile -> no-op", L.role_of(ledhu, "x") == L.ROLE_M0)
+CU.relabel_reagent_halocarbons(ledhu, reagent="Ur", log=lambda *a: None)
+check("halocarbon: non-Br reagent -> no-op", L.role_of(ledhu, "x") == L.ROLE_M0)
+CU.relabel_reagent_halocarbons(ledhu, reagent=None, log=lambda *a: None)
+check("halocarbon: reagent=None -> no-op", L.role_of(ledhu, "x") == L.ROLE_M0)
 
 
 def test_all():
