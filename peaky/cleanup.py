@@ -502,11 +502,68 @@ def demote_unconfirmed_fluorine(ledger: pd.DataFrame, *, f_min: int = F_DEMOTE_M
     return {"f_demoted": n}
 
 
+# ---- reagent-precursor / brominated-background halocarbons -----------------
+# A bromomethane reagent-precursor fragment (CH2Br2 -> CHBr2-, m/z 170.845) is
+# MASS-DEGENERATE with an absurd bare-element + reagent-cluster reading (neutral
+# "C" via [M+HBr+Br]-): the SAME ion at the SAME mass. Scoring ties exactly and
+# the neutral-halogen complexity penalty then hands the win to the bare-element
+# cluster, so the report names "neutral C". We catch these on the INVARIANT ION
+# COMPOSITION (independent of which neutral the fitter guessed -> robust to
+# ion-formula string ordering). The >=2 bromines are isotope-confirmable and the
+# match is exact composition, so this is safe. Br-CIMS only.
+#   (ion neutral-composition, true neutral, true adduct, label, role)
+_REAGENT_HALOCARBONS = [
+    ("CHBr2",    "CH2Br2",    "[M-H]-", "dibromomethane (Br-CIMS reagent precursor)", L.ROLE_REAGENT),
+    ("CBr3",     "CHBr3",     "[M-H]-", "bromoform (Br-CIMS reagent precursor)",      L.ROLE_REAGENT),
+    ("C2HBr2O2", "C2H2Br2O2", "[M-H]-", "dibromoacetic acid (brominated background)", L.ROLE_M0),
+]
+
+
+def _ion_comp(s):
+    """Canonical element-count tuple of an ion formula (charge/radical stripped)."""
+    try:
+        return tuple(sorted(C.parse_formula(str(s).rstrip("+-.")).items()))
+    except Exception:
+        return None
+
+
+def relabel_reagent_halocarbons(ledger: pd.DataFrame, profile=None, *, log=print) -> dict:
+    """Reclassify bromomethane reagent-precursor / brominated-background ions that
+    the degenerate 'bare element + [M+HBr+Br]-' reading mislabels (see note above).
+    Reagent precursors (CH2Br2/CHBr3) -> role=reagent, out of the analyte pool;
+    a named brominated background (dibromoacetic acid) keeps M0 but gets its real
+    neutral + a note. Matched on the invariant ion composition. Br-CIMS only."""
+    if "ion_formula" not in ledger.columns:
+        return {"relabeled": 0}
+    if profile is not None and getattr(profile, "name", "") != "Br":
+        return {"relabeled": 0}                    # bromide-reagent specific
+    targets = {c: t for t in _REAGENT_HALOCARBONS
+               for c in (_ion_comp(t[0]),) if c}
+    comps = ledger["ion_formula"].map(_ion_comp)
+    n = 0
+    for i in ledger.index:
+        t = targets.get(comps.at[i])
+        if t is None or bool(ledger.at[i, "locked"]):
+            continue
+        _, neutral, adduct, label, role = t
+        if role == L.ROLE_REAGENT:
+            L.mark_reagent(ledger, ledger.at[i, "peak_id"], f"reagent precursor: {label}")
+        else:                                      # named background: fix neutral+adduct so
+            ledger.at[i, "neutral_formula"] = neutral   # (neutral, adduct) match the ion
+            ledger.at[i, "adduct"] = adduct
+            ledger.at[i, "commentary"] = label
+        n += 1
+    if n:
+        log(f"[cleanup] reagent-halocarbon relabel: {n} ion(s) reclassified")
+    return {"relabeled": n}
+
+
 def run_cleanup(client, sample_id, ledger, profile, cfg, *, log=print) -> dict:
     """Orchestrate the cleanup steps (recovery first, so a recovered molecule
     isn't then mislabelled a cluster/artifact; satellite reclaim last)."""
     rec = recover_isotope_gated(client, sample_id, ledger, profile, cfg, log=log)
     clu = label_bromide_clusters(ledger, client, sample_id, log=log)
+    rhc = relabel_reagent_halocarbons(ledger, profile, log=log)
     art = flag_ringing_artifacts(ledger, log=log)
     sat = reclaim_satellites(ledger, log=log)
     tails = reclaim_envelope_tails(ledger, log=log)   # deep poly-halogen envelope (k>=2)
@@ -515,6 +572,7 @@ def run_cleanup(client, sample_id, ledger, profile, cfg, *, log=print) -> dict:
     # assign.run calls it post-tiering.
     return {"recovered": rec["recovered"], "clusters": clu["labelled"],
             "cluster_covalent_ties": clu.get("covalent_ties", 0),
+            "reagent_halocarbons": rhc["relabeled"],
             "artifacts": art["flagged"], "reclaimed_satellites": sat["reclaimed"],
             "envelope_tails": tails["tails"]}
 

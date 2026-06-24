@@ -182,6 +182,39 @@ check("Cl-anchored F kept; low-F kept",
       ledf.loc[3, "tier"] == "Identified" and ledf.loc[4, "tier"] == "Identified")
 
 
+# ---- reagent-precursor / brominated-background halocarbon relabel ----
+class _Br:
+    name = "Br"
+class _Ur:
+    name = "Ur"
+ledh = mk([("chbr2", 170.8451, 2e2), ("dbaa", 214.8349, 7e2), ("real", 250.10, 1e4)])
+for pid, neutral, adduct, ionf in [("chbr2", "C", "[M+HBr+Br]-", "CHBr2-"),       # bare-C mis-read
+                                   ("dbaa", "C2HBrO2", "[M+Br]-", "C2HBr2O2-"),    # dibromoacetic acid ion
+                                   ("real", "C10H16O2", "[M+Br]-", "C10H16BrO2-")]:
+    j = ledh.index[ledh["peak_id"] == pid][0]
+    ledh.at[j, "role"] = L.ROLE_M0; ledh.at[j, "neutral_formula"] = neutral
+    ledh.at[j, "adduct"] = adduct; ledh.at[j, "ion_formula"] = ionf
+    ledh.at[j, "method"] = "seed"; ledh.at[j, "confidence"] = "Good"
+    ledh.at[j, "commentary"] = "seed"        # provenance so the M0 rows are I5-valid
+res = CU.relabel_reagent_halocarbons(ledh, _Br(), log=lambda *a: None)
+check("halocarbon: relabeled 2 (CHBr2-, C2HBr2O2-)", res["relabeled"] == 2, res)
+check("halocarbon: CHBr2- (bare-C mis-read) -> reagent", L.role_of(ledh, "chbr2") == L.ROLE_REAGENT)
+_d = ledh[ledh["peak_id"] == "dbaa"].iloc[0]
+check("halocarbon: C2HBr2O2- -> named dibromoacetic acid, M0",
+      _d["neutral_formula"] == "C2H2Br2O2" and _d["role"] == L.ROLE_M0)
+check("halocarbon: dibromoacetic acid adduct fixed to [M-H]-", _d["adduct"] == "[M-H]-")
+check("halocarbon: real organobromine untouched",
+      L.role_of(ledh, "real") == L.ROLE_M0
+      and ledh[ledh["peak_id"] == "real"].iloc[0]["neutral_formula"] == "C10H16O2")
+check("halocarbon: ledger valid after relabel", L.validate(ledh) == [])
+# polarity gate: a non-Br reagent profile is a no-op
+ledhu = mk([("x", 170.8451, 2e2)])
+_j = ledhu.index[ledhu["peak_id"] == "x"][0]
+ledhu.at[_j, "role"] = L.ROLE_M0; ledhu.at[_j, "ion_formula"] = "CHBr2-"
+CU.relabel_reagent_halocarbons(ledhu, _Ur(), log=lambda *a: None)
+check("halocarbon: non-Br reagent profile -> no-op", L.role_of(ledhu, "x") == L.ROLE_M0)
+
+
 def test_all():
     assert FAIL == 0, f"{FAIL} checks failed"
 

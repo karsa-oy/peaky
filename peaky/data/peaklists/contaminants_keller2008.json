@@ -1,0 +1,566 @@
+{
+ "schema_version": 1,
+ "id": "contaminants_keller2008",
+ "system": "lab_contaminants",
+ "label": "MS background / contaminant ions (Keller 2008)",
+ "data_version": "2008.1",
+ "polarity": "both",
+ "native_detection": "ESI+/ESI-",
+ "always_active": true,
+ "applies_to_contexts": [
+  "*"
+ ],
+ "references": [
+  {
+   "authors": "Keller, B.O.; Sui, J.; Young, A.B.; Whittal, R.M.",
+   "title": "Interferences and contaminants encountered in modern mass spectrometry",
+   "journal": "Analytica Chimica Acta",
+   "volume": 627,
+   "pages": "71-81",
+   "year": 2008,
+   "doi": "10.1016/j.aca.2008.04.043",
+   "note": "Supplementary mmc1; compiled from Waters/ABI/New Objective/Sigma-Aldrich background-ion lists + Tong et al. JASMS 10 (1999) 1174 and others (see XLS 'Refs')"
+  }
+ ],
+ "provenance": {
+  "extracted_from": "1-s2.0-S0003267008007605-mmc1-3.xls, sheets '+ve Ions' & '-ve Ions'",
+  "verification": "47/59 neutral formulas reproduce the listed singly-charged ion mass to <=5 ppm under their stated adduct",
+  "caveat": "Distinct ORGANIC neutral monomers only; PEG/PPG/Triton/Tween polymer ladders and metal-salt clusters were not expanded into single neutrals. Match is by neutral formula under the run's reagent adducts."
+ },
+ "n_species": 59,
+ "species": [
+  {
+   "formula": "CN",
+   "name": "",
+   "origin": "Fragment from acetonitrile",
+   "modes": [
+    "ESI-"
+   ],
+   "validated": false
+  },
+  {
+   "formula": "CH4O",
+   "name": "Methanol",
+   "origin": "Acetonitrile, solvent",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C2H3N",
+   "name": "ACN",
+   "origin": "Acetonitrile, solvent",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "CH2O2",
+   "name": "",
+   "origin": "Formic acid, FA (anion)",
+   "modes": [
+    "ESI-"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C2H4O2",
+   "name": "Acetic acid-Fe-O- complex",
+   "origin": "Acetic Acid, Ac (anion)",
+   "modes": [
+    "ESI+",
+    "ESI-"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C3H7NO",
+   "name": "Dimethyl formamide",
+   "origin": "solvent",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C3H6O2",
+   "name": "Propionic acid Fe-O complex",
+   "origin": "during ESI with metal tips and acetic acid",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": false
+  },
+  {
+   "formula": "C2H6OS",
+   "name": "DMSO",
+   "origin": "Dimethylsulfoxide, solvent",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "CH4O3S",
+   "name": "",
+   "origin": "Methanesulfuric acid (methanesulfonate, anion)",
+   "modes": [
+    "ESI-"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C5H10NO",
+   "name": "NMP",
+   "origin": "N-methyl 2-pyrrolidone; solvent, floor stripper",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": false
+  },
+  {
+   "formula": "C6H15N",
+   "name": "TEA",
+   "origin": "Triethylamine, buffer",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C2HF3O2",
+   "name": "",
+   "origin": "Trifluoroacetic acid, TFA (anion)",
+   "modes": [
+    "ESI-"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C4H11NO3",
+   "name": "TRIS",
+   "origin": "TRIS, buffer",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C7H10N2",
+   "name": "DMAP",
+   "origin": "Dimethylaminopyridine, solvent",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C8H19N",
+   "name": "DIPEA",
+   "origin": "Diisopropylethylamine, solvent",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C9H21N",
+   "name": "TPA",
+   "origin": "Tripropylamine, solvent",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C8H4O3",
+   "name": "Phthalic anhydride",
+   "origin": "fragment ion originating from phthalate esters",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": false
+  },
+  {
+   "formula": "C10H15N",
+   "name": "Phenyldiethylamine",
+   "origin": "solvent",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C9H16N2",
+   "name": "DBU",
+   "origin": "1,8-Diazabicyclo[5.4.0]undec-7-ene",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C8H18O3",
+   "name": "DGBE",
+   "origin": "Diethylene glycol monobutyl ether, cpd. In scintillation cocktail",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C3HF5O2",
+   "name": "",
+   "origin": "Pentafluoropropionic acid, Perfluoropropionic acid",
+   "modes": [
+    "ESI-"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C11H16O2",
+   "name": "BHA",
+   "origin": "Butylated hydroxyanisole, antioxidant additives",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C13H10O",
+   "name": "DPK",
+   "origin": "Diphenyl ketone",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C12H27N",
+   "name": "TBA",
+   "origin": "Tributylamine, solvent",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C10H7NO3",
+   "name": "4-HCCA",
+   "origin": "matrix cluster",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C10H10O4",
+   "name": "Dimethyl phthalate",
+   "origin": "Phthalate esters, plasticizer",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C10H15NO2S",
+   "name": "n-BBS",
+   "origin": "n-butyl benzenesulfonamide",
+   "modes": [
+    "ESI+",
+    "ESI-"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C15H24O",
+   "name": "BTH",
+   "origin": "Butylated hydroxytoluene, Antioxidant",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C13H24N2O",
+   "name": "DCU",
+   "origin": "N,N'-Dicyclohexylurea",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C16H36N",
+   "name": "TBA",
+   "origin": "Tetrabutylammonium, buffer",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": false
+  },
+  {
+   "formula": "C19H15",
+   "name": "Trityl cation",
+   "origin": "Trityl cation, [Ph3C]+",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": false
+  },
+  {
+   "formula": "C16H32O2",
+   "name": "",
+   "origin": "Palmitic acid (carboxylate anion) C16:0",
+   "modes": [
+    "ESI-"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C12H27O4P",
+   "name": "TBP",
+   "origin": "Tributylphosphate",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C20H17O",
+   "name": "MMT",
+   "origin": "Monomethoxytrityl cation",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": false
+  },
+  {
+   "formula": "C18H15OP",
+   "name": "TPO",
+   "origin": "Triphenylphosphine oxide",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C16H22O4",
+   "name": "Dibutylphthalate",
+   "origin": "Dibutylphthalate, plasticizer",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C18H35NO",
+   "name": "Oleamide",
+   "origin": "Slip agent in polyethylene films",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C18H34O2",
+   "name": "",
+   "origin": "Oleic acid (carboxylate anion) C18:1",
+   "modes": [
+    "ESI-"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C18H37NO",
+   "name": "Stearamide",
+   "origin": "Slip agent in polyethylene films",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C18H36O2",
+   "name": "",
+   "origin": "Stearic acid (carboxylate anion) 18:0",
+   "modes": [
+    "ESI-"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C16H33NO3",
+   "name": "n,n-DDA",
+   "origin": "n,n-bis(2-hydroxyethyl) dodecanamide, anti-static agent",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C18H34O4",
+   "name": "DBS",
+   "origin": "Dibutyl sebacate, plasticizer",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C18H15O4P",
+   "name": "TPP",
+   "origin": "Triphenyl phosphate, flame retardant in plastics",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C22H43NO",
+   "name": "Erucamide",
+   "origin": "Erucamide, (Cis-13-docosenoic amide)",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C22H42O4",
+   "name": "DEHA",
+   "origin": "Bis(2-ethylhexyl) adipate, plasticizer",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C24H38O4",
+   "name": "Diisooctyl phthalate",
+   "origin": "Diisooctyl phthalate, plasticiser",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C22H47ClN2O",
+   "name": "",
+   "origin": "Palmitamidopropyl-trimonium chloride, personal care products additive",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": false
+  },
+  {
+   "formula": "C25H54ClN",
+   "name": "BTAC-228",
+   "origin": "Behentrimonium chloride, personal care product additive",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": false
+  },
+  {
+   "formula": "C24H44N4O4",
+   "name": "nylon",
+   "origin": "Cyclic oligomer of polyamide 66, (adipic acid/hexylmethylene diamine condensation)",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C30H58O4S",
+   "name": "DDTDP",
+   "origin": "Didodecyl 3,3′-thiodipropionate, antioxidant",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C34H72ClN",
+   "name": "DPDMA",
+   "origin": "Dipalmityldimethylammonium chloride, catalyst, personal care products additive",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": false
+  },
+  {
+   "formula": "C30H58O5S",
+   "name": "DDTDP",
+   "origin": "Didodecyl 3,3′-thiodipropionate oxidized to sulfoxide, antioxidant",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C35H62O3",
+   "name": "Irganox",
+   "origin": "Irganox 1076, antioxidant in synthetic polymers, antioxidant",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C30H58O6S",
+   "name": "DDTDP",
+   "origin": "Didodecyl 3,3′-thiodipropionate oxidized to sulfone, antioxidant",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C36H76ClN",
+   "name": "SPDMA",
+   "origin": "Stearyl-palmityldimethylammonium chloride, catalyst, personal care product additive",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": false
+  },
+  {
+   "formula": "C38H80ClN",
+   "name": "DSDMA",
+   "origin": "Distearyldimethylammonium chloride, catalyst, personal care products additive",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": false
+  },
+  {
+   "formula": "C32H58N2O7S",
+   "name": "CHAPS",
+   "origin": "3-[(3-Cholamidopropyl)dimethylammonio]-1-propanesulfonate",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C36H66N6O6",
+   "name": "nylon",
+   "origin": "Cyclic oligomer of polyamide 66, (adipic acid/hexylmethylene diamine condensation)",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  },
+  {
+   "formula": "C48H88N8O8",
+   "name": "nylon",
+   "origin": "Cyclic oligomer of polyamide 66, (adipic acid/hexylmethylene diamine condensation)",
+   "modes": [
+    "ESI+"
+   ],
+   "validated": true
+  }
+ ]
+}
