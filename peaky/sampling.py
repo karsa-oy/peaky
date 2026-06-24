@@ -123,3 +123,99 @@ def select_representative_sample_ids(peaks: pd.DataFrame, *,
     """Convenience: just the selected `sample_item_id`s (time order)."""
     sel = select_representative_samples(peaks, sample_col=sample_col, **kw)
     return sel[sample_col].tolist()
+
+
+# ---------------------------------------------------------------------------
+# Strategy 2: BRIGHTEST-COVERAGE (the "bin-then-assign" realization).
+#
+# THE RULE picks samples by TIME; but match_compounds can only commit a peak in a
+# sample where that peak's isotope envelope is actually present, i.e. where it is
+# bright. On a reagent-CIMS run the max-TIC pick is dominated by the (huge) reagent
+# ion, so it is the brightest sample for only a small fraction of ANALYTE peaks
+# (measured: 13% on the orange Br- batch) and event-only analytes stay unexplained.
+#
+# Brightest-coverage instead bins ALL batch peaks by m/z (timeseries.build_matrix),
+# and for each significant bin takes the sample where it is BRIGHTEST. Because each
+# bin has exactly one brightest (arg-max) sample, the winner sets are DISJOINT, so
+# the optimal cover is simply: take winner samples in descending bins-won order
+# until `coverage_target` of significant bins is covered (capped at k_max, floored
+# at k_min). The selected ids feed the SAME assign.run + merge as THE RULE — only
+# WHICH real samples get assigned changes, never the scoring or the merge. It is a
+# COVERAGE play (catches more analyte peaks), not a speed play (~k_max assigns).
+# ---------------------------------------------------------------------------
+def select_brightest_coverage_samples(
+        peaks: pd.DataFrame, *, coverage_target: float = 0.85, k_max: int = 10,
+        k_min: int = N_TIME + 1, height_floor: float = 1000.0,
+        include_time_grid: bool = True, sample_col: str = "sample_item_id",
+        **table_kw) -> pd.DataFrame:
+    """Pick the winner-sample subset that COVERS the brightest occurrence of as many
+    significant m/z bins as possible (brightest-coverage strategy; see module note).
+
+    Returns the selected `sample_table()` rows, time-ordered, with a `role` column
+    ('coverage-winner' / 'time-grid' / 'coverage+time-grid') and a `bins_won` int
+    (significant bins this sample is the brightest for). Feed `[sample_item_id]`
+    straight into `assign_batch.run(sample_ids=...)`.
+
+    - `height_floor` (cps): a bin is "significant" if its max height across samples
+      is >= this. Reagent-relative — lower it for a quieter dataset.
+    - greedy cover by bins-won until `coverage_target` of significant bins is covered,
+      bounded `k_min` <= n <= `k_max`. Padded to `k_min` with the richest (max-TIC)
+      remaining samples so a too-high floor / quiet dataset never under-selects.
+    - `include_time_grid` unions the two TIME endpoints (cheap insurance the run
+      start/end are represented even if they win no bins).
+    """
+    from . import timeseries as TS
+
+    k_min = min(k_min, k_max)            # k_max is the hard cap, even below the default floor
+    tab = sample_table(peaks, sample_col=sample_col, **table_kw)
+    n = len(tab)
+    if n == 0:
+        return tab.assign(role=pd.Series(dtype=str), bins_won=pd.Series(dtype=int))
+    if n <= k_min:                       # too few samples to be selective: take all
+        return tab.assign(role="coverage-winner", bins_won=0)
+
+    mat, _bin_mz = TS.build_matrix(peaks, sample_col=sample_col)   # samples x bins
+    maxh = mat.max(axis=0)                                         # per-bin max (skips NaN)
+    sig = maxh.index[maxh >= height_floor]                         # significant bins
+    win_counts = (mat[sig].idxmax(axis=0).value_counts()          # sample -> #bins won (desc)
+                  if len(sig) else pd.Series(dtype=int))
+    total = max(int(len(sig)), 1)
+
+    selected: list = []
+    bins_won: dict = {}
+    covered = 0
+    for sid, cnt in win_counts.items():
+        if len(selected) >= k_max:
+            break
+        selected.append(sid); bins_won[sid] = int(cnt); covered += int(cnt)
+        if covered / total >= coverage_target and len(selected) >= k_min:
+            break
+    # pad to k_min with the richest remaining samples (robustness for a high floor)
+    if len(selected) < k_min:
+        order = (tab.sort_values("tic", ascending=False)[sample_col].tolist()
+                 if "tic" in tab.columns else tab[sample_col].tolist())
+        for sid in order:
+            if sid not in bins_won:
+                selected.append(sid); bins_won[sid] = 0
+                if len(selected) >= k_min:
+                    break
+
+    roles = {sid: "coverage-winner" for sid in selected}
+    if include_time_grid and "datetime_utc" in tab.columns and n >= 2:
+        for sid in (tab.iloc[0][sample_col], tab.iloc[-1][sample_col]):
+            roles[sid] = "coverage+time-grid" if sid in roles else "time-grid"
+            bins_won.setdefault(sid, 0)
+
+    sel = tab[tab[sample_col].isin(roles)].copy()
+    sel["role"] = sel[sample_col].map(roles)
+    sel["bins_won"] = sel[sample_col].map(bins_won).fillna(0).astype(int)
+    sort_key = "datetime_utc" if "datetime_utc" in sel.columns else sample_col
+    return sel.sort_values(sort_key).reset_index(drop=True)
+
+
+def select_brightest_coverage_sample_ids(peaks: pd.DataFrame, *,
+                                         sample_col: str = "sample_item_id",
+                                         **kw) -> list:
+    """Convenience: just the brightest-coverage `sample_item_id`s (time order)."""
+    sel = select_brightest_coverage_samples(peaks, sample_col=sample_col, **kw)
+    return sel[sample_col].tolist()

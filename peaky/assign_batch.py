@@ -26,6 +26,7 @@ import os
 import numpy as np
 import pandas as pd
 
+from . import paths as PT
 from . import profiles as P
 from . import sampling as SS
 
@@ -223,6 +224,8 @@ def _m0(ledger: pd.DataFrame) -> pd.DataFrame:
 def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
         reagent: str = "auto", context: str | None = None,
         n_time: int = SS.N_TIME, include_max_tic: bool = True,
+        select: str = "representative", coverage_target: float = 0.85,
+        k_max: int = 10, height_floor: float = 1000.0,
         out_dir: str, tol_ppm: float = DEFAULT_TOL_PPM,
         sample_ids: list | None = None, ts_peaks=None, amine_r_min: float = 0.7,
         log=print, **assign_kw) -> dict:
@@ -232,11 +235,13 @@ def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
     also guarantees the selected sample ids are valid for get_peaks — cached ids
     go stale / 404 when the server copy is renamed). `context` defaults to the
     reagent profile's context. Extra kwargs pass through to assign.run. Writes
-    per_file/<sid>_ledger.csv, merged_ledger.csv, jitter.csv, batch_summary.json."""
+    (see paths.RunPaths): merged_ledger.csv + batch_summary.json at the run root,
+    per_file/<sid>_ledger.csv, and tables/{selected_samples,jitter}.csv."""
     from . import assign as A
     from . import io_mascope as IO
 
     out_dir = os.path.expanduser(out_dir)
+    TAB = PT.run_paths(out_dir).ensure().tables    # .csv tables -> tables/
     pfdir = os.path.join(out_dir, "per_file")
     os.makedirs(pfdir, exist_ok=True)
 
@@ -250,10 +255,21 @@ def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
     prof = P.resolve(reagent, peaks)
     context = context or prof.context
     if sample_ids is None:
-        sel = SS.select_representative_samples(peaks, n_time=n_time,
-                                               include_max_tic=include_max_tic)
+        if select == "brightest":
+            # bin ALL batch peaks -> assign each significant bin's BRIGHTEST sample.
+            # Needs the per-PEAK table (height per peak): the pipeline passes it as
+            # ts_peaks; fall back to `peaks` if it already is per-peak.
+            src = ts_peaks if ts_peaks is not None else peaks
+            sel = SS.select_brightest_coverage_samples(
+                src, coverage_target=coverage_target, k_max=k_max,
+                height_floor=height_floor)
+            log(f"[assign_batch] brightest-coverage: {len(sel)} winner samples "
+                f"(target {coverage_target:.0%}, floor {height_floor:g} cps)")
+        else:
+            sel = SS.select_representative_samples(peaks, n_time=n_time,
+                                                   include_max_tic=include_max_tic)
         sample_ids = sel["sample_item_id"].tolist()
-        sel.to_csv(os.path.join(out_dir, "selected_samples.csv"), index=False)
+        sel.to_csv(os.path.join(TAB, "selected_samples.csv"), index=False)
     log(f"[assign_batch] {prof.label} context={context!r}: "
         f"{len(sample_ids)} representative files -> {pfdir}")
 
@@ -286,11 +302,13 @@ def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
         from . import cleanup
         cleanup.prefer_amine_over_ammonium(merged, ts_peaks=ts_peaks, r_min=amine_r_min, log=log)
     merged.to_csv(os.path.join(out_dir, "merged_ledger.csv"), index=False)
-    jitter.to_csv(os.path.join(out_dir, "jitter.csv"), index=False)
+    jitter.to_csv(os.path.join(TAB, "jitter.csv"), index=False)
 
     summary = {
         "reagent": prof.name, "label": prof.label, "context": context,
         "batch_name": batch,
+        "select": select,
+        "coverage_target": (coverage_target if select == "brightest" else None),
         "n_files": len(sample_ids), "sample_ids": sample_ids,
         "tol_ppm": tol_ppm, "offsets_ppm": offsets,
         "merged_M0": int(len(merged)),

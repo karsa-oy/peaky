@@ -13,7 +13,7 @@ from . import (chemistry, cleanup, contexts, degeneracy, io_mascope, isotopes,
                ladders, ledger, passes, reagents, residual, series_gka,
                siloxane, tiers, timeseries)
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 MODULE_VERSIONS = {
     "assign": __version__,

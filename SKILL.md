@@ -5,7 +5,7 @@ description: >-
   stored in Mascope. Use when a user asks to assign formulas, annotate a
   spectrum, identify compounds, build a target list, or explain unassigned /
   contaminant / homolog peaks for a Mascope sample_id. SDK-native, runs locally
-  via the shell MCP; defers all mass + isotope scoring to Mascope's
+  via the Bash tool / `peaky` CLI; defers all mass + isotope scoring to Mascope's
   match_compounds; produces an 11-sheet tiered Excel (Identified / Candidates /
   below-assignability) with commentary, close alternatives, per-isotopologue
   scores, a peak-ownership audit, and an interactive rotating-GKA widget. Also runs
@@ -19,14 +19,16 @@ description: >-
 
 # Mascope multi-pass peak assignment
 
-A reproducible, test-driven, SDK-native pipeline. **All heavy work runs on the
-host Python** (which has `mascope-sdk`) via your shell / Bash tool — or a shell
-MCP if your Claude runs sandboxed; the `mascope__*` MCP is never used to transport
-peak tables through context. (Outside Claude, just run the `mascope-assign` CLI in
-a terminal.)
+> This skill is **Peaky** (`import peaky`, CLI `peaky`); the skill id stays
+> `mascope-peak-assign` for back-compat. See `README.md` / `docs/ARCHITECTURE.md`.
 
-This is the from-scratch successor to `mascope-formula-assignment`. Canonical
-home and iteration repo: `~/.claude/skills/mascope-peak-assign/`.
+A reproducible, test-driven, SDK-native pipeline. **All heavy work runs on the
+host Python** (which has `mascope-sdk`) via the **Bash tool / `peaky` CLI** (a
+shell MCP only if your Claude runs sandboxed); the `mascope__*` MCP is never used
+to transport peak tables through context. (Outside Claude, just run the `peaky`
+CLI in a terminal.)
+
+Canonical home and iteration repo: `~/.claude/skills/mascope-peak-assign/`.
 
 ## Operating principle
 
@@ -46,29 +48,45 @@ ledger's commit API enforces structural invariants so no pass can corrupt it.
 
 ## Pre-flight
 
-1. Run on the host Python via your shell / Bash tool (host has `mascope-sdk`),
-   not a sandboxed shell. `pip install -e .` once (pulls deps, registers the CLI).
-2. `.env` at `~/.mascope/.env` has `MASCOPE_URL` + `MASCOPE_ACCESS_TOKEN`
-   (auto-loaded; copy `.env.example`; or `--env` / `$MASCOPE_ENV`).
+1. Run on the host Python via the Bash tool / `peaky` CLI (host has `mascope-sdk`),
+   not a sandboxed shell. **First-time setup from a fresh clone:** `pip install -e .`
+   then **`peaky setup`** — that one command creates the workspace `.env` + `output/`,
+   verifies the install (and the connection if creds are set), and prints the layout
+   + next steps. Re-run `peaky setup` any time to re-check.
+2. Creds: edit the repo-root `.env` (or `~/.mascope/.env`) with `MASCOPE_URL` +
+   `MASCOPE_ACCESS_TOKEN` (auto-loaded; or `--env` / `$MASCOPE_ENV`). Batch outputs
+   default to the workspace `output/` (`$PEAKY_OUTPUT_DIR`, set by `peaky setup`)
+   else `~/peaky-output`; override per run with `peaky batch --out-dir ...`.
 3. Pick `--reagent` (forces analyte channels) and/or `--context` for the sample.
 
 ## Running
 
-Discover data, then assign (the installed console command):
+Discover data, then assign — one sample, or a whole batch (the `peaky` console
+command; `mascope-assign` is a back-compat alias, `python3 -m peaky …` equivalent):
 
 ```bash
-mascope-assign list datasets
-mascope-assign list samples --batch "<batch>" --dataset "<workspace>"
-mascope-assign assign --sample-id <ID> --reagent <Br|Ur|NO3|NO3_15N|auto> \
-    --height-cutoff 100 --output-dir ~/mascope-output/<name>
+peaky list datasets
+peaky list samples --batch "<batch>" --dataset "<workspace>"
+
+# one sample
+peaky assign --sample-id <ID> --reagent <Br|Ur|NO3|NO3_15N|auto> \
+    --height-cutoff 100 --output-dir ~/peaky-output/<name>
+
+# a whole batch (assign subset -> merge -> cluster -> Van Krevelen -> PDF report)
+peaky batch --batch "<batch>" --dataset "<workspace>" --reagent <Br|Ur|...> \
+    [--select representative|brightest] --out-dir ~/peaky-output
+
+# regenerate figures + PDF of an existing run, offline (no assignment, no network)
+peaky report --run-dir <run-folder> --reagent <Br|Ur|...> --ts <ts.parquet>
 ```
 
-(`python3 -m mascope_assign assign …` and the legacy `scripts/run_assignment.py`
-forwarder are equivalent.)
-
-Writes `<ID>_<UTC>_{ledger.csv, assignments.xlsx, summary.md, manifest.json,
-gka.html}` plus per-pass ledger checkpoints. Full run on a ~1000-peak Br-CIMS
-sample is ~5 min (cutoff 100).
+`--select brightest` bins ALL batch peaks and assigns each significant m/z bin's
+brightest sample (better analyte coverage than the default 5-time-spaced+max-TIC
+rule; `--coverage-target`/`--k-max`/`--height-floor` tune it). Single-sample
+`assign` writes `<ID>_<UTC>_{ledger.csv, assignments.xlsx, summary.md,
+manifest.json, gka.html}` + per-pass checkpoints (~5 min on a ~1000-peak Br-CIMS
+sample). Batch writes one versioned run folder — see **Outputs** below and
+`docs/OUTPUTS.md`.
 
 ### Contexts
 
@@ -121,7 +139,7 @@ P is monoisotopic). `cleanup.demote_unconfirmed_fluorine` (run **after**
 
 ### Key flags
 
-`--ppm` (m/z trust, default 1.0) · `--search-ppm` (enumeration tol, 5.0) ·
+`--ppm` (m/z trust, default 1.0) · `--search-ppm` (enumeration tol, 3.0) ·
 `--height-cutoff` (cps, 100) · `--no-pass2/3/4` · `--no-cache`.
 
 ## Representative-sample batch pipeline (assign a whole batch, not one file)
@@ -137,8 +155,11 @@ pipeline assigns a **representative subset and merges by m/z**:
   — resolves the `profiles.ReagentProfile`, runs `assign.run` per selected file
   (keeps each `per_file/<sid>_ledger.csv`), then an **offset-aware merge** (`align`)
   - a file-to-file **jitter** table. Pass `ts_peaks` (the full-batch per-peak time
-    series) to enable the positive-mode NH4→amine gate below. Writes `merged_ledger.csv`,
-    `jitter*.csv`, `batch_summary.json`.
+    series) to enable the positive-mode NH4→amine gate below. Writes `merged_ledger.csv`
+    + `batch_summary.json` at the **run root**, per-file ledgers in `per_file/`, and
+    `selected_samples.csv` / `jitter.csv` in `tables/`. The run folder is organized by
+    `paths.RunPaths`: `.png`→`figures/`, `.csv`/`.xlsx`→`tables/`, the PDF→`report/`,
+    a live-fetched TS→`data/` (a TS passed by path is referenced, not copied).
 - IDs must be fetched FRESH from the live server (`io_mascope.fetch_batch_samples`,
   regex-escape the batch name) — cached `sample_item_id`s 404 when a server copy is
   renamed.
@@ -194,10 +215,12 @@ composition, scrutiny, gka, families, changers, clusters, methods]`, each a `sec
   - The `gka` section renders `gka_figure.render_gka` on demand from the merged ledger.
     The cover stamps `run_id` (Report ID) + a date+TIME `generated` line; the PDF FILENAME embeds the
     Report ID (`report_<run_id>.pdf`). Cover formula-disagreements read from the merged ledger's own
-    `formula_agree` (authoritative). **Reproducible bytes:** figures/PDF/CSV are a deterministic fn of
-    inputs + run-time — the xlsx + matplotlib metadata stamp the run time via `SOURCE_DATE_EPOCH` (same
-    inputs+time → byte-identical; a later run → a later stamp). The live `match_compounds` step is the only
-    from-scratch non-determinism (server-side).
+    `formula_agree` (authoritative). **Reproducible content:** figures/PDF-figures/CSV/xlsx are a
+    deterministic fn of the INPUT DATA ONLY — `stamp_source_date_epoch()` pins `SOURCE_DATE_EPOCH` to a
+    FIXED content epoch, so they're byte-identical whenever you re-run the same data. The run time appears
+    ONLY as the PDF cover's "generated" text + the Report ID + the run-folder name (so a re-analysis next
+    week reproduces the same numbers/pixels; only the Report ID differs). The live `match_compounds` step
+    is the only server-side non-determinism.
 - **Run versioning** — `pipeline.make_run_dir(base, batch_name, when)` / `run_id` / `run_stamp` /
   `slugify`: every set of outputs goes in its own timestamped folder `<batch-slug>_<date>_<time>/`
   (folder name == Report ID). Pass ONE `datetime.now()` per run so folder, id and cover agree.
@@ -212,11 +235,13 @@ composition, scrutiny, gka, families, changers, clusters, methods]`, each a `sec
   scattered element set with NO series (e.g. assorted F mass-fits that never step by CF2) is NOT
   plotted. Pure fns: `detect_series` / `element_members` / `present_families` / `family_summary` / `kmd`.
 
-Reference drivers (live, scratch — fold into a package CLI when sharing) live in
-`~/mascope-output/orange-assign/`: `run_orange.py` (assign), `run_clusters.py`,
-`run_vankrevelen.py`, `run_report.py`. **<server> is behind a Cloudflare WAF** — a burst
-of live runs trips a 403 ("Attention Required") that clears after 15-30 min of no
-traffic (polling extends it); `deferred_rerun.py` waits it out.
+The whole assign → merge → cluster → Van Krevelen → PDF chain is now in-package:
+run **`peaky batch --batch ... --dataset ... --reagent ...`** (one versioned run
+folder), and **`peaky report --run-dir ...`** to regenerate figures + the PDF
+offline from an existing run. (The old `run_orange.py` / `run_clusters.py` /
+`run_vankrevelen.py` / `run_report.py` scratch drivers are superseded by these.)
+**A server may sit behind a Cloudflare WAF** — a burst of live runs can trip a 403
+("Attention Required") that clears after 15-30 min of no traffic (polling extends it).
 
 ## The pipeline
 
@@ -254,6 +279,11 @@ traffic (polling extends it); `deferred_rerun.py` waits it out.
 
 ## Outputs
 
+**Batch runs** write one versioned folder (`<slug>_<UTC>Z/`) with subdirs
+`figures/` `tables/` `report/` `data/` + `merged_ledger.csv` / `run_manifest.json`
+/ `batch_summary.json` / `per_file/` at the root — full reference in
+**[`docs/OUTPUTS.md`](docs/OUTPUTS.md)**. The **single-sample** `assign` files:
+
 | file                | contents                                                                                                                                                                                                                                                                                                                                                      |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `_ledger.csv`       | every peak: **role** (M0 / iso_child / reagent / **artifact** / unexplained), formula, adduct, scores (incl. arbitration `eff_score`/`eff_margin`/`tied`), ppm, confidence, **tier + tier_reason + candidate_density + degeneracy_density/degeneracy_note**, provenance, commentary, alternatives, isotopologues (reagent rows now carry their `ion_formula`) |
@@ -270,9 +300,9 @@ homologous series flatten into horizontal rows; peaks colored by status
 (backbone / low / unassigned). Band detector uses the mass-accuracy-derived
 tolerance `δGKA ≈ (X/mass(R))·δm`, `δm = ppm·(m/z)·1e-6`. Use it to spot
 structure (CF₂ contaminant ladders, oxidation series) the auto-detector did not
-already open. `run_assignment.py` emits one per run.
+already open. `peaky assign` emits one per run (plus a second over the unexplained residual).
 
-## Module map (`mascope_assign/`)
+## Module map (`peaky/`)
 
 | module                | role                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -293,7 +323,7 @@ already open. `run_assignment.py` emits one per run.
 | `cleanup.py`          | residual cleanup: isotope-confirmed recovery, bromide-cluster labelling, ringing-artifact flagging, satellite reclaim, **`prefer_amine_over_ammonium`** (positive: re-read uncorroborated/non-co-varying `[M+NH4]+` as the `[M+H]+` amine)                                                                                                                                                                               |
 | **`sampling.py`**     | THE RULE — `select_representative_samples` (5 evenly-time-spaced + max-TIC) for batch assignment                                                                                                                                                                                                                                                                                                                         |
 | **`assign_batch.py`** | `run(batch\|peaks, ts_peaks=, amine_r_min=)` — assign the reps, keep per-file ledgers, offset-aware merge (`align`) + jitter table; applies the positive amine gate at merge level                                                                                                                                                                                                                                       |
-| **`cluster.py`**      | correlation clustering (log-corr, COMPLETE linkage r>0.6, signed distance) → `render_a4` A4-portrait paginated panels + remaining-peaks overview. **Flatness gate** `split_varying`/`render_flat_panel` (cv<`FLAT_CV` bunched, not clustered). `render_changers` = A4-portrait big-standalone-changers page. `write_cluster_workbook(when=)` — byte-reproducible per-cluster XLSX (timestamps stamped from the run time) |
+| **`cluster.py`**      | correlation clustering (log-corr, COMPLETE linkage r>0.6, signed distance) → `render_a4` A4-portrait paginated panels + remaining-peaks overview. **Flatness gate** `split_varying`/`render_flat_panel` (cv<`FLAT_CV` bunched, not clustered). `render_changers` = A4-portrait big-standalone-changers page. `write_cluster_workbook(when=)` — byte-reproducible per-cluster XLSX (timestamps pinned to a FIXED content epoch, not the run time) |
 | **`composition.py`**  | report composition accounting (pure): `signal_by_backbone` (intensity-weighted CHO/CHON/CHOS), `amine_shadow_stats`/`collapsed_composition` (the [M+NH4]+/[M+H]+-amine degeneracy two-way), `top_species_by_signal`, `oligomer_flag` (high-C high-O HOM-dimer candidates)                                                                                                                                                |
 | **`plausibility.py`** | chemical-plausibility QC: `scan(merged, polarity)` flags Candidate-only mass-coincidence formulas (high heteroatom / very low H/C / wrong-mode halogen); Identified never flagged (powers the `scrutiny` report section)                                                                                                                                                                                                 |
 | **`pdf_report.py`**   | STANDARD iterable PDF report (uniform A4) — `build()` over `SECTIONS=[cover, findings, coverage, composition, scrutiny, gka, families, changers, clusters, methods]`, ctx loaded once. PDF filename = `report_<run_id>.pdf`                                                                                                                                                                                              |
@@ -306,13 +336,14 @@ already open. `run_assignment.py` emits one per run.
 
 ## Testing & iteration
 
-`pytest tests/` (or `for t in tests/test_*.py; do python3 "$t"; done`) — **833 offline
-assertions across 30 files**, no network (io*mascope live smoke gated behind
+`pytest tests/` (or `for t in tests/test_*.py; do python3 "$t"; done`) — **the
+offline suite must stay green**, no network (io_mascope live smoke gated behind
 `MASCOPE_LIVE=1`). `python3 tests/test_smoke.py` is a 2-second no-creds install check.
 Every module has a matching `tests/test*<module>.py`; CI (`.github/workflows/test.yml`)
 runs the suite on 3.11–3.13 with no credentials. Add a test with each change; keep it green.
-See `README.md`for the dev loop and`ROADMAP.md` for current state + the open
-quality work + lessons.
+See `docs/ARCHITECTURE.md` for the design (ledger model, pass sequence, data
+flow), `README.md` for the dev loop, and `docs/ROADMAP.md` for current state +
+the open quality work + lessons.
 
 ## Gotchas
 

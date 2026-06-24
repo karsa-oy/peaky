@@ -120,12 +120,13 @@ def _bins_for_formula(arr, idx, cols_set, formula, adducts):
 
 
 def time_traces(ts_peaks: pd.DataFrame, formulas, adducts, *, mode: str = "raw",
-                bin_minutes: int = DEFAULT_BIN_MIN, reagent_mzs=None
+                bin_minutes: int | None = None, reagent_mzs=None
                 ) -> tuple[np.ndarray, pd.DataFrame]:
-    """Raw (or normalised) intensity trace per formula, binned on wall-clock.
+    """Raw (or normalised) intensity trace per formula (summed across its adducts).
 
-    Returns (hours grid, DataFrame indexed by grid-bin, columns = formulas) of
-    the binned MEDIAN intensity. NaN where a formula has no matched bin."""
+    `bin_minutes=None` (default) = NATIVE per-sample resolution (one point per
+    sample at its real hour, no re-gridding); pass an int to time-bin (legacy).
+    Returns (x-hours, DataFrame columns=formulas). NaN where a formula has no bin."""
     ts_peaks = ts_peaks.copy()
     ts_peaks["datetime_utc"] = pd.to_datetime(ts_peaks["datetime_utc"], utc=True)
     tstamp = ts_peaks.groupby("sample_item_id")["datetime_utc"].first()
@@ -141,6 +142,19 @@ def time_traces(ts_peaks: pd.DataFrame, formulas, adducts, *, mode: str = "raw",
         rt = mat.sum(axis=1)
     else:
         rt = None
+
+    def _series(b):
+        s = mat[b].sum(axis=1)
+        return (s / rt.replace(0, np.nan)) if rt is not None else s
+
+    if bin_minutes is None:                                # NATIVE — one point per sample
+        out = {}
+        for f in formulas:
+            b = _bins_for_formula(arr, idx, cols_set, f, adducts)
+            out[f] = (pd.Series(_series(b).values) if b
+                      else pd.Series(np.nan, index=range(len(hr))))
+        return hr, pd.DataFrame(out)
+
     grid = np.arange(0, np.nanmax(hr) + bin_minutes / 60.0, bin_minutes / 60.0)
     digit = np.digitize(hr, grid)
     out = {}
@@ -149,10 +163,7 @@ def time_traces(ts_peaks: pd.DataFrame, formulas, adducts, *, mode: str = "raw",
         if not b:
             out[f] = pd.Series(np.nan, index=range(1, len(grid) + 1))
             continue
-        s = mat[b].sum(axis=1)
-        if rt is not None:
-            s = s / rt.replace(0, np.nan)
-        out[f] = pd.Series(s.values).groupby(digit).median().reindex(range(1, len(grid) + 1))
+        out[f] = pd.Series(_series(b).values).groupby(digit).median().reindex(range(1, len(grid) + 1))
     return grid, pd.DataFrame(out)
 
 
@@ -184,17 +195,22 @@ def _bin_for_mz(arr, idx, cols_set, mz, tol=8.0):
 
 
 def ion_traces(ts_peaks: pd.DataFrame, ion_mz_map: dict, *, mode: str = "raw",
-               bin_minutes: int = DEFAULT_BIN_MIN, reagent_mzs=None
+               bin_minutes: int | None = None, reagent_mzs=None
                ) -> tuple[np.ndarray, pd.DataFrame]:
     """One trace PER ION (no summing across adducts — the opposite of time_traces).
     `ion_mz_map` maps an arbitrary key -> the ion's measured m/z; each key gets the
-    binned-median trace of the single TS bin matching that m/z (<=8 ppm). Keeping
-    channels separate lets divergent ion channels of one neutral cluster apart."""
+    trace of the single TS bin matching that m/z (<=8 ppm). Keeping channels separate
+    lets divergent ion channels of one neutral cluster apart.
+
+    `bin_minutes=None` (default) = NATIVE per-sample resolution: the samples are
+    already the common time axis, so return one point per sample at its real hour —
+    no re-gridding onto a uniform lattice (which aliases into spurious empty time
+    bins). Pass an int to time-bin instead (legacy). Returns (x-hours, traces df)."""
     ts_peaks = ts_peaks.copy()
     ts_peaks["datetime_utc"] = pd.to_datetime(ts_peaks["datetime_utc"], utc=True)
     tstamp = ts_peaks.groupby("sample_item_id")["datetime_utc"].first()
     mat, bin_mz = TS.build_matrix(ts_peaks)
-    mat = mat.reindex(tstamp.sort_values().index)
+    mat = mat.reindex(tstamp.sort_values().index)          # rows in time order
     hr = (tstamp.reindex(mat.index) - tstamp.min()).dt.total_seconds().values / 3600.0
     bm = bin_mz.sort_values(); arr = bm.values; idx = bm.index.values
     cols_set = set(mat.columns)
@@ -204,6 +220,19 @@ def ion_traces(ts_peaks: pd.DataFrame, ion_mz_map: dict, *, mode: str = "raw",
         rt = mat.sum(axis=1)
     else:
         rt = None
+
+    def _series(b):                                        # the (normalised) per-sample trace
+        s = mat[b]
+        return (s / rt.replace(0, np.nan)) if rt is not None else s
+
+    if bin_minutes is None:                                # NATIVE — one point per sample
+        out = {}
+        for key, mz in ion_mz_map.items():
+            b = _bin_for_mz(arr, idx, cols_set, float(mz))
+            out[key] = (pd.Series(_series(b).values) if b is not None
+                        else pd.Series(np.nan, index=range(len(hr))))
+        return hr, pd.DataFrame(out)
+
     grid = np.arange(0, np.nanmax(hr) + bin_minutes / 60.0, bin_minutes / 60.0)
     digit = np.digitize(hr, grid)
     out = {}
@@ -212,10 +241,7 @@ def ion_traces(ts_peaks: pd.DataFrame, ion_mz_map: dict, *, mode: str = "raw",
         if b is None:
             out[key] = pd.Series(np.nan, index=range(1, len(grid) + 1))
             continue
-        s = mat[b]
-        if rt is not None:
-            s = s / rt.replace(0, np.nan)
-        out[key] = pd.Series(s.values).groupby(digit).median().reindex(range(1, len(grid) + 1))
+        out[key] = pd.Series(_series(b).values).groupby(digit).median().reindex(range(1, len(grid) + 1))
     return grid, pd.DataFrame(out)
 
 
@@ -231,7 +257,7 @@ def _logcorr(a, b, min_points: int = 8):
 
 def channel_agreement(ts_peaks: pd.DataFrame, ion_table: pd.DataFrame, *,
                       floor: float = 150.0, min_points: int = 8,
-                      bin_minutes: int = DEFAULT_BIN_MIN) -> pd.DataFrame:
+                      bin_minutes: int | None = None) -> pd.DataFrame:
     """QC: do the ion channels of the SAME neutral track in time? (We otherwise
     SUM them — `time_traces`.) For every neutral with >=2 testable channels
     (>=min_points finite points AND median >= floor cps), correlate every channel
@@ -281,11 +307,11 @@ def channel_agreement(ts_peaks: pd.DataFrame, ion_table: pd.DataFrame, *,
 
 def attach_dynamics(analytes: pd.DataFrame, ts_peaks: pd.DataFrame, adducts, *,
                     mode: str = "raw", reagent_mzs=None,
-                    bin_minutes: int = DEFAULT_BIN_MIN) -> pd.DataFrame:
+                    bin_minutes: int | None = None) -> pd.DataFrame:
     """Add median_cps / cv / changing to the analyte table from the time series.
-    `bin_minutes` must be scaled to the batch span (the 30-min default gives too
-    few points on a short densely-sampled batch -> cv unreliable / changing all
-    False)."""
+    `bin_minutes=None` (default) computes cv at NATIVE per-sample resolution (every
+    sample is a point), so a short densely-sampled batch is no longer starved of
+    points; pass an int to time-bin (legacy)."""
     df = analytes.copy()
     _, traces = time_traces(ts_peaks, df["neutral_formula"].tolist(), adducts,
                             mode=mode, reagent_mzs=reagent_mzs, bin_minutes=bin_minutes)
@@ -434,9 +460,12 @@ def van_krevelen_batch(out_dir, ts, profile, *, merged=None, tag=None, label=Non
     """
     import os
 
+    from . import paths as PT
     from . import timeseries as TS
 
     OUT = os.path.expanduser(out_dir)
+    P = PT.run_paths(OUT).ensure()
+    FIG, TAB = P.figures, P.tables       # .png -> figures/, .csv -> tables/
     tag = tag or profile.name
     label = label or profile.label
     batch_name = batch_name or label
@@ -448,16 +477,17 @@ def van_krevelen_batch(out_dir, ts, profile, *, merged=None, tag=None, label=Non
         ts = pd.read_parquet(os.path.expanduser(ts))
     ts = ts.copy()
     ts["datetime_utc"] = pd.to_datetime(ts["datetime_utc"], utc=True)
-    BIN_MIN = bin_minutes or TS.auto_bin_minutes(ts)
+    BIN_MIN = bin_minutes        # None = NATIVE per-sample resolution (no time grid)
 
     # (1) organic-only VK (Si excluded) — the clean atmospheric view
     an = analyte_table(merged, exclude_contaminant=True)
     an = attach_dynamics(an, ts, profile.adducts, mode="raw", bin_minutes=BIN_MIN)
     nchg = int(an["changing"].sum())
-    log(f"{tag}: {len(an)} organic analytes ({nchg} changing); bin={BIN_MIN}min")
+    log(f"{tag}: {len(an)} organic analytes ({nchg} changing); "
+        f"res={'native/sample' if BIN_MIN is None else str(BIN_MIN)+'min'}")
     subj = f" · {subject}" if subject else ""
     render_van_krevelen(
-        an, f"{OUT}/van_krevelen_{tag}.png",
+        an, f"{FIG}/van_krevelen_{tag}.png",
         title=f"{label}{subj} — Van Krevelen ({len(an)} analytes, {nchg} changing)")
 
     # (2) FULL VK — EVERY assigned peak, coloured by composition (Si/F/halogen shown)
@@ -466,9 +496,9 @@ def van_krevelen_batch(out_dir, ts, profile, *, merged=None, tag=None, label=Non
     anf["fclass"] = anf["neutral_formula"].map(full_class)
     log(f"{tag} FULL: {len(anf)} assigned neutrals; classes {anf['fclass'].value_counts().to_dict()}")
     render_van_krevelen_full(
-        anf, f"{OUT}/van_krevelen_full_{tag}.png",
+        anf, f"{FIG}/van_krevelen_full_{tag}.png",
         title=f"Van Krevelen — {batch_name}   ({len(anf)} assigned compounds)")
     anf[["neutral_formula", "adduct", "tier", "oc", "hc", "fclass", "median_cps", "cv", "changing"]] \
-        .to_csv(f"{OUT}/van_krevelen_full_{tag}.csv", index=False)
-    log(f"wrote {OUT}/van_krevelen_full_{tag}.png")
+        .to_csv(f"{TAB}/van_krevelen_full_{tag}.csv", index=False)
+    log(f"wrote {FIG}/van_krevelen_full_{tag}.png")
     return {"organic": an, "full": anf, "bin_minutes": BIN_MIN, "out_dir": OUT, "tag": tag}

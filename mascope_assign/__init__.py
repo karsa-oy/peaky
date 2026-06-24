@@ -1,53 +1,47 @@
-"""mascope_assign — multi-pass chemical-formula assignment for high-resolution
-mass-spec peaks stored in Mascope.
+"""Back-compat shim: ``mascope_assign`` is now ``peaky``.
 
-SDK-native, test-driven. Mascope's ``match_compounds`` is the scoring oracle; this
-package owns candidate generation, chemistry plausibility, series logic and
-arbitration. State lives in one mutable ledger DataFrame (one row per peak);
-passes are ledger -> ledger functions that only fill/annotate.
+The package was renamed to ``peaky`` (its distribution + CLI name). This module
+keeps the old import path working as a true alias of the real package — including
+submodules — so existing ``import mascope_assign`` / ``from mascope_assign import
+x`` / ``import mascope_assign.cli`` code is unchanged AND resolves to the SAME
+module objects as ``peaky`` (no duplicate, separately-stateful module copies).
 
-Public API (import from the package root; internals may move):
-
-    import mascope_assign as ma
-
-    ma.run(sample_id, context)        # single-sample assignment -> dict
-    ma.run_batch(batch=..., ...)      # representative-sample batch assignment
-    ma.run_pipeline(batch=..., ...)   # the orchestration spine
-    ma.PassConfig(...)                # assignment knobs
-    ma.get_context("ambient-air")     # context (plausibility + contaminant families)
-    ma.resolve_reagent("auto", peaks) # ReagentProfile (Br / Ur / NO3 ...)
-    ma.build_report(out_dir, ...)     # standard PDF assignment report
-
-Attributes are resolved lazily (PEP 562) so ``import mascope_assign`` stays cheap
-and does not pull matplotlib or the Mascope SDK until a heavy entry point is used.
+How: a meta-path finder redirects any ``mascope_assign[.sub]`` import to the
+corresponding ``peaky[.sub]`` module, then ``sys.modules`` is pointed at ``peaky``
+so bare ``import mascope_assign`` and attribute access also hit the real package.
+Keep this file a pure alias — ``peaky`` is the single source of truth.
 """
-from __future__ import annotations
+import importlib
+import importlib.abc
+import importlib.util
+import sys
 
-__version__ = "0.3.0"
-
-# public name -> (submodule, attribute)
-_LAZY = {
-    "run": ("assign", "run"),
-    "run_batch": ("assign_batch", "run"),
-    "run_pipeline": ("pipeline", "run"),
-    "PassConfig": ("passes", "PassConfig"),
-    "get_context": ("contexts", "get_context"),
-    "resolve_reagent": ("profiles", "resolve"),
-    "ReagentProfile": ("profiles", "ReagentProfile"),
-    "build_report": ("pdf_report", "build"),
-}
-
-__all__ = ["__version__", *sorted(_LAZY)]
+_OLD = __name__          # "mascope_assign"
+_NEW = "peaky"
 
 
-def __getattr__(name: str):
-    import importlib
+class _Redirector(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    """Resolve ``mascope_assign`` and ``mascope_assign.<sub>`` to the live
+    ``peaky`` / ``peaky.<sub>`` module object."""
 
-    if name in _LAZY:
-        mod, attr = _LAZY[name]
-        return getattr(importlib.import_module(f".{mod}", __name__), attr)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == _OLD or fullname.startswith(_OLD + "."):
+            return importlib.util.spec_from_loader(fullname, self)
+        return None
+
+    def create_module(self, spec):
+        new_name = _NEW + spec.name[len(_OLD):]   # mascope_assign.cli -> peaky.cli
+        module = importlib.import_module(new_name)
+        sys.modules[spec.name] = module           # alias points at the real object
+        return module
+
+    def exec_module(self, module):                # already executed as peaky.*
+        pass
 
 
-def __dir__():
-    return sorted(__all__)
+if not any(isinstance(f, _Redirector) for f in sys.meta_path):
+    sys.meta_path.insert(0, _Redirector())
+
+import peaky  # noqa: E402
+
+sys.modules[__name__] = peaky

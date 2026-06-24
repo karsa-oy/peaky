@@ -3,8 +3,11 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "peaky"
-version = "0.3.0"
+# Distribution name on PyPI (`peaky` is taken). The IMPORT package + CLI stay
+# `peaky` (dist != import, like scikit-learn/sklearn): `pip install mascope-peaky`
+# then `import peaky` / run `peaky`.
+name = "mascope-peaky"
+version = "0.4.0"
 description = "Peaky — AI-native analysis toolbox for Mascope: reproducible CIMS peak assignment, clustering, and reporting."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -39,17 +42,19 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
-# `pip install peaky[compress]` enables the size-reduced companion PDF
+# `pip install mascope-peaky[compress]` enables the size-reduced companion PDF
 # (pdf_report.compress_pdf). Absent these, the report still builds; only the
 # `_compressed.pdf` is skipped.
 compress = ["PyMuPDF>=1.23", "Pillow>=9.0"]
 
 [project.urls]
-Repository = "https://github.com/alekseishcherbinin/peaky"
+Repository = "https://github.com/karsa-oy/peaky"
 
 [project.scripts]
-peaky = "mascope_assign.cli:main"
-mascope-assign = "mascope_assign.cli:main"   # back-compat alias
+peaky = "peaky.cli:main"
+mascope-assign = "peaky.cli:main"   # back-compat alias
 
 [tool.hatch.build.targets.wheel]
-packages = ["mascope_assign"]
+# `peaky` is the package; `mascope_assign` is a one-line back-compat shim
+# (sys.modules alias) so existing `import mascope_assign` keeps working.
+packages = ["peaky", "mascope_assign"]

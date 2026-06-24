@@ -19,11 +19,20 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from . import io_mascope as IO
+from . import paths as PT
 from . import profiles as P
 from . import sampling as SS
 from . import timeseries as TS
 
 __version__ = "0.2.0"  # + representative-sample selection (5 time-grid + max-TIC)
+
+# Content-stable epoch for SOURCE_DATE_EPOCH. NOT the run time: figures, workbooks
+# and the ledger are a PURE FUNCTION of the input data, so their embedded metadata
+# timestamps must be constant — a re-run of the same data, whenever it happens,
+# yields byte-identical figures/tables. The RUN time reaches output only as visible
+# text (PDF cover "generated" + Report ID), the run-folder name, and run_manifest.json.
+# 315532800 = 1980-01-01T00:00:00Z (also the zip-format mtime floor the xlsx writer needs).
+CONTENT_EPOCH = 315532800
 
 STAGES = ("matrix", "assign", "cluster", "validate")
 
@@ -55,6 +64,20 @@ def run_stamp(when: datetime | None = None) -> tuple[str, str]:
 def run_id(batch_name: str, when: datetime | None = None) -> str:
     """Versioned run id = batch slug + timestamp; also the output folder's name."""
     return f"{slugify(batch_name)}_{run_stamp(when)[0]}"
+
+
+def stamp_source_date_epoch(when=None) -> str:
+    """Export the FIXED ``CONTENT_EPOCH`` as ``SOURCE_DATE_EPOCH`` so every renderer
+    stamps a constant time, not ``now()`` and not the run time. matplotlib reads it
+    for PNG/PDF metadata and the xlsx writer reads it via ``cluster._resolve_when``;
+    this is matplotlib's ONLY reproducible-stamp hook. Pinning it to a constant makes
+    figures, workbooks and tables a PURE FUNCTION OF THE INPUT DATA — the same data
+    re-run at any time yields byte-identical figures/tables. Run time is NOT carried
+    here; it reaches output only as visible PDF-cover text + the Report ID + the
+    run-folder name. `when` is accepted for back-compat but IGNORED. Returns the epoch."""
+    epoch = str(CONTENT_EPOCH)
+    os.environ["SOURCE_DATE_EPOCH"] = epoch
+    return epoch
 
 
 def make_run_dir(base: str, batch_name: str, when: datetime | None = None) -> str:
@@ -167,11 +190,20 @@ def generate_report(ctx: RunContext, ts, *, subject: str | None = None,
     from . import clustering as CLU
     from . import pdf_report as R
 
+    # Pin figures/PDF/workbooks to a FIXED content epoch (not the run time) so the
+    # scientific content is byte-identical regardless of WHEN it's run. The run time
+    # appears only as cover text + Report ID (ctx.generated / ctx.run_id below).
+    stamp_source_date_epoch()
+
     if isinstance(ts, str):
-        ctx.ts_path = os.path.expanduser(ts)
+        ctx.ts_path = os.path.expanduser(ts)        # reference an existing parquet, never copy
         ts = pd.read_parquet(ctx.ts_path)
     elif ctx.ts_path is None:
-        ctx.ts_path = os.path.join(ctx.out_dir, f"{ctx.tag}_ts.parquet")
+        # ts was fetched live (no on-disk source) — keep ONE copy with the run, in
+        # data/, so the report/provenance can read it. (When the caller passed a
+        # parquet path, run_batch points ctx.ts_path at it instead of copying.)
+        ctx.ts_path = os.path.join(PT.run_paths(ctx.out_dir).ensure().data,
+                                   f"{ctx.tag}_ts.parquet")
         ts.to_parquet(ctx.ts_path)
 
     out: dict = {"ctx": ctx}
@@ -200,26 +232,37 @@ def generate_report(ctx: RunContext, ts, *, subject: str | None = None,
 def run_batch(*, batch: str, dataset: str | None = None, reagent: str = "auto",
               base_out: str, ts=None, when=None, subject: str | None = None,
               amine_r_min: float = 0.7, do_report=True, config: str | None = None,
+              select: str = "representative", coverage_target: float = 0.85,
+              k_max: int = 10, height_floor: float = 1000.0,
               log=print, **assign_kw) -> dict:
-    """Full batch pipeline in ONE call: representative-sample ASSIGN (live
-    match_compounds) -> merge -> cluster figures -> Van Krevelen -> PDF report,
-    into one versioned run folder. `ts` is the full-batch per-sample peak time
-    series (DataFrame or parquet path); if None it is fetched live and reused for
-    the amine gate + clustering. Returns {ctx, assign, cluster, vk, report_pdf}."""
+    """Full batch pipeline in ONE call: sample-subset ASSIGN (live match_compounds)
+    -> merge -> cluster figures -> Van Krevelen -> PDF report, into one versioned run
+    folder. `ts` is the full-batch per-sample peak time series (DataFrame or parquet
+    path); if None it is fetched live and reused for the amine gate + clustering.
+
+    `select` picks the assigned-sample strategy: 'representative' (THE RULE: 5
+    time-spaced + max-TIC) or 'brightest' (bin all peaks -> assign each significant
+    m/z bin's brightest sample; `coverage_target`/`k_max`/`height_floor` tune it).
+    Returns {ctx, assign, cluster, vk, report_pdf}."""
     from . import assign_batch as AB
 
+    ts_src = None
     if isinstance(ts, str):
-        ts = pd.read_parquet(os.path.expanduser(ts))
+        ts_src = os.path.expanduser(ts)            # an on-disk parquet we can reference
+        ts = pd.read_parquet(ts_src)
     if ts is None:
         log(f"[batch] fetching full-batch time series for {batch!r} ...")
         ts = load(batch=batch, dataset=dataset)
     prof = P.resolve(reagent, ts, config=config)
     ctx = make_run_context(base_out, batch, prof, when=when, dataset=dataset)
+    if ts_src:
+        ctx.ts_path = ts_src     # reference the caller's parquet; don't re-copy it into the run dir
     log(f"[batch] {ctx.run_id} -> {ctx.out_dir}")
 
     res = AB.run(batch=batch, dataset=dataset, reagent=prof.name,
                  out_dir=ctx.out_dir, ts_peaks=ts, amine_r_min=amine_r_min,
-                 log=log, **assign_kw)
+                 select=select, coverage_target=coverage_target, k_max=k_max,
+                 height_floor=height_floor, log=log, **assign_kw)
     gen = generate_report(ctx, ts, subject=subject, do_report=do_report, log=log)
 
     # provenance: pin this run to its exact code + input-data hash + config +
@@ -236,6 +279,8 @@ def run_batch(*, batch: str, dataset: str | None = None, reagent: str = "auto",
         ts_path=ctx.ts_path,
         counts={"merged_M0": summ.get("merged_M0"),
                 "merged_tiers": summ.get("merged_tiers"),
-                "n_samples": summ.get("n_files")},
+                "n_samples": summ.get("n_files"),
+                "select": summ.get("select"),
+                "coverage_target": summ.get("coverage_target")},
         created_utc=ctx.when.isoformat(), log=log)
     return {"ctx": ctx, "assign": res, **gen}

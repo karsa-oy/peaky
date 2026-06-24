@@ -477,9 +477,9 @@ def write_cluster_workbook(rows, out_xlsx, *, meta=None, item_label=None,
     is the cluster_rows output [(cid, members, rbar, shape, peak_hr), ...]; `meta`
     maps a member key -> a dict of columns (e.g. neutral_formula / channel / m_z /
     match_score / tier). `member_cols` orders/selects those columns. `when` is the
-    run timestamp embedded in the file (so a re-run with the same inputs+time is
-    byte-identical, while a later run carries a later stamp). Returns the path (or
-    None if no rows)."""
+    timestamp embedded in the file; it defaults (via _resolve_when) to the FIXED
+    content epoch, so the workbook is byte-identical for identical data, whenever
+    it's written. Returns the path (or None if no rows)."""
     if not rows:
         return None
     summary = pd.DataFrame([{
@@ -508,29 +508,32 @@ def write_cluster_workbook(rows, out_xlsx, *, meta=None, item_label=None,
 
 def _resolve_when(when):
     """The timestamp to embed in a workbook. Precedence: explicit `when` (a datetime
-    or epoch seconds) -> SOURCE_DATE_EPOCH env (the reproducible-build convention; the
-    run driver sets it to the run's generation time) -> the current UTC time. Tying it
-    to the RUN time means two runs at different times get different bytes (as they
-    should — like the report ID and cover), while a re-run with the same inputs+time
-    is byte-identical."""
+    or epoch seconds) -> SOURCE_DATE_EPOCH env (which the run driver pins to the FIXED
+    content epoch, not the run time) -> the same fixed content epoch as a last resort.
+    Because the embedded stamp is a constant, the workbook is a PURE FUNCTION OF ITS
+    DATA: the same data yields byte-identical bytes whenever it's run. (Run time lives
+    only on the PDF cover + Report ID, never in the data files.)"""
     import os
     from datetime import datetime, timezone
+    # mirror pipeline.CONTENT_EPOCH (1980-01-01Z); duplicated as a bare int to avoid a
+    # cluster -> pipeline import cycle (pipeline imports cluster transitively).
+    _CONTENT_EPOCH = 315532800
     if when is None:
         sde = os.environ.get("SOURCE_DATE_EPOCH")
         when = int(sde) if sde else None
     if when is None:
-        return datetime.now(timezone.utc)
+        return datetime.fromtimestamp(_CONTENT_EPOCH, tz=timezone.utc)
     if isinstance(when, (int, float)):
         return datetime.fromtimestamp(int(when), tz=timezone.utc)
     return when
 
 
 def _make_xlsx_deterministic(path, *, when=None) -> None:
-    """Rewrite an .xlsx so its bytes are a deterministic function of its data + the
-    run timestamp: replace openpyxl's datetime.now() stamps (docProps/core.xml AND
-    every zip member's embedded mtime) with `when` (see _resolve_when). Same data +
-    same time -> identical bytes; a later run -> a later timestamp. Zip mtimes must
-    be >= 1980 (the format floor), which any real run time satisfies."""
+    """Rewrite an .xlsx so its bytes are a deterministic function of ITS DATA:
+    replace openpyxl's datetime.now() stamps (docProps/core.xml AND every zip
+    member's embedded mtime) with `when` (see _resolve_when), which defaults to the
+    FIXED content epoch. Same data -> identical bytes, whenever it's written. Zip
+    mtimes must be >= 1980 (the format floor); the content epoch is 1980-01-01."""
     import os
     import re
     import zipfile

@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mascope_assign import gka_figure as GF  # noqa: E402
+from peaky import gka_figure as GF  # noqa: E402
 
 PASS = FAIL = 0
 def check(name, cond, detail=""):
@@ -77,7 +77,7 @@ check("element_members: Si collected; F-monsters excluded, real PFCAs kept",
       and set(GF.element_members(fmass, "F")) == set(PFCA), GF.element_members(fmass, "F"))
 check("detect_series: Si has a short (2-rung) C2H6OSi ladder but no >=4 one",
       GF.detect_series(fmass, units=["C2H6OSi"], min_len=4) == []
-      and len(__import__("mascope_assign.series_gka", fromlist=["find_homolog_series"])
+      and len(__import__("peaky.series_gka", fromlist=["find_homolog_series"])
               .find_homolog_series(GF.element_members(fmass, "Si"), "C2H6OSi", min_len=2)) >= 1)
 shown = [f[0] for f in GF.present_families(fmass)]
 check("present_families: siloxane SHOWS on its short C2H6OSi ladder (D3->D4)",

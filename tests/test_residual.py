@@ -5,12 +5,12 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mascope_assign import residual as RD  # noqa: E402
-from mascope_assign import ledger as L  # noqa: E402
-from mascope_assign import contexts as X  # noqa: E402
-from mascope_assign import chemistry as C  # noqa: E402
-from mascope_assign import isotopes as ISO  # noqa: E402
-from mascope_assign.passes import PassConfig  # noqa: E402
+from peaky import residual as RD  # noqa: E402
+from peaky import ledger as L  # noqa: E402
+from peaky import contexts as X  # noqa: E402
+from peaky import chemistry as C  # noqa: E402
+from peaky import isotopes as ISO  # noqa: E402
+from peaky.passes import PassConfig  # noqa: E402
 
 PASS = FAIL = 0
 CFG = PassConfig(height_cutoff=100)
@@ -195,7 +195,7 @@ check("pair enumeration drops F-with-O>6 candidates",
        and C.parse_formula(f).get("O", 0) > 6])
 
 # ---------- CH2O unit registered for series detection ----------
-from mascope_assign import series_detect as SD  # noqa: E402
+from peaky import series_detect as SD  # noqa: E402
 check("CH2O in series unit library", "CH2O" in SD.UNIT_LIBRARY,
       sorted(SD.UNIT_LIBRARY))
 

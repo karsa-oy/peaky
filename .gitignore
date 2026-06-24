@@ -14,6 +14,8 @@ __pycache__/
 .claude/
 
 # generated run outputs
+/output/                 # the workspace output/ folder (PEAKY_OUTPUT_DIR; `peaky setup`)
+/peaky-output/
 checkpoints/
 *_assignments.xlsx
 *_ledger.csv

@@ -23,6 +23,8 @@ import os
 import numpy as np
 import pandas as pd
 
+from . import paths as PT
+
 __version__ = "0.1.0"
 
 A4 = (8.27, 11.69)                       # portrait inches
@@ -48,7 +50,7 @@ def _skill_version() -> str:
         av = assign.__version__
     except Exception:
         av = "?"
-    return f"mascope_assign (assign v{av}) · git {sha}"
+    return f"peaky (assign v{av}) · git {sha}"
 
 
 def load_context(out_dir: str, *, tag: str, label: str, ts_path: str | None = None,
@@ -57,8 +59,10 @@ def load_context(out_dir: str, *, tag: str, label: str, ts_path: str | None = No
     from . import analyte_viz as V
     from . import chemistry as C
     out_dir = os.path.expanduser(out_dir)
-    ctx: dict = {"out_dir": out_dir, "tag": tag, "label": label, "fig": {},
-                 "generated": generated, "version": _skill_version(),
+    RP = PT.run_paths(out_dir)
+    FIG, TAB = RP.figures, RP.tables       # MUST mirror the writers (clustering/analyte_viz)
+    ctx: dict = {"out_dir": out_dir, "fig_dir": FIG, "tag": tag, "label": label,
+                 "fig": {}, "generated": generated, "version": _skill_version(),
                  "batch_name": batch_name, "run_id": run_id}
 
     merged = pd.read_csv(f"{out_dir}/merged_ledger.csv")
@@ -82,7 +86,7 @@ def load_context(out_dir: str, *, tag: str, label: str, ts_path: str | None = No
         ctx["score_by_tier"] = {t: float(gs[t]) for t in gs.index}
     ctx["adduct_counts"] = merged["adduct"].value_counts().to_dict()   # actual channels
     # the representative sample NAMES (timestamps), not just ids
-    ss = f"{out_dir}/selected_samples.csv"
+    ss = f"{TAB}/selected_samples.csv"
     if os.path.exists(ss):
         s = pd.read_csv(ss)
         name = s["sample_item_name"] if "sample_item_name" in s.columns else s["sample_item_id"]
@@ -196,7 +200,7 @@ def load_context(out_dir: str, *, tag: str, label: str, ts_path: str | None = No
         p = f"{out_dir}/{fn}"
         if os.path.exists(p):
             ctx[key] = json.load(open(p))
-    vk = f"{out_dir}/van_krevelen_full_{tag}.png"
+    vk = f"{FIG}/van_krevelen_full_{tag}.png"
     if os.path.exists(vk):
         ctx["fig"]["vk"] = vk           # single (scatter)
     # cluster figures are PAGED (clusters_<set>_<tag>_p<i>.png) — collect ALL pages
@@ -204,13 +208,13 @@ def load_context(out_dir: str, *, tag: str, label: str, ts_path: str | None = No
                       ("changers", f"clusters_changers_{tag}"),
                       ("flat", f"clusters_flat_{tag}"),
                       ("unassigned", f"clusters_unassigned_{tag}")]:
-        paged = sorted(glob.glob(f"{out_dir}/{stem}_p*.png"),
+        paged = sorted(glob.glob(f"{FIG}/{stem}_p*.png"),
                        key=lambda s: int(s.rsplit("_p", 1)[1].split(".")[0]))
         if paged:
             ctx["fig"][key] = paged
-        elif os.path.exists(f"{out_dir}/{stem}.png"):
-            ctx["fig"][key] = [f"{out_dir}/{stem}.png"]
-    cc = f"{out_dir}/clusters_changing_{tag}.csv"
+        elif os.path.exists(f"{FIG}/{stem}.png"):
+            ctx["fig"][key] = [f"{FIG}/{stem}.png"]
+    cc = f"{TAB}/clusters_changing_{tag}.csv"
     if os.path.exists(cc):
         ctx["changing_csv"] = pd.read_csv(cc)
     return ctx
@@ -635,7 +639,9 @@ def gka(ctx, pdf):
     if merged is None or "neutral_formula" not in getattr(merged, "columns", []) \
             or not len(merged):
         return
-    png = os.path.join(ctx["out_dir"], f"gka_{ctx['tag']}.png")
+    fig_dir = ctx.get("fig_dir") or ctx["out_dir"]
+    os.makedirs(fig_dir, exist_ok=True)
+    png = os.path.join(fig_dir, f"gka_{ctx['tag']}.png")
     GK.render_gka(merged, png, title=ctx.get("batch_name") or ctx["label"])
     ctx["fig"]["gka"] = png
     _image_page(pdf, png, "")           # figure carries its own title
@@ -731,7 +737,7 @@ def methods(ctx, pdf):
                   ("b", "  not a measurement (see Composition for the degeneracy it leaves).")]
     _text_lines(fig, lines, y0=0.88, dy=0.026)
     if ctx.get("generated"):
-        fig.text(0.08, 0.06, f"mascope_assign · generated {ctx['generated']}", fontsize=8, color=GREY)
+        fig.text(0.08, 0.06, f"peaky · generated {ctx['generated']}", fontsize=8, color=GREY)
     _close(pdf, fig)
 
 
@@ -753,7 +759,7 @@ def build(out_dir: str, *, tag: str, label: str, ts_path: str | None = None,
         # name the PDF with the Report ID when we have one, so the file is
         # self-identifying even when moved out of its run folder.
         fname = f"report_{run_id}.pdf" if run_id else f"report_{tag}.pdf"
-        out_pdf = os.path.join(os.path.expanduser(out_dir), fname)
+        out_pdf = os.path.join(PT.run_paths(out_dir).ensure().report, fname)
     with PdfPages(out_pdf) as pdf:
         for section in sections:
             try:

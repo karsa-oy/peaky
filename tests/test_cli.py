@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mascope_assign import cli, gka_widget, profiles  # noqa: E402
+from peaky import cli, gka_widget, profiles  # noqa: E402
 
 PASS = FAIL = 0
 def check(name, cond, detail=""):
@@ -37,12 +37,50 @@ check("parse `assign --adducts` (multi)", a.adducts == ["[M+Br]-", "[M-H]-"] and
 a = P.parse_args(["--env", "/tmp/x.env", "list", "datasets"])
 check("top-level --env is parsed", a.env == "/tmp/x.env")
 
+# ---- batch selection strategy flags -----------------------------------------
+a = P.parse_args(["batch", "--batch", "B"])
+check("batch defaults to representative selection",
+      a.func is cli.cmd_batch and a.select == "representative"
+      and a.coverage_target == 0.85 and a.k_max == 10 and a.height_floor == 1000.0)
+a = P.parse_args(["batch", "--batch", "B", "--select", "brightest",
+                  "--coverage-target", "0.9", "--k-max", "8", "--height-floor", "500"])
+check("parse `batch --select brightest` + knobs",
+      a.select == "brightest" and a.coverage_target == 0.9
+      and a.k_max == 8 and a.height_floor == 500.0)
+
 # subcommand is required
 try:
     P.parse_args([])
     check("no subcommand -> error", False, "did not raise")
 except SystemExit:
     check("no subcommand -> error", True)
+
+# ---- setup command + output-dir resolution ----------------------------------
+a = P.parse_args(["setup"])
+check("parse `setup`", a.func is cli.cmd_setup)
+check("resolve_out_dir: --out-dir wins", cli.resolve_out_dir("/x/y") == os.path.expanduser("/x/y"))
+os.environ["PEAKY_OUTPUT_DIR"] = "/tmp/peaky_test_out"
+check("resolve_out_dir: $PEAKY_OUTPUT_DIR honored when no --out-dir",
+      cli.resolve_out_dir(None) == "/tmp/peaky_test_out")
+os.environ.pop("PEAKY_OUTPUT_DIR", None)
+# cmd_setup scaffolds a workspace (no network: clear creds so it skips the connect check)
+import tempfile  # noqa: E402
+_saved = {k: os.environ.pop(k, None) for k in ("MASCOPE_URL", "MASCOPE_ACCESS_TOKEN")}
+_orig_root = cli._workspace_root
+try:
+    with tempfile.TemporaryDirectory() as _d:
+        open(os.path.join(_d, ".env.example"), "w").write("MASCOPE_URL=\nMASCOPE_ACCESS_TOKEN=\n")
+        cli._workspace_root = lambda: _d
+        cli.cmd_setup(SimpleNamespace())
+        _env = open(os.path.join(_d, ".env")).read()
+        check("setup creates .env + output/ + sets PEAKY_OUTPUT_DIR to the workspace output/",
+              os.path.isdir(os.path.join(_d, "output"))
+              and f"PEAKY_OUTPUT_DIR={os.path.join(_d, 'output')}" in _env)
+finally:
+    cli._workspace_root = _orig_root
+    for _k, _v in _saved.items():
+        if _v is not None:
+            os.environ[_k] = _v
 
 # ---- reagent resolution: explicit profile name needs NO network --------------
 ns = SimpleNamespace(adducts=None, reagent="Br", context=None, sample_id="X", no_cache=False)

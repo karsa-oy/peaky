@@ -1,10 +1,10 @@
 """Van Krevelen + raw time-series plots for a run's analytes, computed
-identically for any instrument via mascope_assign.analyte_viz.
+identically for any instrument via peaky.analyte_viz.
 
     python3 scripts/analyte_plots.py \
         --ledger <LEDGER.csv> --ts-parquet <BATCH_peaks.parquet> \
         --adducts '[M+Br]-,[M-H]-,[M+HBr+Br]-' \
-        --out-prefix ~/mascope-output/<name>/<name> --label 'Br⁻ CIMS' --batch <SAMPLE_ID>
+        --out-prefix ~/peaky-output/<name>/<name> --label 'Br⁻ CIMS' --batch <SAMPLE_ID>
 
     --label is the reagent (e.g. 'Br⁻ CIMS', 'Ur⁺ CIMS'); --batch is the batch /
     sample id. Both are shown in the figure titles as "<label> · <batch> — ...".
@@ -24,7 +24,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from mascope_assign import analyte_viz as V  # noqa: E402
+from peaky import analyte_viz as V  # noqa: E402
 
 
 def main(argv=None):

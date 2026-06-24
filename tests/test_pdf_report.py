@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mascope_assign import pdf_report as R  # noqa: E402
+from peaky import pdf_report as R  # noqa: E402
 
 PASS = FAIL = 0
 def check(name, cond, detail=""):
@@ -19,6 +19,7 @@ def check(name, cond, detail=""):
 
 with tempfile.TemporaryDirectory() as d:
     os.makedirs(f"{d}/per_file", exist_ok=True)
+    os.makedirs(f"{d}/tables", exist_ok=True)   # cluster tables live under tables/ (paths.RunPaths)
     # minimal merged ledger (M0 rows) spanning a few classes; C10H19NO2 is the
     # NH3-shifted shadow of C10H16O2 (the ammonium/amine degeneracy), and one row
     # has formula_agree=False (drives the single-source disagreement count).
@@ -39,7 +40,7 @@ with tempfile.TemporaryDirectory() as d:
     ]).to_csv(f"{d}/per_file/s1_ledger.csv", index=False)
     pd.DataFrame({"neutral_formula": ["C10H16O2", "C10H14O2", "C9H12O2"],
                   "cluster": [1, 1, 1], "cv": [0.5, 0.6, 0.4],
-                  "median_cps": [9000, 4000, 2000]}).to_csv(f"{d}/clusters_changing_Ur.csv", index=False)
+                  "median_cps": [9000, 4000, 2000]}).to_csv(f"{d}/tables/clusters_changing_Ur.csv", index=False)
 
     ctx = R.load_context(d, tag="Ur", label="Ur⁺ CIMS")
     check("load_context: merged loaded", ctx["n_m0"] == 6, ctx.get("n_m0"))

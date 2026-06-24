@@ -27,6 +27,7 @@ import pandas as pd
 
 from . import analyte_viz as V
 from . import cluster as CL
+from . import paths as PT
 from . import timeseries as TS
 
 __version__ = "0.1.0"
@@ -47,6 +48,8 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
     tag     : filename token (default profile.name); label: title text (profile.label).
     """
     OUT = os.path.expanduser(out_dir)
+    P = PT.run_paths(OUT).ensure()
+    FIG, TAB = P.figures, P.tables       # .png -> figures/, .csv/.xlsx -> tables/
     tag = tag or profile.name
     label = label or profile.label
     ADDUCTS, NORM = profile.adducts, profile.normaliser
@@ -54,7 +57,7 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
 
     # clear stale cluster pages so a shorter run (fewer pages) can't leave orphans
     # that the report would still glob in
-    for _old in glob.glob(f"{OUT}/clusters_*_{tag}_p*.png"):
+    for _old in glob.glob(f"{FIG}/clusters_*_{tag}_p*.png"):
         os.remove(_old)
 
     if merged is None:
@@ -66,11 +69,14 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
         ts = pd.read_parquet(os.path.expanduser(ts))
     ts = ts.copy()
     ts["datetime_utc"] = pd.to_datetime(ts["datetime_utc"], utc=True)
-    # time-bin width: aim for ~50 bins across the (often short, dense) batch span.
-    BIN_MIN = bin_minutes or TS.auto_bin_minutes(ts)
+    # Native per-sample time resolution by default (BIN_MIN=None): the samples are
+    # the common time axis, so traces + correlation use one point per sample at its
+    # real time — no re-gridding onto a uniform lattice (which aliased into spurious
+    # empty bins). Pass bin_minutes=int to time-bin instead.
+    BIN_MIN = bin_minutes
     span_min = (ts["datetime_utc"].max() - ts["datetime_utc"].min()).total_seconds() / 60.0
     log(f"=== {tag} ({label}) : merged M0={len(merged)}, TS samples={ts['sample_item_id'].nunique()}, "
-        f"span={span_min:.0f}min -> bin={BIN_MIN}min ===")
+        f"span={span_min:.0f}min -> res={'native/sample' if BIN_MIN is None else str(BIN_MIN)+'min'} ===")
 
     def cv_of(traces, cols):
         out = {}
@@ -147,14 +153,14 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
     changers = CL.big_changers(traces_raw, remainder, grid, fold_min=CL.BIG_CHANGE_FOLD)
     changer_set = {c for c, _, _ in changers}
     remainder = [k for k in remainder if k not in changer_set]
-    CL.render_changers(changers, traces_raw, grid, f"{OUT}/clusters_changers_{tag}", ion_lbl,
+    CL.render_changers(changers, traces_raw, grid, f"{FIG}/clusters_changers_{tag}", ion_lbl,
                        title=f"{label} · Large standalone changes (≥{CL.BIG_CHANGE_FOLD:g}× fold, no family) — {len(changers)} channels")
     pd.DataFrame({"ion": [ion_lbl(c) for c, _, _ in changers],
                   "neutral_formula": [c.split("|")[0] for c, _, _ in changers],
                   "channel": [meta[c]["channel"] for c, _, _ in changers],
                   "fold": [round(f, 1) for _, f, _ in changers],
                   "peak_hour": [round(ph, 2) for _, _, ph in changers],
-                  "median_cps": [round(med[c], 0) for c, _, _ in changers]}).to_csv(f"{OUT}/clusters_changers_{tag}.csv", index=False)
+                  "median_cps": [round(med[c], 0) for c, _, _ in changers]}).to_csv(f"{TAB}/clusters_changers_{tag}.csv", index=False)
     log(f"CHANGING: {len(rows)} dynamic families covering {sum(len(r[1]) for r in rows)}; "
         f"{len(flat_rows)} flat clusters ({len(flat_cluster_members)} ch) demoted; "
         f"{len(changers)} big standalone changers; "
@@ -165,12 +171,12 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
     posc = posc[np.isfinite(posc) & (posc > 0)]
     ylimc = (max(50, np.percentile(posc, 1)), np.percentile(posc, 99.5)) if len(posc) else None
     Zc = (Lg - Lg.mean()) / Lg.std() if len(clust_cols) else Lg
-    CL.render_clusters(rows, grid, Zc, traces_raw, ion_lbl, f"{OUT}/clusters_changing_{tag}",
+    CL.render_clusters(rows, grid, Zc, traces_raw, ion_lbl, f"{FIG}/clusters_changing_{tag}",
                        remaining=None, mode="raw", ylim=ylimc,
                        title=f"{label} · Co-varying ion channels — {sum(len(r[1]) for r in rows)} channels in {len(rows)} families",
                        subtitle="legend:  formula+adduct  (match-score) — shape clusters; near-identical merged, flat families demoted")
     # per-cluster workbook: one tab per (dynamic) cluster
-    CL.write_cluster_workbook(list(rows), f"{OUT}/clusters_changing_{tag}.xlsx",
+    CL.write_cluster_workbook(list(rows), f"{TAB}/clusters_changing_{tag}.xlsx",
                               meta=meta, item_label=ion_lbl, member_cols=MCOLS)
     clustered = [c for c in clust_cols if int(lab.get(c, -1)) in dyn_ids]   # CSV = dynamic families only
     pd.DataFrame({"ion": [ion_lbl(c) for c in clustered],
@@ -180,7 +186,7 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
                   "tier": [meta[c]["tier"] for c in clustered],
                   "cluster": [int(lab[c]) for c in clustered],
                   "cv": [round(cv[c], 3) for c in clustered],
-                  "median_cps": [round(med[c], 0) for c in clustered]}).to_csv(f"{OUT}/clusters_changing_{tag}.csv", index=False)
+                  "median_cps": [round(med[c], 0) for c in clustered]}).to_csv(f"{TAB}/clusters_changing_{tag}.csv", index=False)
 
     # FLAT = the uncorrelated remainder + Si contamination -> bunched overview panel
     flat_cols = goodk(list(dict.fromkeys(remainder + [k for k in ion_mz if is_si[k] and med.get(k, 0) >= FLOOR])))
@@ -188,18 +194,18 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
     pos = pos[np.isfinite(pos) & (pos > 0)]
     ylim = (max(50, np.percentile(pos, 1)), np.percentile(pos, 99.5)) if len(pos) else None
     log(f"FLAT: {len(flat_cols)} uncorrelated/contaminant ion channels (bunched)")
-    CL.render_flat_panel(flat_cols, traces_raw, grid, f"{OUT}/clusters_flat_{tag}_p1.png", ion_lbl,
+    CL.render_flat_panel(flat_cols, traces_raw, grid, f"{FIG}/clusters_flat_{tag}_p1.png", ion_lbl,
                          label=f"{label} · flat background (uncorrelated + flat families + Si)", ylim=ylim,
                          title=f"{label} · Flat background — {len(flat_cols)} ion channels (bunched)")
     pd.DataFrame({"ion": [ion_lbl(c) for c in flat_cols],
                   "neutral_formula": [c.split("|")[0] for c in flat_cols],
                   "channel": [meta[c]["channel"] for c in flat_cols], "cluster": 0,
                   "cv": [round(cv[c], 3) for c in flat_cols],
-                  "median_cps": [round(med[c], 0) for c in flat_cols]}).to_csv(f"{OUT}/clusters_flat_{tag}.csv", index=False)
+                  "median_cps": [round(med[c], 0) for c in flat_cols]}).to_csv(f"{TAB}/clusters_flat_{tag}.csv", index=False)
 
     # CHANNEL-AGREEMENT QC: do a neutral's ion channels actually track in time?
     ca = V.channel_agreement(ts, merged[["neutral_formula", "adduct", "mz"]], bin_minutes=BIN_MIN)
-    ca.to_csv(f"{OUT}/channel_agreement_{tag}.csv", index=False)
+    ca.to_csv(f"{TAB}/channel_agreement_{tag}.csv", index=False)
     if len(ca):
         log(f"CHANNEL AGREEMENT: {len(ca)} multi-channel neutrals — "
             f"{ca['verdict'].value_counts().to_dict()}")
@@ -227,6 +233,8 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
     def to_grid(m, bin_minutes=BIN_MIN):
         m = m.reindex(tstamp.sort_values().index)
         hr = (tstamp.reindex(m.index) - tstamp.min()).dt.total_seconds().values / 3600.0
+        if bin_minutes is None:                            # NATIVE — one row per sample
+            return hr, m.reset_index(drop=True)
         g = np.arange(0, np.nanmax(hr) + bin_minutes / 60.0, bin_minutes / 60.0)
         return g, m.groupby(np.digitize(hr, g)).median().reindex(range(1, len(g) + 1))
 
@@ -249,17 +257,17 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
     for cid, mem, rbar, sh, ph in rowsu:
         log(f"  c{cid}: n={len(mem)} r̄={rbar:.2f} {sh} h{ph:.1f} m/z {bin_mz[mem].min():.1f}-{bin_mz[mem].max():.1f}")
     rem_u = CL.remaining_row(un_vary, labu, bigu, un_raw, ggrid)[1] if len(un_vary) else None
-    paths_u = CL.render_clusters(rowsu, ggrid, Zu, un_raw, mzlab, f"{OUT}/clusters_unassigned_{tag}",
+    paths_u = CL.render_clusters(rowsu, ggrid, Zu, un_raw, mzlab, f"{FIG}/clusters_unassigned_{tag}",
                                  remaining=rem_u, mode="raw", ylim=ylimu,
                                  title=f"{label} · Unexplained peaks — {len(un_vary)} varying bins in {len(bigu)} clusters")
     if un_flat:
-        CL.render_flat_panel(un_flat, un_raw, ggrid, f"{OUT}/clusters_unassigned_{tag}_p{len(paths_u)+1}.png",
+        CL.render_flat_panel(un_flat, un_raw, ggrid, f"{FIG}/clusters_unassigned_{tag}_p{len(paths_u)+1}.png",
                              mzlab, label=f"{label} · flat / non-varying unexplained", ylim=ylimu,
                              title=f"{label} · Unexplained — {len(un_flat)} flat / non-varying bins (bunched)")
     labu_idx = set(labu.index)
     pd.DataFrame({"mz": [round(float(bin_mz[b]), 4) for b in un_bins],
                   "cluster": [int(labu[b]) if b in labu_idx else 0 for b in un_bins],
-                  "median_cps": [round(float(median_h[b]), 0) for b in un_bins]}).to_csv(f"{OUT}/clusters_unassigned_{tag}.csv", index=False)
+                  "median_cps": [round(float(median_h[b]), 0) for b in un_bins]}).to_csv(f"{TAB}/clusters_unassigned_{tag}.csv", index=False)
 
     log(f"DONE — figures in {OUT}")
     return {"changing": rows, "flat_clusters": flat_rows, "changers": changers,

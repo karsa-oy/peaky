@@ -27,6 +27,17 @@ __version__ = "0.1.0"
 _RUNTIME_CFG_FIELDS = ("mechanism_ids", "prior_offset", "reagent_element")
 
 
+def _rel_or_abs(path: str | None, base: str) -> str | None:
+    """A run-dir-relative path when `path` lives inside the run dir (e.g. a copied
+    ``data/<tag>_ts.parquet``), else the absolute path (e.g. an external input TS
+    referenced, not copied — see pipeline reference-not-copy). Either way ts_sha1
+    pins the content, so the run stays reproducible regardless of where the TS sits."""
+    if not path:
+        return None
+    p, b = os.path.abspath(os.path.expanduser(path)), os.path.abspath(base)
+    return os.path.relpath(p, b) if p == b or p.startswith(b + os.sep) else p
+
+
 def sha1_file(path: str, *, _buf: int = 1 << 20) -> str | None:
     """Streaming sha1 of a file (None if it does not exist)."""
     if not path or not os.path.exists(path):
@@ -97,7 +108,7 @@ def build_manifest(*, run_dir: str, batch_name: str, dataset: str | None,
             "batch_name": batch_name,
             "reagent": reagent,
             "sample_ids": list(sample_ids or []),
-            "ts_parquet": os.path.basename(ts_path) if ts_path else None,
+            "ts_parquet": _rel_or_abs(ts_path, run_dir),
             "ts_sha1": sha1_file(ts_path) if ts_path else None,
         },
         "config": cfg_d,
