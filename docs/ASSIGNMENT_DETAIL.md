@@ -205,6 +205,10 @@ Pre-calibration (`cal_mu=None`) the center is 0 ppm. The method suffix (e.g. `se
 
 Both run BEFORE pass 4 so freed peaks are re-offered.
 
+### 3.1b Siloxane ladder (siloxane.py, runs after cleanup)
+
+`assign_siloxane_ladder` claims the PDMS `+C2H6OSi` (+74.019) oligomer ladder, mass-degenerate per rung with high-O CHON fits, using the series spacing + the 29Si/30Si envelope as decisive evidence, and **locks** its commits so the CHON-centric audits can't undo them. **Si-count intensity gate** (`_m1_ratio`, audit rule): the 29Si M+1 must not only be *matched* by the oracle but its **observed (M+1)/(M0) ratio must be ≥ `SI_M1_MIN_FRAC` (0.6) × the predicted `nSi·4.68% + nC·1.07%`** — otherwise the Si count is over-claimed and the commit is skipped. This stopped C₈H₂₆O₅Si₄ being locked over the real HOM C₁₀H₁₈O₁₁ at m/z 393.004 (M+1 ~13% where Si₄ needs ~27%).
+
 ### 3.2 Pass 2 — GKA Series Expansion (passes.py:1906–1947)
 
 **Purpose**: iterative greatest-common-addition series expansion from locked M0 anchors. Walks homologous chains (CH2, PDMS `C2H6OSi`, CF2) outward step-by-step, re-anchoring on each round's confirmed members; each proposal is Mascope-scored.
