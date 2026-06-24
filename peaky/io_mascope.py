@@ -76,11 +76,13 @@ _ISO_TOKEN = re.compile(r"\[(\d+[A-Z][a-z]?)\](\d*)")
 # ---------------------------------------------------------------------------
 # Connection
 # ---------------------------------------------------------------------------
-def connect(env_path: str | None = None):
+def connect(env_path: str | None = None, workspace: str | None = None):
     """Build a MascopeClient from the .env (MASCOPE_URL, MASCOPE_ACCESS_TOKEN).
     Searches a project-local .env (repo root or cwd) then the home locations, or
     $MASCOPE_ENV, unless env_path is given. Process env vars of the same name also
-    work directly."""
+    work directly. The Mascope WORKSPACE is selected by `workspace` (name /
+    substring / id) or $MASCOPE_WORKSPACE; with neither, the SDK auto-selects only
+    when the token sees exactly one workspace (else use `peaky list workspaces`)."""
     from dotenv import load_dotenv
     path = _find_env(env_path)
     load_dotenv(path)
@@ -91,9 +93,17 @@ def connect(env_path: str | None = None):
             f"MASCOPE_URL / MASCOPE_ACCESS_TOKEN not found (looked in {path}). "
             "Copy .env.example to .env in the repo root (or ~/.mascope/.env) and fill "
             "it in, set $MASCOPE_ENV to your .env path, or export the two variables.")
+    ws = workspace or os.environ.get("MASCOPE_WORKSPACE") or None
     from mascope_sdk import MascopeClient
-    _patch_datasets_list_for_legacy_servers()
-    return MascopeClient(url=url, access_token=tok)
+    try:
+        return MascopeClient(url=url, access_token=tok, workspace=ws)
+    except Exception as e:                       # noqa: BLE001 — friendlier guidance
+        if not ws and "workspace" in str(e).lower():
+            raise RuntimeError(
+                "This Mascope server exposes multiple workspaces; pick one with "
+                "`--workspace NAME` (or set MASCOPE_WORKSPACE). "
+                "Run `peaky list workspaces` to see them.") from e
+        raise
 
 
 def _patch_datasets_list_for_legacy_servers() -> None:
@@ -230,6 +240,27 @@ def _legacy_load_batch_peaks(client, batch: str, *, dataset: str | None = None,
                             desc="Loading peaks (legacy)", unit="sample")
     frames = [f.dropna(axis=1, how="all") for f in frames if f is not None]
     return pd.concat(frames, ignore_index=True) if frames else None
+
+
+def list_workspaces() -> pd.DataFrame:
+    """All workspaces the token can see, WITHOUT binding one — so it works as the
+    first discovery step on a multi-workspace server (where building a
+    workspace-scoped client would fail). Hits /api/workspaces via the SDK's raw
+    http_get (verify_ssl defaults off, so a self-signed internal cert is fine).
+    Powers `list workspaces`; columns include workspace_id / workspace_name."""
+    from dotenv import load_dotenv
+    from mascope_sdk._http import http_get
+    load_dotenv(_find_env())
+    url = os.environ.get("MASCOPE_URL")
+    tok = os.environ.get("MASCOPE_ACCESS_TOKEN")
+    if not url or not tok:
+        raise RuntimeError("MASCOPE_URL / MASCOPE_ACCESS_TOKEN not found "
+                           "(see `peaky setup`).")
+    r = http_get(url, "workspaces", tok, timeout=(15, 60))
+    data = (r.json() or {}).get("data", []) or []
+    if not data:
+        raise RuntimeError("no workspaces returned (check MASCOPE_URL / token)")
+    return pd.DataFrame(data)
 
 
 def list_datasets(client) -> pd.DataFrame:

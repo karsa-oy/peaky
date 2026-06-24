@@ -78,6 +78,13 @@ def cmd_list(args) -> None:
     _require_creds()
     from . import io_mascope as IO
 
+    if args.what == "workspaces":
+        ws = IO.list_workspaces()
+        col = "workspace_name" if "workspace_name" in ws.columns else ws.columns[0]
+        print(f"{len(ws)} workspaces:")
+        for v in ws[col].tolist():
+            print("  ", v)
+        return
     client = IO.connect()
     if args.what == "datasets":
         ds = IO.list_datasets(client)
@@ -247,11 +254,15 @@ def build_parser() -> argparse.ArgumentParser:
         description="Peaky — reproducible multi-pass formula assignment for Mascope peaks.")
     ap.add_argument("--env", default=None,
                     help="path to a Mascope .env (else ~/.mascope/.env or $MASCOPE_ENV)")
+    ap.add_argument("--workspace", default=None,
+                    help="Mascope workspace name/substring/id (else $MASCOPE_WORKSPACE; "
+                         "auto-selected only when the token sees exactly one). "
+                         "Discover with `peaky list workspaces`. Goes BEFORE the command.")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    pl = sub.add_parser("list", help="discover datasets / batches / samples")
-    pl.add_argument("what", choices=["datasets", "batches", "samples"])
-    pl.add_argument("--dataset", default=None, help="dataset (workspace) name")
+    pl = sub.add_parser("list", help="discover workspaces / datasets / batches / samples")
+    pl.add_argument("what", choices=["workspaces", "datasets", "batches", "samples"])
+    pl.add_argument("--dataset", default=None, help="dataset name (see `peaky list datasets`)")
     pl.add_argument("--batch", default=None, help="sample-batch name (for `samples`)")
     pl.set_defaults(func=cmd_list)
 
@@ -420,6 +431,8 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     if args.env:
         os.environ["MASCOPE_ENV"] = os.path.expanduser(args.env)
+    if args.workspace:
+        os.environ["MASCOPE_WORKSPACE"] = args.workspace
     return _run_guarded(lambda: args.func(args))
 
 

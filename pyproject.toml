@@ -24,13 +24,8 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Chemistry",
 ]
 
-# Runtime dependencies. mascope-sdk is the live Mascope/Karsa connector (public
-# PyPI, MIT); `pip install` pulls/updates it like any other dep. It is imported
-# lazily inside io_mascope.connect(), so the offline test suite still makes NO
-# network calls even though the SDK is installed. A Mascope ACCOUNT/token is only
-# needed at run time — not to install or to run the offline tests.
 dependencies = [
-    "mascope-sdk>=2026.5",
+    "mascope-sdk>=2026.6.12",
     "pandas>=2.1",
     "pyarrow>=14",          # parquet engine — the per-batch TS (*_ts.parquet) is read/written across the pipeline
     "numpy>=1.24",
