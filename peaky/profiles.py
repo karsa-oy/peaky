@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 @dataclass(frozen=True)
 class ReagentProfile:
     name: str                       # short key, e.g. "Br" / "Ur"
-    label: str                      # display label for figures, e.g. "Br⁻ CIMS"
+    label: str                      # display label (figures + console), e.g. "Br- CIMS"
     polarity: str                   # "-" or "+"
     adducts: list[str]              # analyte channels (peaky adduct labels)
     normaliser: str                 # "reagent" | "tic"  (for the TS/correlation layer)
@@ -27,7 +27,7 @@ class ReagentProfile:
 
 
 BR = ReagentProfile(
-    name="Br", label="Br⁻ CIMS", polarity="-",
+    name="Br", label="Br- CIMS", polarity="-",
     adducts=["[M+Br]-", "[M-H]-", "[M+HBr+Br]-"],
     normaliser="reagent", reagent_ion_re=r"Br\d-$",
     ranges="C0-40 H0-80 N0-3 O0-18 S0-2 Cl0-2 Br0-2",
@@ -35,7 +35,7 @@ BR = ReagentProfile(
     aliases=("br", "bromide", "br-cims", "br-"))
 
 UR = ReagentProfile(
-    name="Ur", label="Ur⁺ CIMS", polarity="+",
+    name="Ur", label="Ur+ CIMS", polarity="+",
     adducts=["[M+H]+", "[M+(CH4N2O)H]+"],
     normaliser="tic", reagent_ion_re=None,
     ranges="C0-40 H0-90 N0-8 O0-15 S0-2",
@@ -47,7 +47,7 @@ UR = ReagentProfile(
 # molecules detected as the [M+NO3]⁻ cluster (and [M-H]⁻ when acidic). Reagent ions
 # are the NO3⁻ / (HNO3)ₙ·NO3⁻ cluster series.
 NO3 = ReagentProfile(
-    name="NO3", label="NO₃⁻ CIMS", polarity="-",
+    name="NO3", label="NO3- CIMS", polarity="-",
     adducts=["[M+NO3]-", "[M-H]-"],
     normaliser="reagent", reagent_ion_re=r"(HNO3)*NO3-?$",
     ranges="C0-40 H0-60 N0-3 O0-25 S0-2",
@@ -61,7 +61,7 @@ NO3 = ReagentProfile(
 # the correlation layer normalises on TIC, not on a reagent ion. detect_adduct is
 # [M+^NO3]- so auto-detect distinguishes it from the ¹⁴N NO3 profile above.
 NO3_15N = ReagentProfile(
-    name="NO3_15N", label="¹⁵NO₃⁻ CIMS", polarity="-",
+    name="NO3_15N", label="[15N]O3- CIMS", polarity="-",
     adducts=["[M+^NO3]-", "[M-H]-"],
     normaliser="tic", reagent_ion_re=None,
     ranges="C0-40 H0-60 N0-3 O0-25 S0-2",

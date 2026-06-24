@@ -27,19 +27,19 @@ check("resolve('NO3') built-in", P.resolve("NO3").name == "NO3")
 check("NO3 is negative mode", P.resolve("nitrate").polarity == "-")
 check("NO3 analyte channel is [M+NO3]-", "[M+NO3]-" in P.resolve("NO3").adducts)
 
-# ---- ¹⁵N-labelled nitrate (distinct from the ¹⁴N NO3 profile) ----------------
+# ---- 15N-labelled nitrate (distinct from the 14N NO3 profile) ----------------
 check("resolve('NO3_15N') built-in", P.resolve("NO3_15N").name == "NO3_15N")
 for _a in ("15no3", "^no3-", "nitrate-15n", "15n-nitrate"):
     check(f"alias {_a!r} -> NO3_15N", P.resolve(_a).name == "NO3_15N")
-check("¹⁵N profile is negative mode", P.resolve("NO3_15N").polarity == "-")
-check("¹⁵N analyte channel is [M+^NO3]-", "[M+^NO3]-" in P.resolve("NO3_15N").adducts)
-check("¹⁵N keeps deprotonation channel", "[M-H]-" in P.resolve("NO3_15N").adducts)
-check("¹⁵N detect_adduct distinguishes it from ¹⁴N",
+check("15N profile is negative mode", P.resolve("NO3_15N").polarity == "-")
+check("15N analyte channel is [M+^NO3]-", "[M+^NO3]-" in P.resolve("NO3_15N").adducts)
+check("15N keeps deprotonation channel", "[M-H]-" in P.resolve("NO3_15N").adducts)
+check("15N detect_adduct distinguishes it from 14N",
       P.resolve("NO3_15N").detect_adduct == "[M+^NO3]-"
       and P.resolve("NO3").detect_adduct == "[M+NO3]-")
-check("plain 'no3' still resolves to ¹⁴N NO3, not the ¹⁵N profile",
+check("plain 'no3' still resolves to 14N NO3, not the 15N profile",
       P.resolve("no3").name == "NO3")
-check("¹⁵N profile normalises on TIC (reagent ions out of window)",
+check("15N profile normalises on TIC (reagent ions out of window)",
       P.resolve("NO3_15N").normaliser == "tic")
 try:
     P.resolve("xenon"); check("unknown reagent raises", False, "no raise")

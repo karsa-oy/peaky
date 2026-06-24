@@ -427,7 +427,22 @@ Next steps:
   (or just ask Claude: "assign formulas for batch <name> with the bromide reagent")""")
 
 
+def _force_utf8_io() -> None:
+    """Make stdout/stderr emit UTF-8 regardless of the host console codepage, so a
+    non-ASCII character in any output never crashes the CLI with UnicodeEncodeError
+    on a legacy Windows console (cp1252). Defensive: reagent labels are ASCII, but
+    figure titles / formulas printed elsewhere may still carry unicode."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):       # detached / non-text stream
+                pass
+
+
 def main(argv=None) -> int:
+    _force_utf8_io()
     args = build_parser().parse_args(argv)
     if args.env:
         os.environ["MASCOPE_ENV"] = os.path.expanduser(args.env)
