@@ -67,7 +67,8 @@ peaky/                 ← the workspace (= your clone)
   .env                 your Mascope creds (URL + token)   ← edit this
   output/              every run's results land here  (PEAKY_OUTPUT_DIR)
   peaky/  scripts/     the package + helper scripts
-  docs/                ARCHITECTURE / ASSIGNMENT / OUTPUTS  (+ SKILL.md)
+  SKILL.md             Claude Code skill instructions
+  docs/                ARCHITECTURE / ASSIGNMENT / OUTPUTS / ROADMAP
 ```
 
 `pip install -e .` resolves the conservative version ranges in `pyproject.toml`.
@@ -91,11 +92,11 @@ MASCOPE_ACCESS_TOKEN=…`. Search order: `--env` / `$MASCOPE_ENV` > repo-root `.
 ## Run it with Claude Code (natural language)
 
 Peaky ships as a Claude Code **skill**. Install [Claude Code](https://claude.com/claude-code),
-make the clone visible to it, and just ask:
+register the skill (cross-platform — copies `SKILL.md` into your skills dir), restart
+Claude Code, and just ask:
 
 ```bash
-mkdir -p ~/.claude/skills
-ln -s "$(pwd)" ~/.claude/skills/peaky      # symlink the clone into your skills dir
+peaky install-skill      # -> ~/.claude/skills/peaky/SKILL.md   (re-run after editing SKILL.md)
 ```
 
 Then, in Claude Code, ask in plain language — the skill triggers automatically:
