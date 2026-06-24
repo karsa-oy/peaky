@@ -427,8 +427,10 @@ def cover(ctx, pdf):
     batch = ctx.get("batch_name") or ctx["label"]
     fig.text(0.08, 0.93, "Peak Assignment Report", fontsize=20, weight="bold", color=INK)
     fig.text(0.08, 0.895, batch, fontsize=14, color=INK)
-    fig.text(0.08, 0.872, f"{ctx['label']} · representative-sample pipeline", fontsize=11,
-             color=GREY)
+    _pipe = ("single-sample" if ctx.get("n_files", 1) <= 1
+             else "brightest-coverage" if str(ctx.get("batch", {}).get("select")) == "brightest"
+             else "representative-sample")
+    fig.text(0.08, 0.872, f"{ctx['label']} · {_pipe} pipeline", fontsize=11, color=GREY)
     meta = ctx.get("version", "")
     if ctx.get("generated"):
         meta = f"{meta}  ·  generated {ctx['generated']}" if meta else f"generated {ctx['generated']}"
@@ -447,6 +449,16 @@ def cover(ctx, pdf):
               f"({idn} Identified / {cn} Candidate)"),
         ("b", f"Distinct neutral compounds:       {ctx['n_neutrals']}"),
     ]
+    rc = ctx.get("role_count", {})
+    if rc:
+        tot = sum(rc.values())
+        asg = rc.get("M0", 0) + rc.get("iso_child", 0) + rc.get("reagent", 0)
+        scope = "" if ctx.get("n_files", 1) <= 1 else f" (pooled over {ctx['n_files']} files)"
+        head += [
+            ("b", f"Peaks{scope}:".ljust(34) + f"{tot} total"),
+            ("dim", f"   {asg} assigned ({rc.get('M0', 0)} M0 + {rc.get('iso_child', 0)} isotopologues "
+                    f"+ {rc.get('reagent', 0)} reagent + {rc.get('artifact', 0)} artifact) · "
+                    f"{rc.get('unexplained', 0)} unexplained ({_pct(rc.get('unexplained', 0), tot):.0f}%)")]
     if ts:
         head += [
             ("b", f"Spectral coverage:                {ex_c:.0f}% of m/z bins, "
@@ -459,13 +471,16 @@ def cover(ctx, pdf):
             head += [("dim", "   of detected signal:  analyte (M0+iso) "
                              f"{rf['analyte']*100:.0f}%,  reagent ion {rf['reagent']*100:.0f}%,  "
                              f"unexplained {rf['unexplained']*100:.0f}%")]
-    head += [
-        ("gap", 1),
-        ("h", "Representative samples assigned"),
-        ("gap", 0.3),
-        ("b", f"{ctx['n_files']} files: 5 evenly time-spaced + the max-TIC sample, "
-              "merged by m/z."),
-    ]
+    nf = ctx.get("n_files", 1)
+    sel = str(ctx.get("batch", {}).get("select", "representative"))
+    if nf <= 1:
+        sel_txt = "Single sample assigned (no merge)."
+    elif sel == "brightest":
+        sel_txt = (f"{nf} files: brightest-coverage selection — each significant m/z bin "
+                   "assigned in the sample where it is brightest, merged by m/z.")
+    else:
+        sel_txt = (f"{nf} files: 5 evenly time-spaced + the max-TIC sample, merged by m/z.")
+    head += [("gap", 1), ("h", "Samples assigned"), ("gap", 0.3), ("b", sel_txt)]
     for name, role in ctx.get("samples", [])[:8]:
         head.append(("m", f"   {name}   [{role}]"))
     j = ctx.get("jitter", {})
