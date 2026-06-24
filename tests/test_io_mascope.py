@@ -105,7 +105,7 @@ check("score_candidates allow_partial records failures",
       partial.attrs)
 
 # ---------- fetch_batch_peaks escapes regex metacharacters in the batch name -----
-# The ^ in a '^Nitrate' (¹⁵N) batch name is a regex anchor; the TS loader must
+# The ^ in a '^Nitrate' (15N) batch name is a regex anchor; the TS loader must
 # escape it (like fetch_batch_samples) or the SDK str.contains matches nothing.
 class _LP:
     seen = None
@@ -118,9 +118,9 @@ check("fetch_batch_peaks escapes the ^ regex anchor in the batch name",
       _LP.seen == IO.escape_batch(_name) and r"\^" in _LP.seen, _LP.seen)
 
 # ---------- flatten_match_tree re-anchors a 100%-labelled (^N) reagent ----------
-# The ¹⁵N nitrate adduct: server tags the all-light ¹⁴N form as the M0 base (no
-# signal) and the single-¹⁵N line (the REAL monoisotopic ion) as a '15N' child.
-# flatten must move is_base onto the ¹⁵N line, else the whole channel is dropped.
+# The 15N nitrate adduct: server tags the all-light 14N form as the M0 base (no
+# signal) and the single-15N line (the REAL monoisotopic ion) as a '15N' child.
+# flatten must move is_base onto the 15N line, else the whole channel is dropped.
 def _iso(isof, mz, pmz, inten, pid):
     return {"target_isotope_formula": isof, "mz": mz, "sample_peak_mz": pmz,
             "sample_peak_intensity": inten, "sample_peak_id": pid,
@@ -129,14 +129,14 @@ def _iso(isof, mz, pmz, inten, pid):
 _no3_tree = [{"target_compound_formula": "C4H6O4", "match_score": 0.96, "match_category": 2,
     "children": [{"target_ion_formula": "C4H6O7^N-", "match_score": 0.96, "match_category": 2,
         "ionization_mechanism_id": "m15", "children": [
-            _iso("C4H6O7^N-", 180.015, 180.005, 0.0, "p0"),       # ¹⁴N phantom base, no signal
-            _iso("[15N]C4H6O7-", 181.012, 181.012, 6312.0, "p1")]}]}]   # real ¹⁵N peak
+            _iso("C4H6O7^N-", 180.015, 180.005, 0.0, "p0"),       # 14N phantom base, no signal
+            _iso("[15N]C4H6O7-", 181.012, 181.012, 6312.0, "p1")]}]}]   # real 15N peak
 _fn = IO.flatten_match_tree(_no3_tree)
 _b = _fn[_fn["is_base"]]
-check("flatten re-anchors ^N reagent base onto the ¹⁵N peak",
+check("flatten re-anchors ^N reagent base onto the 15N peak",
       len(_b) == 1 and abs(float(_b["theo_mz"].iloc[0]) - 181.012) < 1e-3
       and float(_b["sample_peak_intensity"].iloc[0]) == 6312.0, _b[["theo_mz", "is_base"]].to_dict())
-check("flatten leaves the phantom ¹⁴N base non-base",
+check("flatten leaves the phantom 14N base non-base",
       not bool(_fn[(_fn["theo_mz"] == 180.015)]["is_base"].iloc[0]))
 # control: a NON-labelled ion is untouched (base stays the all-light M0)
 _plain = [{"target_compound_formula": "C9H14O5", "match_score": 0.9, "match_category": 2,

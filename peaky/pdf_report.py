@@ -347,7 +347,7 @@ _ADDUCT_DESC = {
     "[M+CO3]-": "CO3- cluster", "[M+HBr+CO3]-": "HBr.CO3- cluster", "[M+HSO4]-": "HSO4- cluster",
     "[M+(CH4N2O)H]+": "urea cluster", "[M+Na]+": "Na+ adduct", "[M+NH4]+": "NH4+ adduct",
     "[M+Cl]-": "Cl- cluster", "[M+I]-": "I- cluster",
-    "[M+NO3]-": "NO3- cluster", "[M+^NO3]-": "¹⁵NO3- cluster",
+    "[M+NO3]-": "NO3- cluster", "[M+^NO3]-": "[15N]O3- cluster",
 }
 
 
@@ -1137,7 +1137,7 @@ def compress_pdf(in_pdf: str, out_pdf: str | None = None, *, max_px: int = 850,
     the page TEXT vector (so formulas/labels stay crisp). The original `in_pdf` is
     never modified — a sibling `<name>_compressed.pdf` is written and its path
     returned. Returns None (no-op) when: PyMuPDF/Pillow are not installed (optional
-    deps — `pip install 'mascope-assign[compress]'`), the input is already under
+    deps — `pip install 'mascope-peaky[compress]'`), the input is already under
     `min_mb`, or anything goes wrong. Deliberately kept out of `build()` so the
     primary report stays byte-for-byte deterministic (see test_determinism)."""
     if out_pdf is None:
@@ -1152,7 +1152,7 @@ def compress_pdf(in_pdf: str, out_pdf: str | None = None, *, max_px: int = 850,
         import fitz                      # PyMuPDF (optional)
         from PIL import Image            # Pillow (optional)
     except Exception:
-        log("[report] compress skipped (install 'mascope-assign[compress]' for PyMuPDF+Pillow)")
+        log("[report] compress skipped (install 'mascope-peaky[compress]' for PyMuPDF+Pillow)")
         return None
     try:
         doc = fitz.open(in_pdf)
