@@ -19,11 +19,11 @@ def check(name, cond, detail=""):
 
 
 # 1) public API surface + version
-import mascope_assign as ma  # noqa: E402
+import peaky as ma  # noqa: E402
 
 check("package __version__ present", isinstance(ma.__version__, str) and bool(ma.__version__))
-for name in ("run", "run_batch", "run_pipeline", "PassConfig", "get_context",
-             "resolve_reagent", "ReagentProfile", "build_report"):
+for name in ("run", "run_batch", "run_assign_batch", "run_pipeline", "PassConfig",
+             "get_context", "resolve_reagent", "ReagentProfile", "build_report"):
     check(f"public API exposes {name}", hasattr(ma, name))
 
 # 2) every package submodule imports (NO network — io_mascope's SDK import is lazy)
@@ -37,11 +37,11 @@ SUBMODULES = [
 ]
 for m in SUBMODULES:
     try:
-        importlib.import_module(f"mascope_assign.{m}")
+        importlib.import_module(f"peaky.{m}")
         ok, detail = True, ""
     except Exception as e:                            # noqa: BLE001
         ok, detail = False, f"{type(e).__name__}: {e}"
-    check(f"import mascope_assign.{m}", ok, detail)
+    check(f"import peaky.{m}", ok, detail)
 
 # 3) third-party stack present (the deps not transitively guaranteed by mascope-sdk)
 for lib in ("pandas", "numpy", "scipy", "matplotlib", "openpyxl", "dotenv"):
@@ -54,7 +54,7 @@ for lib in ("pandas", "numpy", "scipy", "matplotlib", "openpyxl", "dotenv"):
 # 4) a tiny PURE path: the match-tree fixture -> a flat per-isotopologue table
 import pandas as pd  # noqa: E402
 
-from mascope_assign import io_mascope as IO  # noqa: E402
+from peaky import io_mascope as IO  # noqa: E402
 
 tree = json.loads((Path(__file__).resolve().parent / "fixtures" / "match_tree.json").read_text())
 flat = IO.flatten_match_tree(tree)
@@ -62,7 +62,7 @@ check("flatten_match_tree -> non-empty DataFrame",
       isinstance(flat, pd.DataFrame) and len(flat) > 0, len(flat) if hasattr(flat, "__len__") else "?")
 
 # 5) reagent profile resolves offline
-from mascope_assign import profiles as P  # noqa: E402
+from peaky import profiles as P  # noqa: E402
 
 check("resolve_reagent('Br') works offline", P.resolve("Br").name == "Br")
 

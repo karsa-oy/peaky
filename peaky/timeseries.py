@@ -49,7 +49,14 @@ def auto_bin_minutes(ts: pd.DataFrame, *, target_bins: int = 50,
     (validated on the June-3 uronium batch: native 5-min recovered 1018 changing
     channels / 95 families vs 752 / 54 at 29-min). Floored at 1 min; falls back to
     span/target_bins only when per-sample times are unavailable (<3 samples).
-    Shared by clustering + VK so they bin identically."""
+    Shared by clustering + VK so they bin identically.
+
+    The bin is rounded UP (ceil) to the cadence, never down: a bin narrower than the
+    real inter-sample spacing aliases — the fixed-width grid periodically catches
+    ZERO samples (a beat between the grid pitch and the slightly-irregular sample
+    times), leaving empty bins that render as a spurious regular comb of drop-to-floor
+    teeth. ceil guarantees the bin is >= the sample spacing, so every bin holds >= 1
+    sample. (e.g. a 73 s cadence -> 2 min, not the aliasing 1 min.)"""
     if "sample_item_id" in ts.columns:
         t = pd.to_datetime(ts.drop_duplicates("sample_item_id")[time_col], utc=True)
     else:
@@ -58,7 +65,7 @@ def auto_bin_minutes(ts: pd.DataFrame, *, target_bins: int = 50,
     if len(t) >= 3:
         cadence_min = t.diff().dropna().dt.total_seconds().median() / 60.0
         if cadence_min > 0:
-            return max(1, int(round(cadence_min)))
+            return max(1, int(np.ceil(cadence_min)))
     span_min = (t.max() - t.min()).total_seconds() / 60.0 if len(t) >= 2 else 30.0
     return max(1, int(round(span_min / target_bins)))
 

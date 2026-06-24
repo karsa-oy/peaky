@@ -5,8 +5,8 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mascope_assign import passes as P  # noqa: E402
-from mascope_assign import ledger as L  # noqa: E402
+from peaky import passes as P  # noqa: E402
+from peaky import ledger as L  # noqa: E402
 
 PASS = FAIL = 0
 CFG = P.PassConfig()
@@ -150,7 +150,7 @@ check("adduct reading C6H10O3 [M+Br]- beats covalent C6H11BrO3 (reagent prior)",
       wg["neutral"] == "C6H10O3", (wg["neutral"], wg["eff_score"]))
 
 # HBr cluster unit arithmetic
-from mascope_assign import series_gka as G2  # noqa: E402
+from peaky import series_gka as G2  # noqa: E402
 check("Y + HBr = covalent alias composition",
       G2.formula_add("C6H10O3", "HBr", 1) == "C6H11BrO3",
       G2.formula_add("C6H10O3", "HBr", 1))
@@ -245,8 +245,8 @@ check("_family_ok rejects element beyond family range", not P._family_ok("C5H5F3
 check("_family_ok rejects half-integer DBE", not P._family_ok("C8H14NO12", fr))
 
 # ---------- ranges helper ----------
-from mascope_assign import contexts as X  # noqa: E402
-from mascope_assign import isotopes as ISO  # noqa: E402
+from peaky import contexts as X  # noqa: E402
+from peaky import isotopes as ISO  # noqa: E402
 pre = ISO.PrescanResult(has_Br=True, estimated_max_C=12)
 # Pass1/2: CHO(N) only -- heteroatoms NEVER auto-added from prescan
 r = P.build_ranges(X.get_context("ambient-air"), pre, include_N=True)
@@ -591,7 +591,7 @@ check("audit: correct assignment untouched (13C attached, nothing cleared)",
       and s["c13_missing"] == 0 and s["c13_attached"] == 1, s)
 
 # ---------- complete_isotope_envelopes (the 393/395 silanediol bug) ----------
-from mascope_assign import chemistry as CHEM  # noqa: E402
+from peaky import chemistry as CHEM  # noqa: E402
 # silanediol Si4+Br at 393 (M0), its M+2 at 395 wrongly committed as a Cl-F-S
 # organic, M+4 at 397 attached as 395's child. Heights = real Si4+Br envelope.
 led = mk_ledger([("Si", 393.0045, 20086.0), ("Mp2", 395.0028, 24523.0),
@@ -603,7 +603,7 @@ L.commit_assignment(led, "Mp2", neutral_formula="C8H12ClF6NO2S", adduct="[M+CO3]
                     pass_no=4, method="residual:iso-pair", confidence="Low (iso-pair)",
                     commentary="phantom Cl doublet")
 L.attach_isotopologue(led, "Mp4", "Mp2", iso_label="37Cl(pair)")
-import mascope_assign.tiers as _T  # noqa: E402
+import peaky.tiers as _T  # noqa: E402
 _T.apply_tiers(led)
 out = P.complete_isotope_envelopes(led, P.PassConfig(), log=lambda *a: None)
 check("envelope: silanediol M+2 (395) displaced off its phantom formula",
@@ -659,7 +659,7 @@ check("envelope: a High/strong-score victim is NOT displaced (tier-NA safe)",
 # build a silanediol n=4 envelope: M0 inflated ~45% by a coincident BrCl
 # compound. Odd shifts (M+1) = pure silanediol; even (M0/M+2/M+4) carry the
 # extra halogen. Heights from real Br-CIMS data.
-import mascope_assign.chemistry as _CH  # noqa: E402
+import peaky.chemistry as _CH  # noqa: E402
 mz0 = _CH.ion_mz("C8H26O5Si4", "[M+Br]-")   # 393.0046
 comp = mk_ledger([("M0", mz0, 20086.0), ("M1", mz0 + 1.0008, 2698.0),
                   ("M1b", mz0 + 1.0034, 531.0), ("M2", mz0 + 1.9979, 24523.0),
@@ -737,7 +737,7 @@ check("pre-pass4: no satellite -> no demotion",
 # ---------- audit: twin-satellite fallback for missing 13C ----------
 # v20 false-clear: C3H6O3.Br- at 10.3k cps -- own 13C absent from the peak
 # list, but the 81Br twin's 13C satellite exists and proves the carbon.
-from mascope_assign import chemistry as CH  # noqa: E402
+from peaky import chemistry as CH  # noqa: E402
 mz_l = CH.ion_mz("C3H6O3", "[M+Br]-")
 led = mk_ledger([("La", mz_l, 10300.0),
                  ("Tw", mz_l + 1.9979535, 10000.0),
@@ -770,7 +770,7 @@ check("audit: cross-channel agreement blocks the missing-13C clear",
       L.role_of(led, "MB") == L.ROLE_M0 and s["c13_missing"] == 0, s)
 
 # ---------- pass 5: known-neutral completion ----------
-from mascope_assign import contexts as XC  # noqa: E402
+from peaky import contexts as XC  # noqa: E402
 PROF5 = XC.get_context("ambient-air")
 ADD5 = ["[M-H]-", "[M+Br]-"]
 mz_c2 = CH.ion_mz("C2H4O3", "[M+Br]-")

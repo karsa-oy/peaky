@@ -16,7 +16,6 @@ from ledger columns, so they are reproducible.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -269,7 +268,9 @@ def summary_stats(ledger: pd.DataFrame, *, context: str = "",
         add("Run", "sample_id", sample_id)
     if context:
         add("Run", "context", context)
-    add("Run", "generated (UTC)", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"))
+    # NB: no "generated (UTC)" cell here on purpose — this workbook is MATERIAL DATA
+    # and must be byte-identical for identical inputs regardless of when it's run.
+    # The run timestamp lives only on the PDF report cover + the run-folder name.
     add("Run", "peaks total", n)
 
     role_label = {L.ROLE_M0: "assigned (M0)", L.ROLE_ISO: "isotopologue children",
@@ -518,6 +519,10 @@ def write_excel(ledger: pd.DataFrame, path: str | Path,
                          band_by="peak_id" if name == "Candidates" else None)
             if name in ("Summary", "Read me"):
                 _style_summary(ws, out)
+    # content-stable bytes (fixed SOURCE_DATE_EPOCH) so the assignment workbook is a
+    # pure function of the ledger, matching the cluster workbook.
+    from .cluster import _make_xlsx_deterministic
+    _make_xlsx_deterministic(path)
     return path
 
 

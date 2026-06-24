@@ -45,28 +45,39 @@ in the loop and it asks when a choice (reagent, cutoff) actually matters.
 
 Needs Python ≥ 3.11. Everything (including `mascope-sdk`) installs from public PyPI —
 no private index, and **no Mascope account is needed just to install or to run the
-offline tests.**
+offline tests.** (On PyPI the distribution is **`mascope-peaky`** — `peaky` was
+taken; the import package and CLI are still `peaky`.)
 
 ```bash
-git clone https://github.com/alekseishcherbinin/peaky.git
+git clone https://github.com/karsa-oy/peaky.git
 cd peaky
 python3 -m pip install -e .          # registers the `peaky` command (and `mascope-assign` alias)
+peaky setup                          # creates .env + output/, verifies, prints what to do next
 ```
 
-Confirm with the no-network smoke test (≈2 s):
+`peaky setup` turns the clone into a **self-contained workspace** and tells you
+what to do — re-run it any time:
 
-```bash
-python3 tests/test_smoke.py          # "50 passed" => imports + deps OK
 ```
+peaky/                 ← the workspace (= your clone)
+  .env                 your Mascope creds (URL + token)   ← edit this
+  output/              every run's results land here  (PEAKY_OUTPUT_DIR)
+  peaky/  scripts/     the package + helper scripts
+  docs/                ARCHITECTURE / ASSIGNMENT / OUTPUTS  (+ SKILL.md)
+```
+
+`pip install -e .` resolves the conservative version ranges in `pyproject.toml`.
+For the **exact pinned versions** validated in CI, use the lockfile instead:
+`uv sync`. `uv.lock` is the single source of truth for pins — there is no separate
+`requirements.txt`. A no-network smoke check: `python3 tests/test_smoke.py`.
 
 ### Credentials
 
-Copy the template and fill in your Mascope server URL + API token (from the Mascope
-web app's account / API settings). A project-local `.env` is git-ignored and found
-automatically:
+`peaky setup` created a git-ignored `.env` in the repo root — edit it with your
+Mascope server URL + API token (from the Mascope web app's account / API settings):
 
-```bash
-cp .env.example .env                 # then edit: MASCOPE_URL=...   MASCOPE_ACCESS_TOKEN=...
+```
+.env  ->  MASCOPE_URL=...   MASCOPE_ACCESS_TOKEN=...
 ```
 
 Prefer a shared location? Use `~/.mascope/.env` instead, or just `export MASCOPE_URL=…
@@ -93,6 +104,15 @@ Then, in Claude Code, ask in plain language — the skill triggers automatically
 Claude reads `SKILL.md`, picks the right reagent and parameters, runs the
 deterministic pipeline locally, and shows you the assignments / figures / report.
 
+**The mental model** (paste this if a fresh Claude needs orienting): *Mascope =
+data + scorer. Peaky = analysis. Claude = interface.* Mascope's `match_compounds`
+is the **only** scorer — Peaky enumerates candidate formulas, hands them to
+Mascope, and arbitrates; the chemistry gates are structural; **no LLM is in the
+assignment loop**, so every run is reproducible and auditable. Claude orchestrates
+(picks the reagent, runs the pipeline, reads results back) — it never does the
+chemistry. Heavy work runs on the **host Python** (which has `mascope-sdk`) via the
+Bash tool / `peaky` CLI — never transport peak tables through an MCP into context.
+
 ## Run it as a CLI (scripted)
 
 ```bash
@@ -102,11 +122,11 @@ peaky list samples  --batch "<your batch>" --dataset "<your workspace>"
 
 # one sample
 peaky assign --sample-id <ID> --reagent <Br|Ur|NO3|NO3_15N|auto> \
-    --height-cutoff 100 --output-dir ~/mascope-output/<name>
+    --height-cutoff 100 --output-dir ~/peaky-output/<name>
 
 # a whole batch (representative subset -> merge -> clusters -> Van Krevelen -> PDF)
 peaky batch  --batch "<your batch>" --dataset "<your workspace>" \
-    --reagent <Br|Ur|NO3|NO3_15N|auto> --out-dir ~/mascope-output
+    --reagent <Br|Ur|NO3|NO3_15N|auto> --out-dir ~/peaky-output
 ```
 
 `--reagent` forces the analyte channels (a positive/sparse sample otherwise
@@ -129,15 +149,22 @@ Peaky is validated end-to-end on the **orange-peeling** CIMS experiment
 
 One ledger DataFrame (one row per peak; passes only fill/annotate), Mascope is the
 only scorer, chemistry gates are structural. Every change ships with a test, and the
-offline suite (850+ assertions across 31 files, no network) must stay green:
+offline suite (no network) must stay green:
 
 ```bash
 pytest tests/                        # or run any tests/test_*.py as a standalone script
 ```
 
-CI runs the suite on Python 3.11–3.13 with no credentials. Design invariants,
-development history, and the full module map live in **[SKILL.md](SKILL.md)** and
-**[ROADMAP.md](ROADMAP.md)**.
+CI runs the suite on Python 3.11–3.13 with no credentials.
+
+- **How Peaky works** — the ledger model, pass sequence, data flow, module map:
+  **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** (start here).
+- **Assignment explained** (for a scientist): **[docs/ASSIGNMENT.md](docs/ASSIGNMENT.md)**.
+- **Outputs** — every artifact, where it's stored, what it is: **[docs/OUTPUTS.md](docs/OUTPUTS.md)**.
+- **Claude-Code operating instructions** — reagents, flags, chemistry rules:
+  **[SKILL.md](SKILL.md)**.
+- **Development history + open items**: **[docs/ROADMAP.md](docs/ROADMAP.md)**.
+- **Release notes**: **[CHANGELOG.md](CHANGELOG.md)**.
 
 ## License
 

@@ -1,8 +1,11 @@
 """Console entry point for `peaky` (alias: `mascope-assign`).
 
 Subcommands:
+  setup    one-command workspace bootstrap (.env + output/ + verify); run once after install
   list     discover data on the server (datasets / batches / samples)
   assign   single-sample multi-pass assignment -> ledger/xlsx/md/json/gka.html
+  batch    whole-batch pipeline: assign subset -> merge -> cluster -> Van Krevelen -> PDF
+  report   regenerate figures + PDF from an existing run folder (offline)
   gka      build the interactive rotating-GKA HTML from a ledger CSV (offline)
 
 Run `peaky <cmd> --help` for each. Heavy work runs on the host Python
@@ -191,9 +194,11 @@ def cmd_batch(args) -> None:
     from . import pipeline as PL
 
     res = PL.run_batch(batch=args.batch, dataset=args.dataset, reagent=args.reagent,
-                       base_out=os.path.expanduser(args.out_dir), ts=args.ts,
+                       base_out=resolve_out_dir(args.out_dir), ts=args.ts,
                        subject=args.subject, do_report=not args.no_report,
-                       config=args.reagent_config)
+                       config=args.reagent_config, select=args.select,
+                       coverage_target=args.coverage_target, k_max=args.k_max,
+                       height_floor=args.height_floor)
     ctx = res["ctx"]
     print(f"\n[batch] done -> {ctx.out_dir}")
     if res.get("report_pdf"):
@@ -281,12 +286,25 @@ def build_parser() -> argparse.ArgumentParser:
     pb.add_argument("--reagent", default="auto", help="auto | Br | Ur | NO3 | ...")
     pb.add_argument("--reagent-config", default=None,
                     help="JSON/TOML file registering extra reagent profiles")
-    pb.add_argument("--out-dir", default="~/mascope-output",
-                    help="base output dir (a versioned run folder is created under it)")
+    pb.add_argument("--out-dir", default=None,
+                    help="base output dir for the versioned run folder. Default: "
+                         "$PEAKY_OUTPUT_DIR (set by `peaky setup`, = the workspace's "
+                         "output/) else ~/peaky-output")
     pb.add_argument("--ts", default=None,
                     help="cached full-batch TS parquet (else fetched live from the server)")
     pb.add_argument("--subject", default=None, help="optional subject phrase for the VK title")
     pb.add_argument("--no-report", action="store_true", help="skip the PDF report")
+    pb.add_argument("--select", choices=["representative", "brightest"],
+                    default="representative",
+                    help="sample-selection strategy: 'representative' (5 time-spaced + "
+                         "max-TIC) or 'brightest' (bin all peaks, assign each significant "
+                         "m/z bin's brightest sample — better analyte coverage)")
+    pb.add_argument("--coverage-target", type=float, default=0.85,
+                    help="brightest: fraction of significant m/z bins to cover (default 0.85)")
+    pb.add_argument("--k-max", type=int, default=10,
+                    help="brightest: max number of winner samples to assign (default 10)")
+    pb.add_argument("--height-floor", type=float, default=1000.0,
+                    help="brightest: a bin is significant if its max height >= this (cps)")
     pb.set_defaults(func=cmd_batch)
 
     pr = sub.add_parser("report",
@@ -308,7 +326,94 @@ def build_parser() -> argparse.ArgumentParser:
     pg.add_argument("--ppm", type=float, default=2.0, help="mass accuracy for band width")
     pg.set_defaults(func=cmd_gka)
 
+    ps = sub.add_parser("setup", help="one-command workspace bootstrap "
+                                      "(.env + output/ + verify; run once after install)")
+    ps.set_defaults(func=cmd_setup)
+
     return ap
+
+
+def _workspace_root() -> str:
+    """The clone/workspace root (holds .env.example + the package). Falls back to
+    the cwd for a non-editable install where the package isn't next to the repo."""
+    from . import io_mascope as IO
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(IO.__file__)))
+    if not os.path.exists(os.path.join(repo, ".env.example")) \
+            and os.path.exists(os.path.join(os.getcwd(), ".env.example")):
+        return os.getcwd()
+    return repo
+
+
+def resolve_out_dir(explicit: str | None) -> str:
+    """Output base for a batch run. Precedence: --out-dir > $PEAKY_OUTPUT_DIR (set in
+    .env by `peaky setup`, pointing at the workspace's output/) > ~/peaky-output."""
+    if explicit:
+        return os.path.expanduser(explicit)
+    from . import io_mascope as IO
+    try:                                  # make PEAKY_OUTPUT_DIR from .env visible
+        from dotenv import load_dotenv
+        load_dotenv(IO._find_env())
+    except Exception:
+        pass
+    return os.path.expanduser(os.environ.get("PEAKY_OUTPUT_DIR") or "~/peaky-output")
+
+
+def cmd_setup(args) -> None:
+    """One-command workspace bootstrap: create .env, point outputs at output/, verify
+    the install (+ connection if creds are set), and print where everything is."""
+    import shutil
+
+    import peaky
+    from . import io_mascope as IO
+
+    repo = _workspace_root()
+    env_path = os.path.join(repo, ".env")
+    example = os.path.join(repo, ".env.example")
+    out_dir = os.path.join(repo, "output")
+
+    created = False
+    if not os.path.exists(env_path):                       # 1. .env from the template
+        if os.path.exists(example):
+            shutil.copyfile(example, env_path); created = True
+        else:
+            open(env_path, "a").close()
+    body = open(env_path).read()
+    if "PEAKY_OUTPUT_DIR" not in body:                     # 2. outputs -> workspace output/
+        with open(env_path, "a") as fh:
+            fh.write(f"\n# Where run outputs go (this workspace's output/ folder).\n"
+                     f"PEAKY_OUTPUT_DIR={out_dir}\n")
+    os.makedirs(out_dir, exist_ok=True)
+
+    print(f"peaky {peaky.__version__} — import OK.")       # 3. verify install
+    try:                                                   # 4. connection check (if creds)
+        from dotenv import load_dotenv
+        load_dotenv(env_path)
+    except Exception:
+        pass
+    conn = "not set yet — edit .env (step 1)"
+    if os.environ.get("MASCOPE_URL") and os.environ.get("MASCOPE_ACCESS_TOKEN"):
+        try:
+            ds = IO.list_datasets(IO.connect())
+            conn = f"connected — {len(ds)} datasets visible"
+        except Exception as e:
+            conn = f"creds present but connection failed ({type(e).__name__})"
+
+    print(f"""
+Peaky workspace ready:  {repo}/
+    .env              your Mascope creds (URL + token){'   <- CREATED, edit it' if created else ''}
+    output/           all run outputs land here  (PEAKY_OUTPUT_DIR)
+    peaky/  scripts/  the package + helper scripts
+    docs/             ARCHITECTURE / ASSIGNMENT / OUTPUTS  (+ SKILL.md)
+
+Credentials: {conn}
+
+Next steps:
+  1. edit .env   -> MASCOPE_URL + MASCOPE_ACCESS_TOKEN (from the Mascope web app)
+  2. peaky list datasets
+  3. peaky batch --batch "<name>" --dataset "<workspace>" --reagent <Br|Ur|NO3|...>
+     -> a versioned run folder under output/ (ledger + figures + PDF report)
+     (one sample only? peaky assign --sample-id <ID> --reagent <Br|Ur|...>)
+  (or just ask Claude: "assign formulas for batch <name> with the bromide reagent")""")
 
 
 def main(argv=None) -> int:

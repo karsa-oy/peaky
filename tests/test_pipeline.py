@@ -7,8 +7,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mascope_assign import pipeline as PL  # noqa: E402
-from mascope_assign import profiles as P  # noqa: E402
+from peaky import pipeline as PL  # noqa: E402
+from peaky import profiles as P  # noqa: E402
 
 PASS = FAIL = 0
 def check(name, cond, detail=""):

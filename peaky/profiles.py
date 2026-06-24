@@ -17,7 +17,7 @@ class ReagentProfile:
     name: str                       # short key, e.g. "Br" / "Ur"
     label: str                      # display label for figures, e.g. "Br⁻ CIMS"
     polarity: str                   # "-" or "+"
-    adducts: list[str]              # analyte channels (mascope_assign adduct labels)
+    adducts: list[str]              # analyte channels (peaky adduct labels)
     normaliser: str                 # "reagent" | "tic"  (for the TS/correlation layer)
     reagent_ion_re: str | None      # regex on ion_formula picking the reagent ions
     ranges: str                     # grid element ranges for local enumeration

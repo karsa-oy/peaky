@@ -40,3 +40,31 @@ jobs:
 
       - name: Full offline suite
         run: pytest tests/ -q
+
+  # Enforce uv.lock (the single canonical pinned graph). The matrix job above
+  # checks the conservative pyproject ranges; this job fails if the lockfile is
+  # out of date with pyproject (`--frozen`) or if the suite breaks against the
+  # exact pins. uv picks a requires-python-compatible interpreter.
+  locked:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync from the frozen lock (incl. dev extra)
+        run: uv sync --frozen --extra dev
+
+      - name: Assert no Mascope credentials present
+        run: |
+          if [ -n "${MASCOPE_LIVE:-}" ]; then echo "MASCOPE_LIVE must be unset in CI"; exit 1; fi
+          if [ -f "$HOME/.mascope/.env" ]; then echo "~/.mascope/.env must not exist in CI"; exit 1; fi
+          if [ -n "${MASCOPE_ACCESS_TOKEN:-}" ]; then echo "MASCOPE_ACCESS_TOKEN must be unset in CI"; exit 1; fi
+
+      - name: Smoke + full offline suite (pinned)
+        run: |
+          uv run python tests/test_smoke.py
+          uv run pytest tests/ -q

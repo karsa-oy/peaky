@@ -6,8 +6,8 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mascope_assign import series_detect as SD  # noqa: E402
-from mascope_assign import ledger as L  # noqa: E402
+from peaky import series_detect as SD  # noqa: E402
+from peaky import ledger as L  # noqa: E402
 
 PASS = FAIL = 0
 

@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mascope_assign import io_mascope as IO  # noqa: E402
+from peaky import io_mascope as IO  # noqa: E402
 
 PASS = FAIL = 0
 HERE = Path(__file__).resolve().parent
@@ -109,7 +109,7 @@ check("score_candidates allow_partial records failures",
 # escape it (like fetch_batch_samples) or the SDK str.contains matches nothing.
 class _LP:
     seen = None
-    def load_peaks(self, *, dataset, batches):
+    def load_peaks(self, *, dataset, batches, **kwargs):   # **kwargs: tolerate confirm_above=
         _LP.seen = batches
         return pd.DataFrame({"mz": [100.0], "height": [1.0], "sample_item_id": ["s"]})
 _name = "^Nitrate (synthetic) m/z 100-200"
@@ -149,7 +149,7 @@ check("flatten does NOT re-anchor a normal (no-^) ion",
       abs(float(_pf[_pf["is_base"]]["theo_mz"].iloc[0]) - 201.076) < 1e-3)
 
 # ---------- estimate_offset: rough offset from the sample's own matches ----------
-from mascope_assign import chemistry as _C  # noqa: E402
+from peaky import chemistry as _C  # noqa: E402
 # build a synthetic match table at a uniform -1.9 ppm offset (Br-CIMS)
 _off_rows = []
 for f, mech in [("C10H16O4", "+Br-"), ("C10H16O3", "+Br-"), ("C5H10O3", "+Br-"),
@@ -195,6 +195,68 @@ finally:
 check("_REPO_ENV points at the repo-root .env (next to the package)",
       IO._REPO_ENV == os.path.join(
           os.path.dirname(os.path.dirname(os.path.abspath(IO.__file__))), ".env"))
+
+# ---------- legacy (workspace-based) server resolution (offline, monkeypatched) ----------
+_WS = pd.DataFrame([
+    {"workspace_name": "Orange acquisitions", "workspace_id": "WACQ", "workspace_type": "ACQUISITION"},
+    {"workspace_name": "Sandbox", "workspace_id": "WSBX", "workspace_type": "ANALYSIS"},
+])
+_BATCHES = pd.DataFrame([
+    {"workspace_id": "WACQ", "sample_batch_name": "Orange peeling Uronium acquisition",
+     "sample_batch_id": "BURO", "polarity": "+"},
+    {"workspace_id": "WSBX", "sample_batch_name": "Chamber tests", "sample_batch_id": "BCHM", "polarity": "+-"},
+    {"workspace_id": "WSBX", "sample_batch_name": "Uronium scratch copy", "sample_batch_id": "BDUP", "polarity": "+"},
+])
+
+_orig_batches, _orig_ws = IO._legacy_all_batches, IO._legacy_workspaces
+IO._legacy_all_batches = lambda client: _BATCHES.copy()
+IO._legacy_workspaces = lambda client: _WS.copy()
+try:
+    check("resolve_batch_id exact match",
+          IO.resolve_batch_id(None, "Orange peeling Uronium acquisition") == "BURO")
+    check("resolve_batch_id case-insensitive substring",
+          IO.resolve_batch_id(None, "chamber TESTS") == "BCHM")
+    amb = False                                  # 'Uronium' substring hits two batches
+    try:
+        IO.resolve_batch_id(None, "Uronium")
+    except RuntimeError as e:
+        amb = "disambiguate" in str(e)
+    check("resolve_batch_id ambiguous raises", amb)
+    check("resolve_batch_id workspace-scoped disambiguates",
+          IO.resolve_batch_id(None, "Uronium", dataset="Sandbox") == "BDUP")
+    nf = False
+    try:
+        IO.resolve_batch_id(None, "no such batch")
+    except RuntimeError:
+        nf = True
+    check("resolve_batch_id not-found raises", nf)
+
+    class _FakeDS:
+        def list(self):
+            return None              # legacy server: /api/datasets absent
+
+    class _FakeClient:
+        datasets = _FakeDS()
+
+        def __getattr__(self, _):    # batches.list(...) -> AttributeError -> legacy fallback
+            raise AttributeError
+
+    ds = IO.list_datasets(_FakeClient())
+    check("list_datasets falls back to workspaces (reshaped)",
+          list(ds["dataset_name"]) == ["Orange acquisitions", "Sandbox"]
+          and "dataset_id" in ds.columns and "dataset_type" in ds.columns)
+    lb = IO.list_batches(_FakeClient(), dataset="Orange acquisitions")
+    check("list_batches legacy fallback filters by workspace",
+          len(lb) == 1 and lb.iloc[0]["sample_batch_id"] == "BURO")
+finally:
+    IO._legacy_all_batches, IO._legacy_workspaces = _orig_batches, _orig_ws
+
+IO._patch_datasets_list_for_legacy_servers()     # idempotent + swallows NotFoundError
+IO._patch_datasets_list_for_legacy_servers()
+from mascope_sdk.resources.datasets import DatasetsResource as _DSR  # noqa: E402
+check("legacy datasets.list patch installed + idempotent",
+      getattr(_DSR.list, "_legacy_safe", False))
+
 
 # ---------- live smoke (opt-in) ----------
 if os.environ.get("MASCOPE_LIVE") == "1":

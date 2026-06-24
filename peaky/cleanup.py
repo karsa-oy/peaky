@@ -403,7 +403,16 @@ def reclaim_envelope_tails(ledger: pd.DataFrame, *, ppm: float = 6.0, log=print)
     leak measured on the ¹⁵NO₃⁻ batch). Walk k=2..nX from each M0 and accept an
     unexplained peak whose intensity ratio matches the binomial C(nX,k)(p/q)^k.
     Touches only unexplained rows; the ratio gate (and exact +k·Δ mass) prevent
-    grabbing an unrelated neighbour. p/q: ³⁷Cl 0.3199, ⁸¹Br 0.9728."""
+    grabbing an unrelated neighbour. p/q: ³⁷Cl 0.3199, ⁸¹Br 0.9728.
+
+    KNOWN LIMITATION (do not trust this to clear real tails): on real batches this
+    has been observed to be a no-op — the deep-tail leak it targets is, in
+    practice, already absorbed upstream (reclaim_satellites k=1 + the isotope-locked
+    known-species/CP recovery), so by the time this runs there are typically no
+    leaked unexplained tails left for the binomial gate to match. The unit test
+    exercises only the synthetic poly-³⁷Cl case. Kept (harmless, additive — touches
+    only unexplained rows) pending a live-data re-evaluation of the gate; see
+    docs/ROADMAP.md."""
     from math import comb
     from . import isotopes as ISO
     m0 = ledger[ledger["role"] == L.ROLE_M0].dropna(subset=["mz"]).sort_values("mz")

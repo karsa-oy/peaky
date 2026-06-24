@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mascope_assign import cluster as CL  # noqa: E402
+from peaky import cluster as CL  # noqa: E402
 
 PASS = FAIL = 0
 def check(name, cond, detail=""):
