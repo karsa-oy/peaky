@@ -60,10 +60,10 @@ justify:
 | **3** | **Automatic series detection** (the "rotating plot") opens contaminant families on decoy-controlled evidence — organosulfate/nitrate/siloxane/amine, isotope-gated bromo/chloro-organics. |
 | **4** | **Residual explainer**: resolves ~1.998-Da isotope doublets, deep 2-step series, ppm-disciplined acceptance. |
 | **5** | **Known-neutral completion**: fills cross-channel partners + series gaps of passes 1–4 (no new formula space). |
-| **6** | **Anchored ladder gap-fill**: walks +O/+CH₂/+CO₂/−H₂O diagonals out from Identified anchors, satellite-guarded (Candidate tier). |
+| **6** | **Anchored ladder gap-fill**: walks +O/+CH₂/+CO₂/−H₂O diagonals out from Assigned anchors, satellite-guarded (Candidate tier). |
 | **cleanup** | Isotope-confirmed recovery of molecules the score gate dropped, bromide-cluster relabelling, ringing-artifact flagging, and (positive mode) re-reading uncorroborated `[M+NH4]+` as the `[M+H]+` amine. Post-tier **plausibility demotes** (carbon-cluster, heteroatom-free-hydrocarbon-via-an-anion-channel, speculative-residual) and a Br-run reagent-halocarbon relabel drop over-eager commits one tier — never deleting a peak. |
-| **reflist** | Context-gated **reference peaklists** (literature HOM + common MS contaminants) corroborate near-ties (selection prior) and **rescue** mass-matched unexplained peaks — each rescue re-scored by the server before commit, provenance-tagged, never overriding an isotope-scored Identified. |
-| **tiers** | The final verdict (below). Degeneracy density is measured first so a mass-degenerate commit can't claim Identified. |
+| **reflist** | Context-gated **reference peaklists** (literature HOM + common MS contaminants) corroborate near-ties (selection prior) and **rescue** mass-matched unexplained peaks — each rescue re-scored by the server before commit, provenance-tagged, never overriding an isotope-scored Assigned. |
+| **tiers** | The final verdict (below). Degeneracy density is measured first so a mass-degenerate commit can't claim Assigned. |
 
 (Passes 2/3 run via the `series_gka` / `series_detect` engines under the `passes`
 director. Interleaved sweeps — isotope-envelope completion, **composite detection
@@ -77,7 +77,7 @@ the Pass-6 ladder gap-fill.)
 Peaky can consult **curated, provenance-tagged reference peaklists** — a catalog of
 known neutrals per chemical system, each entry carrying its source, data version, and
 literature references. They are used three ways, all **soft** and none ever overriding
-an isotope-scored Identified:
+an isotope-scored Assigned:
 
 - **Selection prior** — a candidate that sits on an active list wins a near-tie in
   arbitration (a small score nudge, not a free pass).
@@ -127,7 +127,7 @@ wins:
 Committed assignments are split into report tiers by **mechanical rules on ledger
 columns** (no judgment calls at report time):
 
-- **Identified** — the formula is unique in the calibrated mass window, *or* it's
+- **Assigned** — the formula is unique in the calibrated mass window, *or* it's
   corroborated by independent evidence (confirmed isotopologues / attached
   satellites, the same neutral in a second ionization channel, or series-anchor
   support), and nothing about the chemistry contradicts the validated sample
@@ -140,5 +140,5 @@ columns** (no judgment calls at report time):
   *constrained mass*, not a confident formula.
 
 > **The honesty principle:** `% signal explained` is a **coverage** metric, not a
-> **quality** metric. A peak is only "Identified" when the *evidence* — not just
+> **quality** metric. A peak is only "Assigned" when the *evidence* — not just
 > the mass — supports it.

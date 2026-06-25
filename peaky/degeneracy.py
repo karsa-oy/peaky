@@ -16,12 +16,12 @@ identifiable each mass really is. The VERDICT lives in tiers.py, which now reads
 these columns: an uncorroborated commit whose honest cross-family density is high
 (or MASS-SATURATED) is capped at Candidate there. (The initial decision to stamp
 without demoting was revised once the contradiction surfaced -- a row reading
-``tier=Identified, "unique formula"`` while also carrying ``degeneracy_density=27,
+``tier=Assigned, "unique formula"`` while also carrying ``degeneracy_density=27,
 MASS-SATURATED`` is self-contradictory. Corroborated commits -- committed
 isotopologue child / second channel / series anchor -- are still spared, because
 that corroboration is exactly the extra-spectral evidence that breaks the tie;
 the honest-but-uncorroborated F-heavy backbones land as Candidate, not a forced
-Identified.) Separation of concerns is preserved: degeneracy MEASURES, tiers
+Assigned.) Separation of concerns is preserved: degeneracy MEASURES, tiers
 JUDGES, and degeneracy.apply_degeneracy must run before tiers.apply_tiers.
 
 Same-ion decomposition readings (covalent ``Y(Br)[M-H]-`` vs cluster

@@ -154,7 +154,7 @@ with tempfile.TemporaryDirectory() as d:
 # --- per-cluster workbook (one tab per cluster) ------------------------------
 wb_rows = [(1, ["A", "B", "C"], 0.9, "rise", 0.5),
            ("remaining (singletons)", ["D", "E"], float("nan"), "n/a", 0.0)]
-wb_meta = {"A": {"neutral_formula": "C6H14O4", "channel": "+H⁺", "match_score": 0.98, "tier": "Identified"},
+wb_meta = {"A": {"neutral_formula": "C6H14O4", "channel": "+H⁺", "match_score": 0.98, "tier": "Assigned"},
            "B": {"neutral_formula": "C6H14O4", "channel": "+Ur⁺", "match_score": 0.91, "tier": "Candidate"}}
 with tempfile.TemporaryDirectory() as d:
     out = CL.write_cluster_workbook(wb_rows, f"{d}/wb.xlsx", meta=wb_meta,

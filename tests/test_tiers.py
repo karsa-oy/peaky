@@ -28,7 +28,7 @@ peaks = pd.DataFrame({
     "height": [1e5, 1e4, 8e4, 1.1e4, 9e2, 5e4, 4e4, 3e4, 2e4, 1e4, 6e3, 5e3]})
 led = L.new_ledger(peaks)
 
-# A: High, isotopologue-confirmed, clear margin -> Identified
+# A: High, isotopologue-confirmed, clear margin -> Assigned
 L.commit_assignment(led, "A", neutral_formula="C10H16O4", adduct="[M-H]-",
                     ion_formula="C10H15O4-", ion_score=0.97, compound_score=0.96,
                     eff_score=0.95, eff_margin=0.20, tied=False,
@@ -62,7 +62,7 @@ L.commit_assignment(led, "E", neutral_formula="C9H4BrClO2", adduct="[M-H]-",
                     ppm_error=-0.2, pass_no=4, method="residual:iso-pair",
                     confidence="Good (iso-pair)", commentary="Pass 4 (iso-pair): BrCl doublet")
 
-# F: known species (pass-0) -> Identified regardless of alternatives
+# F: known species (pass-0) -> Assigned regardless of alternatives
 L.commit_assignment(led, "F", neutral_formula="C4H14O3Si2", adduct="[M+Br]-",
                     ion_formula="C4H14O3Si2.Br-", ion_score=0.95, compound_score=0.94,
                     ppm_error=0.1, pass_no=0, method="known:contaminant:silanediol",
@@ -94,7 +94,7 @@ L.commit_assignment(led, "I", neutral_formula="C8H14O5", adduct="[M-H]-",
                                    "raw_score": 0.87, "ppm": 0.5}])
 
 # J: Good, cross-channel corroboration (same neutral as A, other adduct),
-# close alternative present -> Identified via corroboration
+# close alternative present -> Assigned via corroboration
 L.commit_assignment(led, "J", neutral_formula="C10H16O4", adduct="[M+Br]-",
                     ion_formula="C10H16O4.Br-", ion_score=0.84, compound_score=0.84,
                     eff_score=0.80, eff_margin=0.08, tied=False,
@@ -105,18 +105,18 @@ L.commit_assignment(led, "J", neutral_formula="C10H16O4", adduct="[M+Br]-",
 
 t = T.compute_tiers(led).set_index("peak_id")
 
-check("A High + iso + margin -> Identified", t.at["A", "tier"] == "Identified", t.loc["A"].to_dict())
+check("A High + iso + margin -> Assigned", t.at["A", "tier"] == "Assigned", t.loc["A"].to_dict())
 check("A reason mentions isotopologue", "isotopologue" in t.at["A", "tier_reason"])
 check("C close alt, no corroboration -> Candidate", t.at["C", "tier"] == "Candidate")
 check("D O19 monster -> Candidate despite High", t.at["D", "tier"] == "Candidate")
 check("D reason mentions lattice", "lattice" in t.at["D", "tier_reason"])
 check("E mixed BrCl -> Candidate", t.at["E", "tier"] == "Candidate")
-check("F known species -> Identified", t.at["F", "tier"] == "Identified")
+check("F known species -> Assigned", t.at["F", "tier"] == "Assigned")
 check("G Low -> Candidate", t.at["G", "tier"] == "Candidate")
 check("H stored near-tie -> Candidate", t.at["H", "tier"] == "Candidate")
 check("H reason is the tie", "near-tie" in t.at["H", "tier_reason"], t.at["H", "tier_reason"])
 check("I commentary-tie fallback -> Candidate", t.at["I", "tier"] == "Candidate")
-check("J cross-channel corroboration -> Identified", t.at["J", "tier"] == "Identified",
+check("J cross-channel corroboration -> Assigned", t.at["J", "tier"] == "Assigned",
       t.loc["J"].to_dict())
 check("J reason mentions second channel", "second ionization channel" in t.at["J", "tier_reason"])
 check("density: A counts winner only when alt is far",
@@ -180,7 +180,7 @@ L.commit_assignment(led2, "X1", neutral_formula="C11H8F14", adduct="[M+Br]-",
                     pass_no=3, method="contaminant:fluorinated",
                     confidence="Good", commentary="iso-backed",
                     isotopologues=[{"label": "81Br", "score": 0.9, "peak_id": "z"}])
-# U2: uncorroborated but ON calibration (-0.6) -> stays Identified
+# U2: uncorroborated but ON calibration (-0.6) -> stays Assigned
 L.commit_assignment(led2, "U2", neutral_formula="C8H16O2", adduct="[M-H]-",
                     ion_formula="C8H15O2-", ion_score=0.9, compound_score=0.9,
                     eff_score=0.9, eff_margin=0.4, tied=False, ppm_error=-0.6,
@@ -212,22 +212,22 @@ check("U1 off-cal + uncorroborated -> Candidate", t3.at["U1", "tier"] == "Candid
       t3.loc["U1"].to_dict())
 check("U1 reason cites mass-error-distribution",
       "mass-error-distribution" in t3.at["U1", "tier_reason"], t3.at["U1", "tier_reason"])
-check("X1 off-cal but iso-corroborated -> Identified", t3.at["X1", "tier"] == "Identified",
+check("X1 off-cal but iso-corroborated -> Assigned", t3.at["X1", "tier"] == "Assigned",
       t3.loc["X1"].to_dict())
-check("U2 on-cal uncorroborated -> Identified", t3.at["U2", "tier"] == "Identified",
+check("U2 on-cal uncorroborated -> Assigned", t3.at["U2", "tier"] == "Assigned",
       t3.loc["U2"].to_dict())
-check("core peaks stay Identified", (t3.loc[[f"K{i:02d}" for i in range(N_CORE)],
-                                            "tier"] == "Identified").all())
+check("core peaks stay Assigned", (t3.loc[[f"K{i:02d}" for i in range(N_CORE)],
+                                            "tier"] == "Assigned").all())
 check("B1 background CO3 uncorroborated -> Candidate", t3.at["B1", "tier"] == "Candidate",
       t3.loc["B1"].to_dict())
 check("B1 reason cites background air-ion channel",
       "background air-ion channel" in t3.at["B1", "tier_reason"], t3.at["B1", "tier_reason"])
-check("B2a CO3 but cross-channel corroborated -> Identified",
-      t3.at["B2a", "tier"] == "Identified", t3.loc["B2a"].to_dict())
+check("B2a CO3 but cross-channel corroborated -> Assigned",
+      t3.at["B2a", "tier"] == "Assigned", t3.loc["B2a"].to_dict())
 
 # --- degeneracy-aware tiering (ROADMAP: tiers read degeneracy.py's stamp) -----
 # Regression for the v43 contradiction: two cleanup-recovered ions carried
-# tier=Identified "unique formula in the calibrated window" (candidate_density=1,
+# tier=Assigned "unique formula in the calibrated window" (candidate_density=1,
 # i.e. unique inside their NARROW per-pass box) while the honest cross-family
 # degeneracy audit stamped degeneracy_density=27 / 12 + a MASS-SATURATED note
 # ("not identifiable from accurate mass alone"). Uncorroborated + mass-degenerate
@@ -248,7 +248,7 @@ L.commit_assignment(dg, "R2", neutral_formula="C14H22O4", adduct="[M+Br]-",
                     ion_formula="C14H22O4.Br-", ion_score=0.9, compound_score=0.9,
                     ppm_error=-0.59, pass_no=4, method="cleanup:iso-recovery",
                     confidence="Good (recovered)", commentary="recovered")
-# R3: SAME high degeneracy but isotopologue-CORROBORATED -> must stay Identified
+# R3: SAME high degeneracy but isotopologue-CORROBORATED -> must stay Assigned
 L.commit_assignment(dg, "R3", neutral_formula="C20H20O5", adduct="[M+Br]-",
                     ion_formula="C20H20O5.Br-", ion_score=0.9, compound_score=0.9,
                     ppm_error=0.1, pass_no=4, method="cleanup:iso-recovery",
@@ -263,12 +263,12 @@ L.commit_assignment(dg, "R4b", neutral_formula="C16H24O5", adduct="[M-H]-",
                     ion_formula="C16H23O5-", ion_score=0.9, compound_score=0.9,
                     ppm_error=0.2, pass_no=1, method="cheminfo+grid",
                     confidence="Good", commentary="ch2")
-# R5: honestly unique (density 1) uncorroborated -> stays Identified
+# R5: honestly unique (density 1) uncorroborated -> stays Assigned
 L.commit_assignment(dg, "R5", neutral_formula="C8H12O3", adduct="[M+Br]-",
                     ion_formula="C8H12O3.Br-", ion_score=0.9, compound_score=0.9,
                     ppm_error=0.1, pass_no=1, method="cheminfo+grid",
                     confidence="Good", commentary="clean")
-# R6: density 2 (one rival) uncorroborated -> below the >2 demote bar, Identified
+# R6: density 2 (one rival) uncorroborated -> below the >2 demote bar, Assigned
 L.commit_assignment(dg, "R6", neutral_formula="C9H14O3", adduct="[M+Br]-",
                     ion_formula="C9H14O3.Br-", ion_score=0.9, compound_score=0.9,
                     ppm_error=0.1, pass_no=1, method="cheminfo+grid",
@@ -299,7 +299,7 @@ _stamp_degen("R6", 2, DEG.format(n=2))
 
 td = T.compute_tiers(dg).set_index("peak_id")
 
-check("R1 (C18H14N2O3S, density 27) uncorroborated -> Candidate, not Identified",
+check("R1 (C18H14N2O3S, density 27) uncorroborated -> Candidate, not Assigned",
       td.at["R1", "tier"] == "Candidate", td.loc["R1"].to_dict())
 check("R1 reason cites the mass degeneracy",
       "mass-degenerate" in td.at["R1", "tier_reason"]
@@ -307,21 +307,21 @@ check("R1 reason cites the mass degeneracy",
 check("R1 reason says not identifiable from accurate mass alone",
       "not identifiable from accurate mass alone" in td.at["R1", "tier_reason"],
       td.at["R1", "tier_reason"])
-check("R2 (C14H22O4, density 12) uncorroborated -> Candidate, not Identified",
+check("R2 (C14H22O4, density 12) uncorroborated -> Candidate, not Assigned",
       td.at["R2", "tier"] == "Candidate", td.loc["R2"].to_dict())
-check("R3 same density but isotopologue-corroborated -> stays Identified",
-      td.at["R3", "tier"] == "Identified", td.loc["R3"].to_dict())
+check("R3 same density but isotopologue-corroborated -> stays Assigned",
+      td.at["R3", "tier"] == "Assigned", td.loc["R3"].to_dict())
 check("R3 reason mentions isotopologue (corroboration kept it)",
       "isotopologue" in td.at["R3", "tier_reason"], td.at["R3", "tier_reason"])
-check("R4a high density but cross-channel corroborated -> stays Identified",
-      td.at["R4a", "tier"] == "Identified", td.loc["R4a"].to_dict())
-check("R5 honestly unique (density 1) -> Identified",
-      td.at["R5", "tier"] == "Identified", td.loc["R5"].to_dict())
+check("R4a high density but cross-channel corroborated -> stays Assigned",
+      td.at["R4a", "tier"] == "Assigned", td.loc["R4a"].to_dict())
+check("R5 honestly unique (density 1) -> Assigned",
+      td.at["R5", "tier"] == "Assigned", td.loc["R5"].to_dict())
 check("R5 reason is the unique-window text",
       "unique formula in the calibrated window" in td.at["R5", "tier_reason"],
       td.at["R5", "tier_reason"])
-check("R6 density 2 (below >2 bar) -> stays Identified (no over-demotion)",
-      td.at["R6", "tier"] == "Identified", td.loc["R6"].to_dict())
+check("R6 density 2 (below >2 bar) -> stays Assigned (no over-demotion)",
+      td.at["R6", "tier"] == "Assigned", td.loc["R6"].to_dict())
 
 # CSV round-trip: degeneracy_density -> '27.0' string; verdict must be unchanged
 rtd = pd.read_csv(io.StringIO(dg.to_csv(index=False)))
@@ -329,23 +329,23 @@ td2 = T.compute_tiers(rtd).set_index("peak_id")
 check("CSV round-trip: R1/R2 stay Candidate",
       td2.at["R1", "tier"] == "Candidate" and td2.at["R2", "tier"] == "Candidate",
       {"R1": td2.at["R1", "tier"], "R2": td2.at["R2", "tier"]})
-check("CSV round-trip: R3/R4a stay Identified",
-      td2.at["R3", "tier"] == "Identified" and td2.at["R4a", "tier"] == "Identified",
+check("CSV round-trip: R3/R4a stay Assigned",
+      td2.at["R3", "tier"] == "Assigned" and td2.at["R4a", "tier"] == "Assigned",
       {"R3": td2.at["R3", "tier"], "R4a": td2.at["R4a", "tier"]})
 
 # a ledger with NO degeneracy columns (predates the audit): rule inert, R5-like
-# unique row stays Identified (the helper must not raise on a missing column)
+# unique row stays Assigned (the helper must not raise on a missing column)
 dg_old = dg.drop(columns=["degeneracy_density", "degeneracy_note"])
 td3 = T.compute_tiers(dg_old).set_index("peak_id")
-check("no degeneracy columns -> rule inert (R1 falls back to Identified)",
-      td3.at["R1", "tier"] == "Identified", td3.loc["R1"].to_dict())
+check("no degeneracy columns -> rule inert (R1 falls back to Assigned)",
+      td3.at["R1", "tier"] == "Assigned", td3.loc["R1"].to_dict())
 
 # --- flag_below_assignability: O>=11 AND mass-saturated -> not a confident formula
 ba = pd.DataFrame([
     dict(peak_id="mon", role="M0", neutral_formula="C20H20O29", degeneracy_density=52,
          degeneracy_note="MASS-SATURATED: 52 plausible formulas", tier="Candidate", tier_reason="x"),
     dict(peak_id="cho", role="M0", neutral_formula="C10H16O4", degeneracy_density=1,
-         degeneracy_note="unique", tier="Identified", tier_reason="y"),
+         degeneracy_note="unique", tier="Assigned", tier_reason="y"),
     dict(peak_id="hiO_uniq", role="M0", neutral_formula="C10H16O11", degeneracy_density=1,
          degeneracy_note="unique", tier="Candidate", tier_reason="z"),
 ])

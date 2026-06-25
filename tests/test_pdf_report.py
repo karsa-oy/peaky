@@ -24,11 +24,11 @@ with tempfile.TemporaryDirectory() as d:
     # NH3-shifted shadow of C10H16O2 (the ammonium/amine degeneracy), and one row
     # has formula_agree=False (drives the single-source disagreement count).
     pd.DataFrame([
-        dict(mz=169.1223, neutral_formula="C10H16O2", adduct="[M+H]+", tier="Identified", ion_score=0.9, n_files=6, formula_agree=True),
+        dict(mz=169.1223, neutral_formula="C10H16O2", adduct="[M+H]+", tier="Assigned", ion_score=0.9, n_files=6, formula_agree=True),
         dict(mz=200.0, neutral_formula="C10H19NO2", adduct="[M+NH4]+", tier="Candidate", ion_score=0.7, n_files=3, formula_agree=False),
         dict(mz=183.0, neutral_formula="C9H10N2O", adduct="[M+H]+", tier="Candidate", ion_score=0.6, n_files=2, formula_agree=True),
         dict(mz=223.06, neutral_formula="C6H18O3Si3", adduct="[M+H]+", tier="Candidate", ion_score=0.5, n_files=1, formula_agree=True),
-        dict(mz=247.0, neutral_formula="C3H2F6O", adduct="[M+Br]-", tier="Identified", ion_score=0.8, n_files=4, formula_agree=True),
+        dict(mz=247.0, neutral_formula="C3H2F6O", adduct="[M+Br]-", tier="Assigned", ion_score=0.8, n_files=4, formula_agree=True),
         dict(mz=400.0, neutral_formula="C9H12N4O12", adduct="[M+Na]+", tier="Candidate", ion_score=0.94, n_files=1, formula_agree=True),  # N-monster, flagged
     ]).to_csv(f"{d}/merged_ledger.csv", index=False)
     # one per-file ledger with roles (drives the role breakdown)
@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory() as d:
 
     ctx = R.load_context(d, tag="Ur", label="Ur⁺ CIMS")
     check("load_context: merged loaded", ctx["n_m0"] == 6, ctx.get("n_m0"))
-    check("load_context: tiers counted", ctx["tiers"].get("Identified") == 2, ctx["tiers"])
+    check("load_context: tiers counted", ctx["tiers"].get("Assigned") == 2, ctx["tiers"])
     check("load_context: composition is CHO/CHON/CHOS backbone",
           set(ctx["composition"]) <= {"CHO", "CHON", "CHOS"}, ctx["composition"])
     check("load_context: heteroatom side-counts Si + F",

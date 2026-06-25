@@ -1104,7 +1104,7 @@ def complete_isotope_envelopes(ledger: pd.DataFrame, cfg: PassConfig, *,
     Two actions per predicted satellite line:
       * an UNEXPLAINED peak at the right mass + consistent intensity is attached
         as an iso_child (the envelope was incompletely claimed by the server);
-      * a WEAK committed M0 (not High/Identified, not locked) that is really a
+      * a WEAK committed M0 (not High/Assigned, not locked) that is really a
         parent's satellite is DISPLACED into the iso_child role -- this is the
         393/395 silanediol bug, where the Si4+Br M+2 at 395 got mis-assigned a
         Cl-F-S formula because its M+4/M+2 ratio (~0.26) mimicked a Cl doublet.

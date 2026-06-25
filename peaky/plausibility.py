@@ -8,10 +8,10 @@ carbon-rich (very low H/C) skeletons, or a covalent halogen in a positive-mode
 spectrum whose reagent provides no halogen.
 
 `scan` flags these for SCRUTINY — it does not delete or re-assign anything. It is
-deliberately conservative and only inspects CANDIDATE-tier neutrals: an Identified
+deliberately conservative and only inspects CANDIDATE-tier neutrals: an Assigned
 assignment cleared the server's isotope-pattern score, which is independent
 corroboration we don't second-guess from element ratios. A neutral seen as
-Identified in ANY channel is therefore never flagged.
+Assigned in ANY channel is therefore never flagged.
 
 Pure formula arithmetic; deterministic. Thresholds are intentionally loose so the
 flagged set is small and defensible (the clear coincidences), not a dragnet.
@@ -69,7 +69,7 @@ def implausible(neutral_formula: str, *, tier: str | None = None,
 def scan(merged, *, polarity: str | None = None) -> list[dict]:
     """Flag Candidate-only neutrals that look implausible. Returns one dict per
     distinct neutral: {neutral_formula, reason, ion_score, tier}. A neutral that is
-    Identified in any ion channel is excluded (it is corroborated)."""
+    Assigned in any ion channel is excluded (it is corroborated)."""
     if merged is None or "neutral_formula" not in getattr(merged, "columns", []):
         return []
     g = merged.dropna(subset=["neutral_formula"]).copy()
@@ -79,7 +79,7 @@ def scan(merged, *, polarity: str | None = None) -> list[dict]:
     has_tier = "tier" in g.columns
     out = []
     for f, sub in g.groupby("neutral_formula"):
-        best = ("Identified" if has_tier and (sub["tier"] == "Identified").any()
+        best = ("Assigned" if has_tier and (sub["tier"] == "Assigned").any()
                 else "Candidate")
         reason = implausible(f, tier=best, polarity=polarity)
         if reason:

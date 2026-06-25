@@ -19,18 +19,18 @@ def m0(rows):
 
 
 # fileA + fileB share a peak (C10H16O2 @ ~217.12, mass jitter ~2 ppm), each has
-# one unique peak; fileB also assigns the shared peak Candidate (A is Identified).
-A = m0([(217.1200, "C10H16O2", "[M+H]+", "Identified", 0.91),
-        (158.1539, "C9H19NO", "[M+H]+", "Identified", 0.85)])      # A-only
+# one unique peak; fileB also assigns the shared peak Candidate (A is Assigned).
+A = m0([(217.1200, "C10H16O2", "[M+H]+", "Assigned", 0.91),
+        (158.1539, "C9H19NO", "[M+H]+", "Assigned", 0.85)])      # A-only
 B = m0([(217.1205, "C10H16O2", "[M+H]+", "Candidate", 0.72),
-        (300.1000, "C15H17NO5", "[M+H]+", "Identified", 0.80)])    # B-only
+        (300.1000, "C15H17NO5", "[M+H]+", "Assigned", 0.80)])    # B-only
 
 merged, jitter = AB.align({"A": A, "B": B}, tol_ppm=6.0)
 
 check("3 distinct clusters (1 shared + 2 unique)", len(merged) == 3, len(merged))
 shared = merged[merged["neutral_formula"] == "C10H16O2"].iloc[0]
 check("shared peak seen in 2 files", shared["n_files"] == 2, shared.to_dict())
-check("best tier wins (Identified over Candidate)", shared["tier"] == "Identified", shared["tier"])
+check("best tier wins (Assigned over Candidate)", shared["tier"] == "Assigned", shared["tier"])
 check("formula_agree True for the shared peak", bool(shared["formula_agree"]))
 check("raw mz jitter ~2.3 ppm measured",
       2.0 <= shared["mz_jitter_ppm_raw"] <= 2.6, shared["mz_jitter_ppm_raw"])
@@ -42,8 +42,8 @@ check("jitter long-form has 4 rows (2 shared + 2 unique)", len(jitter) == 4, len
 # fileC at +3 ppm, fileD at -3 ppm -> raw mz differ by ~6 ppm; with offsets the
 # corrected positions coincide and they cluster as ONE peak.
 mz0 = 250.0
-C = m0([(mz0 * (1 + 3e-6), "C12H20O5", "[M+H]+", "Identified", 0.88)])
-D = m0([(mz0 * (1 - 3e-6), "C12H20O5", "[M+H]+", "Identified", 0.87)])
+C = m0([(mz0 * (1 + 3e-6), "C12H20O5", "[M+H]+", "Assigned", 0.88)])
+D = m0([(mz0 * (1 - 3e-6), "C12H20O5", "[M+H]+", "Assigned", 0.87)])
 mC, _ = AB.align({"C": C, "D": D}, tol_ppm=4.0)                    # raw spread 6ppm > 4
 check("without offsets: 6ppm raw split into 2 clusters at tol 4", len(mC) == 2, len(mC))
 mO, _ = AB.align({"C": C, "D": D}, tol_ppm=4.0, offsets={"C": 3.0, "D": -3.0})
@@ -54,7 +54,7 @@ check("offset-aware: raw jitter ~6 ppm but cal-adjusted ~0",
       mO.iloc[0][["mz_jitter_ppm_raw", "mz_jitter_ppm_caldj"]].to_dict() if len(mO) else "empty")
 
 # --- formula disagreement is detected ---------------------------------------
-E = m0([(400.0000, "C20H25NO7", "[M+H]+", "Identified", 0.7)])
+E = m0([(400.0000, "C20H25NO7", "[M+H]+", "Assigned", 0.7)])
 F = m0([(400.0010, "C16H29NO10", "[M+H]+", "Candidate", 0.6)])     # different formula, same m/z
 mEF, _ = AB.align({"E": E, "F": F}, tol_ppm=6.0)
 check("formula disagreement flagged (formula_agree False)",

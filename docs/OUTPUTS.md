@@ -70,7 +70,7 @@ Writes into `--output-dir` with the prefix `<sample-id>_<YYYYMMDD-HHMM>`:
 | Artifact | What it is |
 |---|---|
 | `<prefix>_ledger.csv` | Every peak: role (`M0` / `iso_child` / `reagent` / `artifact` / `unexplained`), formula, adduct, all scores (incl. arbitration `eff_score`/`eff_margin`/`tied`), ppm, confidence, `tier` + `tier_reason`, candidate/degeneracy density, provenance, commentary, alternatives, isotopologues. |
-| `<prefix>_assignments.xlsx` | The styled multi-sheet workbook: Summary · Read-me legend · **Identified** · **Candidates** · Unassigned (evidence-characterized) · By class · Unique formulas · Isotopologues · Peak ownership · Target list · Reagent ions. Frozen headers, autofilters, tier/confidence color chips. |
+| `<prefix>_assignments.xlsx` | The styled multi-sheet workbook: Summary · Read-me legend · **Assigned** · **Candidates** · Unassigned (evidence-characterized) · By class · Unique formulas · Isotopologues · Peak ownership · Target list · Reagent ions. Frozen headers, autofilters, tier/confidence color chips. |
 | `<prefix>_summary.md` | Narrative + top assignments + coverage. |
 | `<prefix>_manifest.json` | Module versions, prescan fingerprint, series-evidence table, per-pass timing. |
 | `<prefix>_gka.html` | Interactive rotating-GKA widget (self-contained, no server). |

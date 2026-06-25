@@ -17,7 +17,7 @@ Claude    →  the interface    (you drive Peaky by asking in plain language)
 ## What it does
 
 - **Chemical-formula assignment** — multi-pass, isotope-pattern-aware peak → formula
-  annotation. Produces a tiered Excel (Identified / Candidate / below-assignability)
+  annotation. Produces a tiered Excel (Assigned / Candidate / below-assignability)
   with commentary, close alternatives, per-isotopologue scores, and a peak-ownership
   audit, plus an interactive rotating-GKA widget.
 - **Batch pipeline** — assigns a representative subset (5 time-spaced + max-TIC
@@ -144,9 +144,9 @@ Peaky is validated end-to-end on the **orange-peeling** CIMS experiment
 (representative-sample assign → merge → clustering → Van Krevelen → PDF report):
 
 - **Orange peeling (Br⁻ CIMS)** — 80 samples / ~96 min → merged **502 M0**
-  (402 Identified / 100 Candidate), ~4× the per-file coverage.
+  (402 Assigned / 100 Candidate), ~4× the per-file coverage.
 - **Orange peeling (Ur⁺ CIMS)** — 81 samples / ~97 min → merged **1319 M0**
-  (1065 Identified / 254 Candidate); the positive-mode NH₄→amine co-variation gate
+  (1065 Assigned / 254 Candidate); the positive-mode NH₄→amine co-variation gate
   is applied at merge.
 
 ## Development

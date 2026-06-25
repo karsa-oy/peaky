@@ -78,7 +78,7 @@ arbitration + multi-pass commit         passes.py director (passes 1–6 + sweep
    │                                     complexity-penalised, isotopologue-gated; commit M0 owners
    ▼
 cleanup → degeneracy → tiers            cleanup.py · degeneracy.py · tiers.py
-   │                                     recover/relabel, measure mass-degeneracy, assign Identified/Candidate
+   │                                     recover/relabel, measure mass-degeneracy, assign Assigned/Candidate
    ▼
 report                                  report.py / pdf — _ledger.csv, _assignments.xlsx, _summary.md, _gka.html
 ```
@@ -143,13 +143,13 @@ commitments the previous ones justify. (Condensed; the authoritative table is in
 | **3**        | `passes` (`series_detect`) | **automatic series detection** ("rotating plot") opens contaminant families on decoy-controlled evidence |
 | **4**        | `residual`        | **residual explainer**: ~1.998-Da isotope doublets, deep 2-step series, ppm-disciplined |
 | **5**        | `passes`          | **known-neutral completion**: cross-channel partners + series gaps (no new formula space) |
-| **6**        | `ladders`         | **anchored ladder gap-fill**: walk +O/+CH₂/+CO₂/−H₂O diagonals out from Identified anchors (Candidate tier) |
+| **6**        | `ladders`         | **anchored ladder gap-fill**: walk +O/+CH₂/+CO₂/−H₂O diagonals out from Assigned anchors (Candidate tier) |
 | iso-env      | `isotopes`        | claim each committed peak's full predicted M+2/M+4 envelope; displaces weak M0s that are really a parent's satellite |
 | siloxane     | `siloxane`        | dedicated PDMS/siloxane ladder on spacing + ²⁹Si/³⁰Si envelope (CHON monsters out-score the true Si formula otherwise) |
 | cleanup      | `cleanup`         | isotope-confirmed recovery, bromide-cluster labelling, ringing/sidelobe artifact flagging; **plausibility demotes** (carbon-cluster / implausible-ionization / speculative-residual, post-tier) + reagent-halocarbon relabel (Br runs) |
-| reflist      | `reflists`        | **reference peaklists** (context-gated; contaminants always on): near-tie selection prior + mass-match **rescue** re-scored by the server — soft, provenance-tagged, never overrides an isotope-scored Identified |
+| reflist      | `reflists`        | **reference peaklists** (context-gated; contaminants always on): near-tie selection prior + mass-match **rescue** re-scored by the server — soft, provenance-tagged, never overrides an isotope-scored Assigned |
 | degeneracy   | `degeneracy`      | honest cross-family mass-degeneracy density; an uncorroborated mass-degenerate commit is capped at Candidate |
-| tiers        | `tiers`           | final **Identified / Candidate** verdict (margin, density, mass-error gate, degeneracy-aware) |
+| tiers        | `tiers`           | final **Assigned / Candidate** verdict (margin, density, mass-error gate, degeneracy-aware) |
 
 Also interleaved: **composite detection** (`cleanup`/`degeneracy`) flags an M0
 whose intensity exceeds its M+1-implied owner — **halide-CIMS only, a no-op in
@@ -270,7 +270,7 @@ predictor), `reagents.py` / `profiles.py` (reagent library + per-reagent config)
 (arbitration + pass director + calibration), `series_gka.py` / `series_detect.py`
 / `ladders.py` (series math, detection, ladder gap-fill), `residual.py` (pass 4),
 `siloxane.py` (PDMS ladder), `cleanup.py` (residual cleanup + plausibility
-demotes), `degeneracy.py` (mass-degeneracy), `tiers.py` (Identified/Candidate
+demotes), `degeneracy.py` (mass-degeneracy), `tiers.py` (Assigned/Candidate
 verdict), `plausibility.py` (QC), `reflists.py` (curated reference-peaklist
 catalog in `data/peaklists/` → near-tie selection prior + mass-match rescue-verify),
 `assign.py` (orchestrator + `PassConfig`).

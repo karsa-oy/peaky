@@ -53,9 +53,9 @@ def sha(p):
 # rows shape for write_cluster_workbook: [(cid, members, rbar, shape, peak_hr), ...]
 _ROWS = [("c1", ["m1", "m2"], 0.91, "rise", 3.5),
          ("c2", ["m3"], 0.80, "fall", 9.0)]
-_META = {"m1": {"neutral_formula": "C4H6O4", "tier": "Identified"},
+_META = {"m1": {"neutral_formula": "C4H6O4", "tier": "Assigned"},
          "m2": {"neutral_formula": "C5H8O4", "tier": "Candidate"},
-         "m3": {"neutral_formula": "C6H10O5", "tier": "Identified"}}
+         "m3": {"neutral_formula": "C6H10O5", "tier": "Assigned"}}
 
 
 def xlsx(path):
@@ -94,7 +94,7 @@ with tempfile.TemporaryDirectory() as d:
     # ---- 3. material CSV carries no clock -> byte-identical by construction ----
     import pandas as pd  # noqa: E402
     df = pd.DataFrame({"mz": [169.12, 183.05], "neutral_formula": ["C10H16O2", "C9H10N2O"],
-                       "tier": ["Identified", "Candidate"]})
+                       "tier": ["Assigned", "Candidate"]})
     p1, p2 = os.path.join(d, "led1.csv"), os.path.join(d, "led2.csv")
     df.to_csv(p1, index=False); df.to_csv(p2, index=False)
     check("merged_ledger-style CSV is byte-identical (no run time in material data)",

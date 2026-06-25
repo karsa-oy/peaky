@@ -11,7 +11,7 @@ Two uses, both decoupled from the expensive server scoring (one offline pass):
 
 This is NOT the Pass-0 known-species lock (`passes._known_species`, for
 contaminants the grid cannot reach). It is a post-hoc PRIOR: it never overrides an
-isotope-scored Identified, never fabricates a peak, and every match carries the
+isotope-scored Assigned, never fabricates a peak, and every match carries the
 source list id for provenance. Masses are recomputed for whatever reagent adduct
 the run uses (`chemistry.ion_mz`), so one list serves Br-/NO3-/I-/urea+ runs alike.
 
@@ -161,7 +161,7 @@ def rescue_unexplained_by_reflist(client, sample_id, ledger, profile, cfg, lists
     formulas, then SCORE those specific formulas with the server (match_compounds).
 
     Decision per matched peak (mass gate: server ion_score >= tau_low AND on-cal z):
-      * isotope-CONFIRMED  -> commit literature-anchored M0 (Good/Identified-grade);
+      * isotope-CONFIRMED  -> commit literature-anchored M0 (Good/Assigned-grade);
       * too DIM to confirm (the predicted 13C M+1 falls below height_cutoff, so no
         satellite COULD show) -> commit a low-quality Candidate + below_assignability
         so the lead is never lost back to 'unexplained' (the user's small-peak rule);
@@ -235,7 +235,7 @@ def rescue_unexplained_by_reflist(client, sample_id, ledger, profile, cfg, lists
                                 method=f"reflist-rescue:{lid}", confidence="Good (literature)",
                                 commentary=(f"Reference-list match ({srcs}); server score "
                                             f"{score:.2f}, isotope-confirmed, z={z:.1f}."))
-            ledger.at[i, "tier"] = "Identified"
+            ledger.at[i, "tier"] = "Assigned"
             rescued += 1
         elif not iso_observable:                       # too dim to confirm -> tentative
             L.commit_assignment(ledger, pid, neutral_formula=formula, adduct=adduct,

@@ -108,7 +108,7 @@ check("unknown error -> no hint", cli._friendly_server_error(ValueError("boom"))
 with tempfile.TemporaryDirectory() as d:
     led = pd.DataFrame({"mz": [200.1, 214.1, 99.9], "height": [1e5, 5e4, 30.0],
                         "role": ["M0", "M0", "unexplained"],
-                        "tier": ["Identified", "Candidate", ""]})
+                        "tier": ["Assigned", "Candidate", ""]})
     csv = os.path.join(d, "led.csv"); led.to_csv(csv, index=False)
     out = os.path.join(d, "w.html")
     rc = cli.main(["--env", os.path.join(d, "creds.env"), "gka", csv, "-o", out])

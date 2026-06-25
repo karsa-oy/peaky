@@ -5,7 +5,7 @@ as "the identification" overstates what the evidence supports. This module
 splits the committed assignments into two report tiers by MECHANICAL rules on
 ledger columns (reproducible, no judgment calls at report time):
 
-  Identified -- the formula is unique in the calibrated mass window, or it is
+  Assigned   -- the formula is unique in the calibrated mass window, or it is
                 corroborated by independent evidence (Mascope-confirmed
                 isotopologues / attached satellites, the same neutral assigned
                 in a second ionization channel, or series-anchor support), and
@@ -57,7 +57,7 @@ from . import ledger as L
 
 __version__ = "0.5.0"  # offset-tolerant calibration (large systematic ppm offsets)
 
-TIER_IDENTIFIED = "Identified"
+TIER_ASSIGNED = "Assigned"
 TIER_CANDIDATE = "Candidate"
 
 TIE_MARGIN = 0.05        # arbitrate()'s own near-tie window
@@ -82,7 +82,7 @@ CAL_SIGMA_FLOOR = 0.15   # ppm; a lucky-tight core must not reject everything
 # of the sample's real reagent ions (carbonate / superoxide / electron
 # attachment). They are NOT a halide-CIMS sample's primary reagent, so they give
 # the search a free +CO3/+O2 degree of freedom that O-rich mass fits exploit. A
-# commit on such a channel is only Identified-grade if (a) the channel is one of
+# commit on such a channel is only Assigned-grade if (a) the channel is one of
 # the sample's primary detected channels (e.g. a genuine CO3-CIMS run) or (b) the
 # assignment is independently corroborated.
 BACKGROUND_CHANNELS = ("[M+CO3]-", "[M+HBr+CO3]-", "[M+O2]-", "[M]-.")
@@ -100,7 +100,7 @@ BACKGROUND_CHANNELS = ("[M+CO3]-", "[M+HBr+CO3]-", "[M+O2]-", "[M]-.")
 # break the degeneracy, and without them the unique-in-my-narrow-box claim is an
 # artifact of the box, not of the spectrum. Corroborated commits are spared (the
 # corroboration IS the tie-breaker), so isotopologue-confirmed / cross-channel
-# backbones stay Identified. Demote when the honest density exceeds this (>=3
+# backbones stay Assigned. Demote when the honest density exceeds this (>=3
 # plausible ions) or the note carries the MASS-SATURATED flag (density > 8).
 DEGEN_DEMOTE_DENSITY = 2
 
@@ -329,7 +329,7 @@ def compute_tiers(ledger: pd.DataFrame) -> pd.DataFrame:
         degen_density, mass_degenerate = _degeneracy(r)
 
         method = str(r.get("method") or "")
-        tier, reason = TIER_IDENTIFIED, ""
+        tier, reason = TIER_ASSIGNED, ""
         if method.startswith("known:"):
             reason = ("known species (pass-0 locked list, mass + own-twin "
                       "self-consistency gated)")

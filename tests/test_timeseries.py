@@ -41,22 +41,22 @@ led = pd.DataFrame([
          neutral_formula=None, ion_formula="Br3-", adduct=None, tier=None, tier_reason=""),
     dict(peak_id="db", mz=409.0011, height=5000, role="M0",
          neutral_formula="C15H22O3", ion_formula="C15H23Br2O3-", adduct="[M+HBr+Br]-",
-         tier="Identified", tier_reason="series"),
+         tier="Assigned", tier_reason="series"),
     dict(peak_id="ct", mz=463.0000, height=8000, role="M0",
          neutral_formula="C12H12F12", ion_formula="C12H12BrF12-", adduct="[M+Br]-",
-         tier="Identified", tier_reason="unique"),
+         tier="Assigned", tier_reason="unique"),
     dict(peak_id="m1", mz=279.0236, height=5000, role="M0",
          neutral_formula="C10H16O4", ion_formula="C10H16BrO4-", adduct="[M+Br]-",
-         tier="Identified", tier_reason="iso"),
+         tier="Assigned", tier_reason="iso"),
     dict(peak_id="m2", mz=311.0134, height=4000, role="M0",
          neutral_formula="C10H16O6", ion_formula="C10H16BrO6-", adduct="[M+Br]-",
-         tier="Identified", tier_reason="iso"),
+         tier="Assigned", tier_reason="iso"),
     dict(peak_id="am", mz=265.0080, height=3000, role="M0",
          neutral_formula="C9H14O4", ion_formula="C9H14BrO4-", adduct="[M+Br]-",
          tier="Candidate", tier_reason="ladder"),
     dict(peak_id="fo", mz=124.9243, height=10000, role="M0",
          neutral_formula="CH2O2", ion_formula="CH2BrO2-", adduct="[M+Br]-",
-         tier="Identified", tier_reason="iso"),
+         tier="Assigned", tier_reason="iso"),
 ])
 
 summ = TS.apply_timeseries(led, peaks, log=lambda *a: None)
@@ -68,10 +68,10 @@ def tier(pid): return led.loc[led.peak_id == pid, "tier"].iloc[0]
 
 check("matrix built + annotated all M0", summ["annotated"] == 6, summ)
 check("di-bromide flat -> background disposition", disp("db").startswith("background:di-bromide"), disp("db"))
-check("di-bromide flat -> DEMOTED Identified->Candidate", tier("db") == "Candidate", tier("db"))
+check("di-bromide flat -> DEMOTED Assigned->Candidate", tier("db") == "Candidate", tier("db"))
 check("demote count >=1", summ["demoted"] >= 1, summ)
 check("fluorinated flat -> inlet contaminant", "inlet/instrument" in disp("ct"), disp("ct"))
-check("contaminant NOT demoted (not di-bromide/CO3)", tier("ct") == "Identified", tier("ct"))
+check("contaminant NOT demoted (not di-bromide/CO3)", tier("ct") == "Assigned", tier("ct"))
 check("flat peaks have low cv_norm", cv("db") < 0.25 and cv("ct") < 0.25, (cv("db"), cv("ct")))
 check("variable ambient peak high cv_norm", cv("am") > 0.4, cv("am"))
 check("co-varying peak -> ambient disposition", disp("am").startswith("ambient"), disp("am"))
@@ -82,7 +82,7 @@ led2 = pd.DataFrame([
     dict(peak_id="r1", mz=236.7555, height=1e6, role="reagent", neutral_formula=None,
          ion_formula="Br3-", adduct=None, tier=None, tier_reason=""),
     dict(peak_id="co3", mz=361.0653, height=4000, role="M0", neutral_formula="C12H15NO8",
-         ion_formula="C13H15NO11-", adduct="[M+CO3]-", tier="Identified", tier_reason="x"),
+         ion_formula="C13H15NO11-", adduct="[M+CO3]-", tier="Assigned", tier_reason="x"),
 ])
 peaks2 = pd.DataFrame([dict(sample_item_id=f"s{s}", mz=mz, height=float(h[s]))
                        for mz, h in {236.7555: 1e6*flat, 361.0653: 4000*flat}.items() for s in range(N)])
@@ -130,12 +130,12 @@ for _i, _t in enumerate(_times):
               {"datetime_utc": _t, "peak_id": f"b{_i}", "mz": 300.0, "height": 50.0, "area": 1.0}]
 pd.DataFrame(_rows).to_parquet(_os.path.join(_rd, "X_ts.parquet"))
 pd.DataFrame([{"mz": 200.0, "neutral_formula": "C10H8O4", "adduct": "[M-H]-",
-               "tier": "Identified", "ion_score": 0.9}]).to_csv(
+               "tier": "Assigned", "ion_score": 0.9}]).to_csv(
     _os.path.join(_rd, "merged_ledger.csv"), index=False)
 
 _tr = TS.trace(_rd, "C10H8O4")
 check("trace by formula resolves the assignment + sums the m/z window per time",
-      _tr.attrs["assignment"].startswith("C10H8O4 [M-H]- (Identified)")
+      _tr.attrs["assignment"].startswith("C10H8O4 [M-H]- (Assigned)")
       and len(_tr) == 3 and list(_tr["height"]) == [100.0, 200.0, 300.0], _tr.attrs)
 _tu = TS.trace(_rd, 300.0)
 check("trace by m/z of an unexplained peak labels it 'unassigned'",

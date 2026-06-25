@@ -95,7 +95,7 @@ def analyte_table(ledger: pd.DataFrame, *, exclude_contaminant: bool = True
     # ONE row per NEUTRAL: a compound seen in two channels ([M+Br]- and [M-H]-,
     # or [M+H]+ and [M+urea+H]+) is a single analyte. Keep the best tier.
     if "tier" in m0.columns:
-        m0["_tr"] = m0["tier"].map({"Identified": 0, "Candidate": 1}).fillna(2)
+        m0["_tr"] = m0["tier"].map({"Assigned": 0, "Candidate": 1}).fillna(2)
         m0 = m0.sort_values("_tr").drop_duplicates("neutral_formula", keep="first").drop(columns="_tr")
     else:
         m0 = m0.drop_duplicates("neutral_formula", keep="first")

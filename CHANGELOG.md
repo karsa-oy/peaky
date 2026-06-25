@@ -4,12 +4,26 @@ All notable changes to Peaky are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — report refactor
+
+### Changed (BREAKING — output schema)
+- **Report tier `Identified` renamed to `Assigned`.** The top assignment tier is now
+  labelled **Assigned** everywhere it surfaces: the `tier` column values in
+  `merged_ledger.csv` (and every per-file ledger), the workbook **Assigned** sheet
+  (was "Identified"), the PDF report tier counts/labels, the GKA-widget legend, and
+  the Summary "Tiers" rows. **This is a schema break**: downstream consumers that
+  filter on `tier == "Identified"` must switch to `tier == "Assigned"`. The
+  `Candidate` and below-assignability tiers are unchanged.
+- The Summary M0 role label is now **"M0 (has formula)"** (was "assigned (M0)") to
+  avoid colliding with the renamed tier; the role word "assigned" is otherwise
+  unchanged.
+
 ## [Unreleased] — 0.5.0 (reference peaklists + chemical-plausibility hardening)
 
 Adds a context-gated literature/contaminant peaklist layer and closes a set of
 chemical-plausibility gaps surfaced by manual review and a cross-pipeline
 (Orbitool) comparison — the pipeline now assigns by mass **and** checks that the
-isotope evidence + ionization chemistry actually support each Identified formula.
+isotope evidence + ionization chemistry actually support each Assigned formula.
 
 ### Added
 - **Reference peaklists** (`peaky/reflists.py` + `peaky/data/peaklists/`): a curated,
@@ -17,7 +31,7 @@ isotope evidence + ionization chemistry actually support each Identified formula
   molecules per chemical system — seeded with α-pinene OH-oxidation HOM (Kang, FZJ
   E&U 557; 830 neutrals) and the Keller 2008 MS contaminant list (59 neutrals).
   Used three ways, all soft + provenance-tagged (never overrides an isotope-scored
-  Identified): (1) **selection prior** — a candidate on an active list wins a near-tie
+  Assigned): (1) **selection prior** — a candidate on an active list wins a near-tie
   in arbitration; (2) **rescue-verify** — unexplained peaks matched by mass are scored
   with the server and committed if confirmed (or kept as a tentative low-quality
   Candidate when too dim to confirm); (3) **report** corroboration/rescue section

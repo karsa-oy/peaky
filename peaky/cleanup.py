@@ -501,7 +501,7 @@ def demote_unconfirmed_fluorine(ledger: pd.DataFrame, *, f_min: int = F_DEMOTE_M
     monoisotopic, so a high-F formula has NO isotope twin to corroborate it; when it
     is also not a known PFCA and carries no Cl/Br/S anchor (whose ³⁷Cl/⁸¹Br/³⁴S
     pattern WOULD confirm a heavy atom), a high-F fit is almost always a mass
-    coincidence ('F-monster', e.g. C11H6F16). Demote Identified->Candidate and flag
+    coincidence ('F-monster', e.g. C11H6F16). Demote Assigned->Candidate and flag
     below_assignability. Real PFCAs and isotope-anchored F species are kept."""
     n = 0
     has_ba = "below_assignability" in ledger.columns
@@ -527,7 +527,7 @@ def demote_unconfirmed_fluorine(ledger: pd.DataFrame, *, f_min: int = F_DEMOTE_M
                 continue
         elif cnt.get("Cl", 0) or cnt.get("Br", 0) or cnt.get("S", 0):
             continue
-        if str(ledger.at[i, "tier"]) == "Identified":
+        if str(ledger.at[i, "tier"]) == "Assigned":
             ledger.at[i, "tier"] = "Candidate"
         if has_ba:
             ledger.at[i, "below_assignability"] = True
@@ -550,7 +550,7 @@ def demote_implausible_carbon(ledger: pd.DataFrame, *, hc_max: float = HC_CARBON
     below `hc_max` with NO fluorine (fluorine-rich low H/C is the F-monster case,
     handled by demote_unconfirmed_fluorine). A bare carbon cluster such as C27H8 /
     C36H6O is a high-mass mass-coincidence, not a real organic-aerosol molecule
-    (real SOA sits at H/C ~1-2). Demote Identified->Candidate and flag
+    (real SOA sits at H/C ~1-2). Demote Assigned->Candidate and flag
     below_assignability. F-free, C>=2 only. Same arithmetic as the plausibility
     'carbon-rich' flag, applied to the tier so the demotion is consistent."""
     n = 0
@@ -565,7 +565,7 @@ def demote_implausible_carbon(ledger: pd.DataFrame, *, hc_max: float = HC_CARBON
         hc = cnt.get("H", 0) / nc
         if hc >= hc_max:
             continue
-        if str(ledger.at[i, "tier"]) == "Identified":
+        if str(ledger.at[i, "tier"]) == "Assigned":
             ledger.at[i, "tier"] = "Candidate"
         if has_ba:
             ledger.at[i, "below_assignability"] = True
@@ -591,7 +591,7 @@ def demote_implausible_ionization(ledger: pd.DataFrame, *, log=print) -> dict:
     [M-H]- or as a halide/carbonate/nitrate/sulfate/carboxylate cluster — regardless
     of how well the exact mass + isotope pattern fit (the pattern of a C/H ion just
     confirms the C count). Such an assignment is a mass coincidence (e.g. C7H10/C7H12
-    [M-H]-, C2H2 [M+CO3]-): Identified->Candidate + below_assignability. Electron
+    [M-H]-, C2H2 [M+CO3]-): Assigned->Candidate + below_assignability. Electron
     attachment ([M]-./[M+O2]-) is exempt (the one route an electron-poor hydrocarbon
     has). Negative-mode anion channels only; positive adducts are left alone."""
     n = 0
@@ -608,7 +608,7 @@ def demote_implausible_ionization(ledger: pd.DataFrame, *, log=print) -> dict:
         ad = str(ledger.at[i, "adduct"])
         if not ad.endswith("-") or ad in _EA_ADDUCTS:
             continue                                 # only FG-requiring anion channels
-        if str(ledger.at[i, "tier"]) == "Identified":
+        if str(ledger.at[i, "tier"]) == "Assigned":
             ledger.at[i, "tier"] = "Candidate"
         if has_ba:
             ledger.at[i, "below_assignability"] = True
@@ -623,10 +623,10 @@ def demote_implausible_ionization(ledger: pd.DataFrame, *, log=print) -> dict:
 
 
 def demote_speculative_residual(ledger: pd.DataFrame, cfg=None, *, log=print) -> dict:
-    """Demote speculative residual-tail commits that reached Identified on weak
+    """Demote speculative residual-tail commits that reached Assigned on weak
     evidence (plausibility-audit rule-gaps). Targets ONLY method startswith
     'residual' (the pass-4 residual explainer / series gap-fill) — so pass-0/1/2
-    grid analytes and known-species are untouched. Demote Identified->Candidate +
+    grid analytes and known-species are untouched. Demote Assigned->Candidate +
     below_assignability when any of:
       * off-calibration: |z| > cal_z_accept (committed beyond the calibrated window);
       * uncorroborated multi-N: n_iso==0 AND N>=3 (a Br-doublet confirms the adduct
@@ -648,7 +648,7 @@ def demote_speculative_residual(ledger: pd.DataFrame, cfg=None, *, log=print) ->
         prim = ledger[is_m0 & ~ledger["adduct"].astype(str).isin(minor)]
         primary = set(prim["neutral_formula"].astype(str))
     n = 0
-    for i in ledger.index[is_m0 & (ledger["tier"] == "Identified")]:
+    for i in ledger.index[is_m0 & (ledger["tier"] == "Assigned")]:
         if not str(ledger.at[i, "method"] or "").startswith("residual"):
             continue
         cnt = C.parse_formula(str(ledger.at[i, "neutral_formula"] or ""))
@@ -672,11 +672,11 @@ def demote_speculative_residual(ledger: pd.DataFrame, cfg=None, *, log=print) ->
         if has_ba:
             ledger.at[i, "below_assignability"] = True
         if "commentary" in ledger.columns:
-            note = f"speculative residual fit -- {reason}; not Identified-grade"
+            note = f"speculative residual fit -- {reason}; not Assigned-grade"
             prev = comm
             ledger.at[i, "commentary"] = (prev + "; " + note) if prev and prev != "nan" else note
         n += 1
-    log(f"[cleanup] demoted {n} speculative-residual M0 (weak Identified residual fits)")
+    log(f"[cleanup] demoted {n} speculative-residual M0 (weak Assigned residual fits)")
     return {"residual_demoted": n}
 
 

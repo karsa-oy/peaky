@@ -33,7 +33,7 @@ from . import sampling as SS
 __version__ = "0.1.0"
 
 DEFAULT_TOL_PPM = 6.0
-TIER_RANK = {"Identified": 2, "Candidate": 1}
+TIER_RANK = {"Assigned": 2, "Candidate": 1}
 _M0_COLS = ["mz", "neutral_formula", "adduct", "tier", "ion_score"]
 
 
@@ -58,7 +58,7 @@ def align(per_file: dict, *, tol_ppm: float = DEFAULT_TOL_PPM,
     a peak). Returns (merged, jitter):
 
       merged  one row per m/z cluster: consensus mz, best assignment
-              (Identified>Candidate>ion_score), n_files, srcs, formula_agree,
+              (Assigned>Candidate>ion_score), n_files, srcs, formula_agree,
               mz_jitter_ppm_raw, mz_jitter_ppm_caldj.
       jitter  long form, one row per (cluster, file): cluster, src, mz,
               neutral_formula, adduct, tier, ion_score.

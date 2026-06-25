@@ -12,7 +12,7 @@ context-gated prior** to:
 
 This is **not** the Pass-0 known-species lock (`passes._known_species`, for
 contaminants the grid cannot reach). It is a post-hoc prior: it never overrides
-an isotope-scored **Identified**, never fabricates, and every match carries the
+an isotope-scored **Assigned**, never fabricates, and every match carries the
 source list id for provenance.
 
 ## Adding a list

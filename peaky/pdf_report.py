@@ -145,7 +145,7 @@ def load_context(out_dir: str, *, tag: str, label: str, ts_path: str | None = No
         if "ppm_error" in a.columns:
             m0 = a[a["role"] == "M0"]
             pbc = {}
-            for t in ("Identified", "Candidate"):
+            for t in ("Assigned", "Candidate"):
                 v = m0[m0.get("tier") == t]["ppm_error"].dropna().tolist()
                 if v:
                     pbc[t] = v
@@ -439,14 +439,14 @@ def cover(ctx, pdf):
     if ctx.get("run_id"):
         fig.text(0.08, 0.834, f"Report ID:  {ctx['run_id']}", fontsize=8.5, color=GREY)
 
-    tiers = ctx["tiers"]; idn = tiers.get("Identified", 0); cn = tiers.get("Candidate", 0)
+    tiers = ctx["tiers"]; idn = tiers.get("Assigned", 0); cn = tiers.get("Candidate", 0)
     ts = ctx.get("ts"); sig = (_pct(ts["expl_signal"], ts["tot_signal"]) if ts else None)
     ex_c = (_pct(ts["expl_count"], ts["nbins"]) if ts else None)
     head = [
         ("h", "Summary"),
         ("gap", 0.3),
         ("b", f"Unique analytes assigned (M0):   {ctx['n_m0']}   "
-              f"({idn} Identified / {cn} Candidate)"),
+              f"({idn} Assigned / {cn} Candidate)"),
         ("b", f"Distinct neutral compounds:       {ctx['n_neutrals']}"),
     ]
     rc = ctx.get("role_count", {})
@@ -500,7 +500,7 @@ def cover(ctx, pdf):
             ("b", f"Mass jitter (median / p95):   {j.get('mz_jitter_raw_median','?')} / "
                   f"{j.get('mz_jitter_raw_p95','?')} ppm  (≈ genuine peak noise)"),
             ("b", f"Formula disagreements:        {dis}  (same m/z, different formula)"),
-            ("b", f"Tier-unstable assignments:    {tus}  (flip Identified <-> Candidate)"),
+            ("b", f"Tier-unstable assignments:    {tus}  (flip Assigned <-> Candidate)"),
             ("dim", "On a disagreement/flip the merge keeps the highest tier, then the "
                     "highest match score."),
         ]
@@ -578,9 +578,9 @@ def coverage(ctx, pdf):
     fig = plt.figure(figsize=A4)
     fig.text(0.08, 0.965, "Assignment quality", fontsize=15, weight="bold", color=INK)
 
-    # (a) mean match score, Identified vs Candidate
+    # (a) mean match score, Assigned vs Candidate
     sbt = ctx.get("score_by_tier", {})
-    tiers = [t for t in ("Identified", "Candidate") if t in sbt]
+    tiers = [t for t in ("Assigned", "Candidate") if t in sbt]
     ax = fig.add_axes([0.11, 0.74, 0.33, 0.17])
     ax.bar(tiers, [sbt[t] for t in tiers], color=["#1D9E75", "#E0A93B"][:len(tiers)], width=0.55)
     for i, t in enumerate(tiers):
@@ -588,10 +588,10 @@ def coverage(ctx, pdf):
     ax.set_ylim(0, 1.05); ax.set_ylabel("mean match score", fontsize=9)
     ax.set_title("Match score by confidence", loc="left", fontsize=11)
 
-    # (b) mass error (ppm) by category: Identified / Candidate / isotopologues
+    # (b) mass error (ppm) by category: Assigned / Candidate / isotopologues
     pbc = ctx.get("ppm_by_cat", {})
     ax2 = fig.add_axes([0.58, 0.74, 0.34, 0.17])
-    cats = [c for c in ("Identified", "Candidate", "isotopologue") if c in pbc]
+    cats = [c for c in ("Assigned", "Candidate", "isotopologue") if c in pbc]
     if cats:
         bp = ax2.boxplot([pbc[c] for c in cats], vert=True, showfliers=False, widths=0.5,
                          patch_artist=True, medianprops=dict(color="#111"))
@@ -640,9 +640,9 @@ def coverage(ctx, pdf):
     ax4.set_xlim(0, xmax * 1.9); ax4.set_xlabel("M0 count (a compound can appear in several channels)", fontsize=7.5)
     ax4.set_title("Reagent / ion channels assigned on", loc="left", fontsize=11)
 
-    idn = ctx["tiers"].get("Identified", 0); cn = ctx["tiers"].get("Candidate", 0)
+    idn = ctx["tiers"].get("Assigned", 0); cn = ctx["tiers"].get("Candidate", 0)
     lines = [("h", "Reading this page"), ("gap", 0.3),
-             ("b", f"• {idn} Identified vs {cn} Candidate. Match score = the server "
+             ("b", f"• {idn} Assigned vs {cn} Candidate. Match score = the server "
                    "isotope-scored compound match (0-1)."),
              ("b", "• Mass accuracy: ppm error of the matched peaks (boxes = IQR, line = median; "
                    "near 0 = well calibrated)."),
@@ -722,7 +722,7 @@ def scrutiny(ctx, pdf):
     import matplotlib.pyplot as plt
     intro = [("dim", f"{len(fl)} Candidate-tier neutral(s) whose formula looks more like a mass"),
              ("dim", "coincidence than a real molecule (many heteroatoms, very low H/C, or a"),
-             ("dim", "wrong-mode halogen). Flagged for review, NOT removed; Identified (isotope-"),
+             ("dim", "wrong-mode halogen). Flagged for review, NOT removed; Assigned (isotope-"),
              ("dim", "scored) assignments are never flagged."),
              ("gap", 0.8)]
     intro += [("dim", "score=match · ppm=mass error · iso=confirmed isotopologues (0=none) · "
@@ -983,7 +983,7 @@ def methods(ctx, pdf):
         ("h", "Caveats"), ("gap", 0.3),
         ("b", "• Report coverage both by count and by signal — they differ a lot."),
         ("b", "• 'Unexplained' is dominated by small near-noise peaks (low signal)."),
-        ("b", "• Confidence (Identified/Candidate) applies to M0 compounds only."),
+        ("b", "• Confidence (Assigned/Candidate) applies to M0 compounds only."),
         ("b", "• Mass-degenerate peaks can flip formula across files (see jitter)."),
     ]
     rf = ctx.get("role_signal_frac", {})

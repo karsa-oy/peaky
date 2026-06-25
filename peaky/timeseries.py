@@ -187,7 +187,7 @@ def apply_timeseries(ledger: pd.DataFrame, peaks: pd.DataFrame, *,
                      tol_ppm: float = DEFAULT_TOL_PPM, demote=True, log=print) -> dict:
     """Annotate `ledger` (in place) with ts_cv_norm / ts_r_mono / ts_r_formic /
     ts_disposition from the time-series `peaks` table, and (if demote) cap a flat
-    di-bromide / CO3-channel Identified commit at Candidate (TS-confirmed
+    di-bromide / CO3-channel Assigned commit at Candidate (TS-confirmed
     background). Returns a summary dict. Reagent normaliser + anchors are taken
     from the ledger when not supplied.
     """
@@ -249,8 +249,8 @@ def apply_timeseries(ledger: pd.DataFrame, peaks: pd.DataFrame, *,
         elif disp.startswith("background"):
             summary["background"] += 1
             # conservative auto-demote: a flat di-bromide / CO3 background commit
-            # must not stay Identified once the time series shows it is background
-            if demote and str(ledger.at[i, "tier"]) == "Identified" and (
+            # must not stay Assigned once the time series shows it is background
+            if demote and str(ledger.at[i, "tier"]) == "Assigned" and (
                     "di-bromide" in disp or "CO3-channel" in disp):
                 ledger.at[i, "tier"] = "Candidate"
                 ledger.at[i, "tier_reason"] = (str(ledger.at[i, "tier_reason"] or "")

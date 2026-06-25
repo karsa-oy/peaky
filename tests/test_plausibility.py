@@ -34,24 +34,24 @@ check("modest N3 low-O species not flagged (O/C<1)",
       PL.implausible("C12H21N3O3", tier="Candidate") is None)
 check("HOM dimer not flagged", PL.implausible("C20H30O14", tier="Candidate") is None)
 
-# Identified tier is never second-guessed
-check("Identified N-monster NOT flagged (corroborated by isotope score)",
-      PL.implausible("C9H12N4O12", tier="Identified") is None)
+# Assigned tier is never second-guessed
+check("Assigned N-monster NOT flagged (corroborated by isotope score)",
+      PL.implausible("C9H12N4O12", tier="Assigned") is None)
 
 # --- scan() de-duplicates and respects best-tier-per-neutral ---
 merged = pd.DataFrame([
     dict(neutral_formula="C9H12N4O12", adduct="[M+Na]+", tier="Candidate", ion_score=0.94),
-    dict(neutral_formula="C10H16O2", adduct="[M+H]+", tier="Identified", ion_score=0.9),
-    # same monster appears Identified in one channel -> must NOT be flagged
+    dict(neutral_formula="C10H16O2", adduct="[M+H]+", tier="Assigned", ion_score=0.9),
+    # same monster appears Assigned in one channel -> must NOT be flagged
     dict(neutral_formula="C8H13N3O10", adduct="[M+H]+", tier="Candidate", ion_score=0.6),
-    dict(neutral_formula="C8H13N3O10", adduct="[M+NH4]+", tier="Identified", ion_score=0.8),
+    dict(neutral_formula="C8H13N3O10", adduct="[M+NH4]+", tier="Assigned", ion_score=0.8),
     dict(neutral_formula="C10H18Br2O12", adduct="[M+H]+", tier="Candidate", ion_score=0.65),
 ])
 flagged = PL.scan(merged, polarity="+")
 names = {d["neutral_formula"] for d in flagged}
 check("scan flags the Candidate-only N-monster", "C9H12N4O12" in names, names)
 check("scan flags the positive-mode dibromo", "C10H18Br2O12" in names, names)
-check("scan excludes a neutral that is Identified in any channel",
+check("scan excludes a neutral that is Assigned in any channel",
       "C8H13N3O10" not in names, names)
 check("scan excludes ordinary CHO", "C10H16O2" not in names, names)
 check("scan carries reason + score", all("reason" in d and "ion_score" in d for d in flagged))

@@ -28,9 +28,9 @@ burst = np.array([1, 1, 1, 5, 9, 7, 4, 2, 1, 1, 1, 1, 1, 1], float)
 flat = np.ones(N)
 # (neutral_formula, adduct, mz, ion_score, tier, shape, base_cps)
 channels = [
-    ("C10H16O2", "[M+Br]-", 286.9, 0.95, "Identified", burst, 4000),
-    ("C10H16O3", "[M+Br]-", 302.9, 0.92, "Identified", burst, 3000),
-    ("C9H14O2",  "[M+Br]-", 272.9, 0.90, "Identified", burst, 2500),
+    ("C10H16O2", "[M+Br]-", 286.9, 0.95, "Assigned", burst, 4000),
+    ("C10H16O3", "[M+Br]-", 302.9, 0.92, "Assigned", burst, 3000),
+    ("C9H14O2",  "[M+Br]-", 272.9, 0.90, "Assigned", burst, 2500),
     ("C6H14O4",  "[M+Br]-", 230.0, 0.88, "Candidate",  flat,  1500),
     ("C8H18O3",  "[M+Br]-", 244.0, 0.85, "Candidate",  flat,  1200),
     ("C8H26O5Si4", "[M+Br]-", 472.9, 0.80, "Candidate", flat,  800),   # Si contaminant

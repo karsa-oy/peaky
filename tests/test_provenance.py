@@ -18,7 +18,7 @@ def check(name, cond, detail=""):
 
 _rd = tempfile.mkdtemp()
 with open(os.path.join(_rd, "merged_ledger.csv"), "w") as fh:
-    fh.write("mz,neutral_formula,tier\n100.0,CH4,Identified\n")
+    fh.write("mz,neutral_formula,tier\n100.0,CH4,Assigned\n")
 _tsp = os.path.join(_rd, "X_ts.parquet")
 with open(_tsp, "wb") as fh:                       # any bytes -> hashable input
     fh.write(b"fake-parquet-bytes")

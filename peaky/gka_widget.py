@@ -45,7 +45,7 @@ def _category(row) -> int:
     if role == "M0":
         tier = row.get("tier")
         if tier is not None and not pd.isna(tier) and str(tier).strip():
-            return 0 if str(tier) == "Identified" else 1
+            return 0 if str(tier) == "Assigned" else 1
         # pre-tier ledgers: fall back to the confidence split
         conf = str(row.get("confidence", ""))
         return 0 if conf.startswith("High") or conf.startswith("Good") else 1
@@ -104,7 +104,7 @@ _TEMPLATE = r"""<!DOCTYPE html><html><head><meta charset="utf-8">
  <label>ppm</label><input type="number" id="ppm" value="{ppm}" step="0.5" style="width:56px">
 </div>
 <div class="leg">
- <label><input type="checkbox" id="c0" checked> <span class="sw" style="background:#888780"></span> identified ({n0})</label>
+ <label><input type="checkbox" id="c0" checked> <span class="sw" style="background:#888780"></span> assigned ({n0})</label>
  <label><input type="checkbox" id="c1" checked> <span class="sw" style="background:#e09b18"></span> candidate ({n1})</label>
  <label><input type="checkbox" id="c2" checked> <span class="sw" style="background:#d8453f"></span> unassigned ({n2})</label>
  <label style="margin-left:auto"><input type="checkbox" id="bands" checked> highlight rows</label>
@@ -154,7 +154,7 @@ pb.onclick=()=>{{if(t){{clearInterval(t);t=null;pb.textContent='▶ rotate';retu
 cv.onmousemove=e=>{{const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;let b=null,bd=100;
  for(const p of pts){{const dd=(p[0]-mx)**2+(p[1]-my)**2;if(dd<bd){{bd=dd;b=p;}}}}
  if(b&&bd<=81){{tip.style.display='block';tip.style.left=Math.min(b[0]+10,wrap.clientWidth-160)+'px';tip.style.top=(b[1]-40)+'px';
-  tip.innerHTML='m/z '+b[2].toFixed(4)+'<br>'+['identified','candidate','unassigned'][b[4]]+'<br>GKD '+b[5].toFixed(4);}}else tip.style.display='none';}};
+  tip.innerHTML='m/z '+b[2].toFixed(4)+'<br>'+['assigned','candidate','unassigned'][b[4]]+'<br>GKD '+b[5].toFixed(4);}}else tip.style.display='none';}};
 cv.onmouseleave=()=>tip.style.display='none';
 new ResizeObserver(draw).observe(wrap);draw();
 </script></body></html>"""

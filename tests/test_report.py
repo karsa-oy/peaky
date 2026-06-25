@@ -41,13 +41,13 @@ L.commit_assignment(led, "C", neutral_formula="C7H12O4", adduct="[M-H]-",
 L.mark_reagent(led, "E", "reagent ion: [Br]-")
 
 sheets = R.build_sheets(led, "ambient-air", sample_id="TEST")
-check("has all sheets", {"Summary", "Read me", "Identified", "Candidates",
+check("has all sheets", {"Summary", "Read me", "Assigned", "Candidates",
                          "Unassigned", "By class", "Unique formulas",
                          "Isotopologues", "Peak ownership", "Target list",
                          "Reagent ions"} <= set(sheets), set(sheets))
 check("summary is the first sheet", list(sheets)[0] == "Summary", list(sheets))
-ident, cand = sheets["Identified"], sheets["Candidates"]
-check("A and C are both Identified (iso-confirmed / unique)",
+ident, cand = sheets["Assigned"], sheets["Candidates"]
+check("A and C are both Assigned (iso-confirmed / unique)",
       len(ident) == 2 and not len(cand[cand["rank"] == 1]),
       (ident.get("neutral_formula"), cand.get("formula")))
 check("identified carries commentary",

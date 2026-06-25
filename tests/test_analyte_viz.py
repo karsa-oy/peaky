@@ -24,9 +24,9 @@ def check(name, cond, detail=""):
 
 # --- analyte_table: M0 organics, excludes Si contamination, VK coords ---
 led = pd.DataFrame([
-    dict(role="M0", neutral_formula="C9H19NO", adduct="[M+H]+", tier="Identified"),
+    dict(role="M0", neutral_formula="C9H19NO", adduct="[M+H]+", tier="Assigned"),
     dict(role="M0", neutral_formula="C9H19NO", adduct="[M+Br]-", tier="Candidate"),  # SAME neutral, 2nd channel
-    dict(role="M0", neutral_formula="C7H16O3", adduct="[M+H]+", tier="Identified"),  # CHO analyte
+    dict(role="M0", neutral_formula="C7H16O3", adduct="[M+H]+", tier="Assigned"),  # CHO analyte
     dict(role="M0", neutral_formula="C8H26O5Si4", adduct="[M+H]+", tier="Candidate"),  # siloxane CONTAM
     dict(role="reagent", neutral_formula="", adduct="", tier=""),             # not an analyte
     dict(role="unexplained", neutral_formula=np.nan, adduct=np.nan, tier=""),
@@ -34,8 +34,8 @@ led = pd.DataFrame([
 an = V.analyte_table(led)
 check("analyte_table = one row per neutral (dedup cross-channel), drops Si + non-M0",
       len(an) == 2, an["neutral_formula"].tolist())
-check("dedup keeps the Identified tier of a cross-channel neutral",
-      an[an.neutral_formula == "C9H19NO"].iloc[0].tier == "Identified")
+check("dedup keeps the Assigned tier of a cross-channel neutral",
+      an[an.neutral_formula == "C9H19NO"].iloc[0].tier == "Assigned")
 check("no Si-bearing analyte survives",
       not an["neutral_formula"].str.contains("Si").any())
 r = an[an.neutral_formula == "C7H16O3"].iloc[0]

@@ -5,7 +5,7 @@
   * write_markdown(...)   -> narrative summary with commentary + alternatives
 
 Tiered presentation (ROADMAP 2): committed assignments are split into
-  Identified  -- unique-in-window or independently corroborated
+  Assigned    -- unique-in-window or independently corroborated
   Candidates  -- honest ambiguity, shown one row PER CANDIDATE FORMULA
 and the unexplained residual keeps its evidence characterization
 (iso-partner / has-constraints / isolated) as the below-assignability tier.
@@ -145,7 +145,7 @@ def build_sheets(ledger: pd.DataFrame, context: str = "ambient-air",
     if len(m0):
         m0 = _enrich_m0(m0)
 
-    ident = m0[m0["tier"] == T.TIER_IDENTIFIED]
+    ident = m0[m0["tier"] == T.TIER_ASSIGNED]
     cand = m0[m0["tier"] == T.TIER_CANDIDATE]
 
     identified = (ident[_ASSIGN_COL_ORDER]
@@ -168,7 +168,7 @@ def build_sheets(ledger: pd.DataFrame, context: str = "ambient-air",
 
     # by class, with the tier split visible
     if len(m0):
-        by_class = (m0.assign(is_ident=(m0["tier"] == T.TIER_IDENTIFIED))
+        by_class = (m0.assign(is_ident=(m0["tier"] == T.TIER_ASSIGNED))
                     .groupby(["compound_class", "heteroatoms"])
                     .agg(n_peaks=("peak_id", "count"),
                          n_identified=("is_ident", "sum"),
@@ -183,11 +183,11 @@ def build_sheets(ledger: pd.DataFrame, context: str = "ambient-air",
 
     # unique formulas across channels
     if len(m0):
-        uniq = (m0.assign(is_ident=(m0["tier"] == T.TIER_IDENTIFIED))
+        uniq = (m0.assign(is_ident=(m0["tier"] == T.TIER_ASSIGNED))
                 .groupby("neutral_formula")
                 .agg(n_peaks=("peak_id", "count"),
                      adducts=("adduct", lambda s: "; ".join(sorted(set(map(str, s))))),
-                     best_tier=("is_ident", lambda s: T.TIER_IDENTIFIED if s.any()
+                     best_tier=("is_ident", lambda s: T.TIER_ASSIGNED if s.any()
                                 else T.TIER_CANDIDATE),
                      best_score=("ion_score", "max"),
                      signal=("height", "sum"))
@@ -216,11 +216,11 @@ def build_sheets(ledger: pd.DataFrame, context: str = "ambient-air",
                      "iso_label", "pass_no", "method", "commentary"]
                     ].sort_values("height", ascending=False)
 
-    # target list (formula + adduct + best ppm), Identified first
-    # ('Identified' > 'Candidate' lexically, hence the descending tier sort)
+    # target list (formula + adduct + best ppm), Assigned first
+    # ('Assigned' < 'Candidate' lexically, hence the ascending tier sort)
     target = (m0[["neutral_formula", "adduct", "ion_formula", "mz",
                   "ppm_error", "ion_score", "confidence", "tier"]]
-              .sort_values(["tier", "mz"], ascending=[False, True])) if len(m0) else pd.DataFrame()
+              .sort_values(["tier", "mz"], ascending=[True, True])) if len(m0) else pd.DataFrame()
 
     reag = led[led["role"] == L.ROLE_REAGENT][[
         "mz", "height", "commentary", "peak_id"]].copy().sort_values(
@@ -242,7 +242,7 @@ def build_sheets(ledger: pd.DataFrame, context: str = "ambient-air",
     return {
         "Summary": summary_stats(led, context=context, sample_id=sample_id),
         "Read me": legend_sheet(),
-        "Identified": identified,
+        "Assigned": identified,
         "Candidates": candidates,
         "Below assignability": below,
         "Unassigned": un,
@@ -273,7 +273,7 @@ def summary_stats(ledger: pd.DataFrame, *, context: str = "",
     # The run timestamp lives only on the PDF report cover + the run-folder name.
     add("Run", "peaks total", n)
 
-    role_label = {L.ROLE_M0: "assigned (M0)", L.ROLE_ISO: "isotopologue children",
+    role_label = {L.ROLE_M0: "M0 (has formula)", L.ROLE_ISO: "isotopologue children",
                   L.ROLE_REAGENT: "reagent ions", L.ROLE_UNEXPLAINED: "unexplained"}
     for role, label in role_label.items():
         cnt = st["by_role"].get(role, 0)
@@ -288,7 +288,7 @@ def summary_stats(ledger: pd.DataFrame, *, context: str = "",
     m0 = ledger[ledger["role"] == L.ROLE_M0]
     if "tier" in ledger.columns and len(m0):
         h_m0 = m0["height"].sum(skipna=True)
-        for tier in (T.TIER_IDENTIFIED, T.TIER_CANDIDATE):
+        for tier in (T.TIER_ASSIGNED, T.TIER_CANDIDATE):
             sub = m0[m0["tier"] == tier]
             sig = (100 * sub["height"].sum(skipna=True) / h_m0) if h_m0 else 0.0
             add("Tiers", tier,
@@ -311,7 +311,7 @@ def summary_stats(ledger: pd.DataFrame, *, context: str = "",
 
 def legend_sheet() -> pd.DataFrame:
     rows = [
-        ("Tiers", "Identified", "Formula unique in the calibrated mass window, "
+        ("Tiers", "Assigned", "Formula unique in the calibrated mass window, "
          "or corroborated by independent evidence: Mascope-confirmed "
          "isotopologues, the same neutral in a second ionization channel, or "
          "series-anchor support. The 'evidence' column states which."),
@@ -401,7 +401,7 @@ _FILL = {
 
 def _chip(label: str) -> str | None:
     s = str(label)
-    if s == T.TIER_IDENTIFIED or s.startswith("High"):
+    if s == T.TIER_ASSIGNED or s.startswith("High"):
         return "good"
     if s == T.TIER_CANDIDATE or s.startswith("Low"):
         return "warn"
@@ -537,7 +537,7 @@ def write_markdown(result: dict, path: str | Path) -> Path:
         f"# Peak assignment — sample {result['sample_id']}",
         "",
         f"- Context: **{result['context']}**",
-        f"- Peaks: {st['n_peaks']}  |  assigned (M0): {st['by_role']['M0']}  "
+        f"- Peaks: {st['n_peaks']}  |  M0 (has formula): {st['by_role']['M0']}  "
         f"|  isotopologues: {st['by_role']['iso_child']}  "
         f"|  unexplained: {st['by_role']['unexplained']}",
         (f"- Peaks explained: "

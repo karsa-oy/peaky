@@ -287,7 +287,7 @@ def run(sample_id: str, context: str = "ambient-air", *,
     summaries["degeneracy"] = _safe("degeneracy", lambda: _degen_summary(
         degeneracy.apply_degeneracy(led, context=profile.label, log=log)))
 
-    # report tier on every committed assignment: Identified vs Candidate
+    # report tier on every committed assignment: Assigned vs Candidate
     # (mechanical rules over evidence columns; ROADMAP 2). Degeneracy-aware: a
     # high degeneracy_density with no isotope / cross-channel / series
     # corroboration is capped at Candidate.
@@ -303,7 +303,7 @@ def run(sample_id: str, context: str = "ambient-air", *,
     # ionization-plausibility: a pure hydrocarbon can't deprotonate or anchor an
     # anion cluster -> demote heteroatom-free M0 on [M-H]-/[M+Br]-/[M+CO3]-/... .
     cleanup.demote_implausible_ionization(led, log=log)
-    # speculative residual-tail: residual:* commits that reached Identified on weak
+    # speculative residual-tail: residual:* commits that reached Assigned on weak
     # evidence (off-cal z, no-iso multi-N, 0-anchor series, sole minor channel).
     cleanup.demote_speculative_residual(led, cfg, log=log)
     # RESCUE-VERIFY (last, post-tiering so it sets its own tier): match the still-
