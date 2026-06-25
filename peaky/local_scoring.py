@@ -66,8 +66,9 @@ def _category(score: float) -> str:
 def score_candidates_local(
     peaks: pd.DataFrame,
     formulas: list[str],
-    adducts: list[str],
+    adducts: list[str] | None = None,
     *,
+    mechanisms: list[str] | None = None,
     ppm: float = MATCH_MZ_TOLERANCE_PPM,
     purity: float | None = None,
     mz_col: str = "mz",
@@ -75,6 +76,10 @@ def score_candidates_local(
     peak_id_col: str = "peak_id",
 ) -> pd.DataFrame:
     """Score candidate NEUTRAL formulas against a sample's peaks, locally.
+
+    Channels are given either as peaky `adducts` (labels like '[M+Br]-') or as
+    already-resolved mascope mechanism strings via `mechanisms` (e.g. '+Br-', as
+    `io_mascope.score_candidates` has them) — the latter skips `adduct_to_mech`.
 
     Mirrors `io_mascope.score_candidates` + `flatten_match_tree`: returns one row
     per (compound, ion, isotopologue) with the same columns the passes consume.
@@ -90,13 +95,17 @@ def score_candidates_local(
     peaks = (
         peaks[[mz_col, intensity_col, peak_id_col]]
         .dropna(subset=[mz_col])
+        .drop_duplicates(peak_id_col)  # raw server peaks have one row per match
         .sort_values(mz_col)
     )
     mzs = peaks[mz_col].to_numpy(dtype=float)
     ints = peaks[intensity_col].to_numpy(dtype=float)
     pids = peaks[peak_id_col].to_numpy()
 
-    mechs = {a: utils.parse_ionization(adduct_to_mech(a)) for a in adducts}
+    if mechanisms is not None:
+        mechs = {m: utils.parse_ionization(m) for m in mechanisms}
+    else:
+        mechs = {a: utils.parse_ionization(adduct_to_mech(a)) for a in (adducts or [])}
     rows: list[dict] = []
 
     for neutral in formulas:
