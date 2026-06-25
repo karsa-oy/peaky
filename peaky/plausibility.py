@@ -53,7 +53,9 @@ F_HIGH = 4          # F>=this -> heavily fluorinated; F is monoisotopic, so the 
 #     from the degeneracy audit; the plain reason-string oracle reports the ratio.)
 #
 #   * CARBON-CLUSTER: DBE/C >= DBE_PER_C_MONSTER (equivalently H <= N+2) on an
-#     F-free C>=2 skeleton is a bare-carbon mass coincidence (C27H8 / C36H6O).
+#     F-free C>=2 skeleton is a bare-carbon mass coincidence (e.g. C5H2, C24H2 --
+#     DBE/C >= 1). H-poor-but-DBE/C<1 skeletons like C27H8 (0.89) are NOT this gate;
+#     they are the separate H/C<0.35 carbon-rich demote in cleanup.py.
 #     A HALF-INTEGER DBE is EXEMPT: radicals carry half-integer DBE, whereas the
 #     carbon-cluster monsters are all integer-DBE. The >= 1.0 cutoff (NOT the
 #     earlier 0.75 proposal) is deliberate -- pyridine (0.80), coumarin (0.78),
