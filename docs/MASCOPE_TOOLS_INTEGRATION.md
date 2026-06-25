@@ -1,10 +1,11 @@
-# Local scoring via `mascope_tools` (WIP)
+# Local scoring via `mascope_tools`
 
-Status: **wired (opt-in `PEAKY_LOCAL_SCORING=1`) and full-pipeline-validated on Bromide;
-one integration bug found & fixed; threshold recalibration is the remaining open call.**
-Goal: replace the network `match_compounds` hot loop with in-process
-`mascope_tools.composition`, the same Mascope scoring maths run locally (IsoSpec +
-`score_pattern`).
+Status: **DEFAULT.** Local in-process scoring replaced the network `match_compounds`
+hot loop (same Mascope scoring maths — IsoSpec + `score_pattern` — run locally). Opt
+back to the server path with `PEAKY_LOCAL_SCORING=0`. `mascope-tools` is now a core
+dependency. Full-pipeline validated on Bromide (0.932 agreement) + Uronium (no OOM,
+0.986); one integration bug found & fixed (deprotonation charge, below); the +0.052
+score offset is kept (its extra assignments are chemically valid — see below).
 
 ## Why
 
@@ -100,32 +101,34 @@ server had them `unexplained`/`iso_child`), and the 224 local misses are the ser
 disagreement set is now M0-vs-iso_child interpretation calls plus the systematic
 **+0.052 score offset** (local runs optimistic, same as the eval's +0.07).
 
-**Open call — threshold recalibration:** the +0.052 offset inflates the Assigned tier
-(1739 vs 1361). Either de-bias the local `eff_score` by ~−0.05 to the server scale (one
-spot, keeps all existing gates/margins) OR shift peaky's tier thresholds +0.05 for the
-local path. Both are cosmetic for *which* peaks get found (the extra local peaks are
-mostly real); they matter for tier-as-confidence parity with historical server runs.
+**Resolved — keep the offset (no recalibration).** The +0.052 offset makes local
+assign *more* (Bromide 2149 vs 1774; Uronium 7062 vs an old-code server 4508). Those
+extras are NOT noise: on every chemistry metric the local-only M0s match the agreed
+"gold" set — Bromide |ppm| 0.37 vs 0.25, Uronium 0.20 vs 0.20; DBE median 3.0;
+negative-DBE ≤3%; same Van Krevelen H/C≈1.6, O/C≈0.3–0.5. Since the goal is to maximise
+*chemically correct* assignments, the honest library score is kept as-is; the offset is
+documented so downstream readers know the local tier scale runs ~0.05 hotter than legacy
+server runs. (Tier-as-confidence parity with old runs was judged not worth suppressing
+real assignments.)
 
-## Remaining to make it the default (next steps)
+## Done — local scoring is the default
 
-1. **Wire dispatch** in `io_mascope.score_candidates`: behind `PEAKY_LOCAL_SCORING`
-   env (or config), call `local_scoring.score_candidates_local(<sample peaks>, chunk,
-   adducts)` instead of `client.matching.match_compounds(...)` + `flatten_match_tree`.
-   The sample peaks are already available (`fetch_peaks`).
-2. **Keep candidate generation bounded** — use peaky's existing `query_candidates`
-   (cheminfo, limit=25/peak, context-filtered ~294/pass) OR `find_compositions` with a
-   `max_result_rows` cap. Uncapped enumeration produced 11,805 candidates/sample (slow);
-   peaky's bounded set scores in ~1s.
-3. **Threshold recalibration** — local `score_pattern` is close but not identical to the
-   backend; re-check `probable=0.8 / possible=0.4` against the pass behaviour. Parity is
-   "similar" so expect minor tuning, not a rewrite.
-4. **Validate full pipeline** — run all 6 passes with local scoring on the Bromide
-   subset, diff assignments vs the committed backend run
-   (`peaky-output/2025-08-11-Bromide-...T120446Z/`).
+1. **Dispatch wired + flipped to default** in `io_mascope.score_candidates`
+   (`_local_scoring_enabled()`; `PEAKY_LOCAL_SCORING=0` opts back to match_compounds).
+2. **Candidate generation unchanged/bounded** — peaky's existing `query_candidates`
+   (cheminfo, context-filtered) feeds the local scorer; no uncapped enumeration.
+3. **Recalibration** — evaluated and intentionally NOT applied (see above).
+4. **Full pipeline validated** — Bromide local-vs-server same-code diff 0.932 agreement;
+   Uronium completes with no OOM (the server-path blocker), 0.986 vs the prior run.
 5. **15N-labelled nitrate scoring** — DONE in `mascope_tools` >= 2026.06.25
    (custom-element `predict_isotopes` + per-reagent purity).
-6. **Dependency** — add `mascope-tools` to peaky `pyproject.toml` (public PyPI); during
-   dev use a `[tool.uv.sources]` editable override on the local checkout (like mascope-sdk).
+6. **Dependency** — `mascope-tools>=2026.6.25` is now a core dependency.
+
+**Possible follow-ups (not blocking):** a clean *today-code* server Uronium baseline (the
+06-24 reference is older code) if a tighter Ur agreement number is wanted — though the
+server path may OOM, which is the whole reason for this work; and the optional memory win
+below.
+
 7. **Optional memory win** — emit only matched isotopologues (+ M0) instead of the full
    predicted envelope to shrink the per-sample frame further.
 

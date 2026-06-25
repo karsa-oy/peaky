@@ -636,6 +636,15 @@ def _mechanism_names(client, mechanism_ids: list[str] | None) -> list[str]:
     return out
 
 
+def _local_scoring_enabled() -> bool:
+    """Local scoring is the default; PEAKY_LOCAL_SCORING=0/false/no/off opts back
+    to the network match_compounds path (the escape hatch)."""
+    v = os.environ.get("PEAKY_LOCAL_SCORING")
+    if v is None:
+        return True
+    return v.strip().lower() not in ("0", "false", "no", "off", "")
+
+
 def _score_candidates_local(client, sample_id, formulas, mechanism_ids):
     """Local, in-process scoring (no match_compounds round-trip) producing the same
     flat per-isotopologue schema as the backend path. Peaks from the cached
@@ -671,10 +680,12 @@ def score_candidates(client, sample_id: str, formulas: list[str], *,
     formulas = sorted({f for f in formulas if f})
     if not formulas:
         return pd.DataFrame()
-    # Local in-process scoring (mascope_tools) instead of the match_compounds
-    # round-trip. Opt-in for now (PEAKY_LOCAL_SCORING=1) while validating; the
-    # server path below stays as the fallback.
-    if os.environ.get("PEAKY_LOCAL_SCORING"):
+    # Local in-process scoring (mascope_tools) is now the DEFAULT: same scoring
+    # maths run locally, ~2x faster, no 30k-row match trees, no timeout/OOM. The
+    # network match_compounds path below stays as an escape hatch -- disable local
+    # with PEAKY_LOCAL_SCORING=0 (or false/no/off). Validated full-pipeline on
+    # Bromide (0.932 agreement) + Uronium; see docs/MASCOPE_TOOLS_INTEGRATION.md.
+    if _local_scoring_enabled():
         return _score_candidates_local(client, sample_id, formulas, mechanism_ids)
     mp = dict(DEFAULT_MATCH_PARAMS)
     if match_params:
