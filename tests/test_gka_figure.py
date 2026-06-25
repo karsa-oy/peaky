@@ -77,7 +77,7 @@ check("element_members: Si collected; F-monsters excluded, real PFCAs kept",
       and set(GF.element_members(fmass, "F")) == set(PFCA), GF.element_members(fmass, "F"))
 check("detect_series: Si has only a short (2-rung) C2H6OSi ladder (not > 3)",
       GF.detect_series(fmass, units=["C2H6OSi"], min_len=4) == []
-      and len(__import__("peaky.series_gka", fromlist=["find_homolog_series"])
+      and len(__import__("peaky.assignment.series_gka", fromlist=["find_homolog_series"])
               .find_homolog_series(GF.element_members(fmass, "Si"), "C2H6OSi", min_len=2)) >= 1)
 shown = [f[0] for f in GF.present_families(fmass)]
 check("present_families: siloxane DROPPED (longest C2H6OSi ladder is 2, not > 3)",

@@ -111,7 +111,7 @@ check("CHO-only does have 13C", line(pc, 1.0034) is not None)
 # --- 81Br mass constant is the true AME2020 value, consistent across modules ---
 check("D_81BR is the true 81Br-79Br delta (1.99795, not 1.99780)",
       abs(ISO.D_81BR - 1.9979521) < 1e-6, ISO.D_81BR)
-import peaky.passes as _P  # noqa: E402
+from peaky.assignment import passes as _P  # noqa: E402
 check("isotopes D_81BR ~ passes._DBR (same physical line)",
       abs(ISO.D_81BR - _P._DBR) < 5e-4, (ISO.D_81BR, _P._DBR))
 check("2x81Br label mass is 2*81Br (no rounding drift)",

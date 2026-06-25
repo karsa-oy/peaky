@@ -603,7 +603,7 @@ L.commit_assignment(led, "Mp2", neutral_formula="C8H12ClF6NO2S", adduct="[M+CO3]
                     pass_no=4, method="residual:iso-pair", confidence="Low (iso-pair)",
                     commentary="phantom Cl doublet")
 L.attach_isotopologue(led, "Mp4", "Mp2", iso_label="37Cl(pair)")
-import peaky.tiers as _T  # noqa: E402
+from peaky.assignment import tiers as _T  # noqa: E402
 _T.apply_tiers(led)
 out = P.complete_isotope_envelopes(led, P.PassConfig(), log=lambda *a: None)
 check("envelope: silanediol M+2 (395) displaced off its phantom formula",
@@ -659,7 +659,7 @@ check("envelope: a High/strong-score victim is NOT displaced (tier-NA safe)",
 # build a silanediol n=4 envelope: M0 inflated ~45% by a coincident BrCl
 # compound. Odd shifts (M+1) = pure silanediol; even (M0/M+2/M+4) carry the
 # extra halogen. Heights from real Br-CIMS data.
-import peaky.chemistry as _CH  # noqa: E402
+from peaky.chem import chemistry as _CH  # noqa: E402
 mz0 = _CH.ion_mz("C8H26O5Si4", "[M+Br]-")   # 393.0046
 comp = mk_ledger([("M0", mz0, 20086.0), ("M1", mz0 + 1.0008, 2698.0),
                   ("M1b", mz0 + 1.0034, 531.0), ("M2", mz0 + 1.9979, 24523.0),

@@ -9,7 +9,7 @@ import sys
 
 # allow running straight from a checkout (no install needed)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from peaky.gka_widget import main  # noqa: E402
+from peaky.reporting.gka_widget import main  # noqa: E402
 
 if __name__ == "__main__":
     main()
