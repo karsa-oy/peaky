@@ -29,13 +29,21 @@ __version__ = "0.1.0"
 INK = "#222222"
 GREY = "#777777"
 
+# A family earns a panel (and a series earns a connector line) only when its
+# LONGEST drawn ladder has MORE than this many members. A >3 floor keeps the
+# real alkyl/oxidation/alkoxylate ladders while dropping incidental 2-rung
+# pairings (e.g. the siloxane D3->D4 longest-2 panel) that were never a series.
+PANEL_MIN_MEMBERS = 3        # longest series must be > PANEL_MIN_MEMBERS
+ZOOM_PAD = 0.10              # fraction of the drawn span padded around each panel
+
 # Repeat-unit families. Each is one small-multiple panel: `base` is the unit the
 # panel's Kendrick axis flattens (so that family's ladders run horizontal);
 # `units` are the repeat units folded into the family's series/summary counts.
-# `element` marks a CONTAMINANT family defined by an ELEMENT (Si / F), not by a
-# long ladder — every element-bearing peak is highlighted and the panel is shown
-# whenever the contaminant is present (siloxanes/PFAS often don't form a >=4 rung
-# ladder yet are still worth surfacing). element=None -> a homology (ladder) family.
+# `element` marks a CONTAMINANT family defined by an ELEMENT (Si / F): every
+# element-bearing peak is highlighted, but the panel still shows only when the
+# element forms a real ladder (longest > PANEL_MIN_MEMBERS under its base unit) —
+# a lone D3->D4 siloxane pair is no longer surfaced. element=None -> a homology
+# (ladder) family; the same longest-ladder>3 rule governs both kinds.
 # (label, base unit, units folded in, colour, element)
 FAMILIES: list[tuple[str, str, list[str], str, str | None]] = [
     ("alkyl",       "CH2",     ["CH2"],                            "#1D9E75", None),
@@ -136,25 +144,27 @@ def element_members(formula_mass: dict[str, float], element: str) -> dict[str, f
             if C.parse_formula(f).get(element, 0) > 0}
 
 
-def present_families(formula_mass: dict[str, float], *, min_len: int = 4,
-                     contam_min_len: int = 2) -> list[tuple]:
-    """The families worth a panel: a family is shown only if it forms a homologous
-    SERIES (ladder). Organic families need a >= min_len ladder; contaminant (element)
-    families need only a SHORT >= contam_min_len ladder under their base unit (and are
-    then highlighted by element). A scattered element-bearing set with NO series —
-    e.g. assorted fluorinated mass-fits that never step by CF2 — is NOT plotted
-    (user 2026-06-20: "if there is no series shouldn't plot in GKA")."""
-    out = []
-    for fam in FAMILIES:
-        label, base, units, col, element = fam
-        if element:
-            keep = bool(G.find_homolog_series(element_members(formula_mass, element),
-                                              base, min_len=contam_min_len))
-        else:
-            keep = bool(detect_series(formula_mass, units=[base], min_len=min_len))
-        if keep:
-            out.append(fam)
-    return out
+def _longest_ladder(formula_mass: dict[str, float], fam: tuple) -> int:
+    """Members in the longest ladder of `fam`'s base unit. For an element family
+    the ladder is searched over the element-bearing neutrals only (the set the
+    panel highlights); for an organic family over all neutrals."""
+    label, base, units, col, element = fam
+    pool = element_members(formula_mass, element) if element else formula_mass
+    ladders = G.find_homolog_series(pool, base, min_len=2)
+    return max((len(c) for c in ladders), default=0)
+
+
+def present_families(formula_mass: dict[str, float], *,
+                     min_members: int = PANEL_MIN_MEMBERS) -> list[tuple]:
+    """The families worth a panel: a family is shown only if its LONGEST ladder
+    has MORE than `min_members` members (default >3). One unified rule for
+    organic and contaminant (element) families — an incidental 2-rung pairing
+    (e.g. the siloxane D3->D4 longest-2 panel) is no longer plotted, while a
+    real >=4-rung ladder still is. A scattered element-bearing set with no
+    series is likewise dropped (user 2026-06-20: "if there is no series
+    shouldn't plot in GKA")."""
+    return [fam for fam in FAMILIES
+            if _longest_ladder(formula_mass, fam) > min_members]
 
 
 # ---------------------------------------------------------------------------
@@ -172,29 +182,51 @@ def kmd(mass, base: str = "CH2") -> np.ndarray:
 # ---------------------------------------------------------------------------
 # figure
 # ---------------------------------------------------------------------------
+def _zoom_to(ax, xs: list[float], ys: list[float], *, pad: float = ZOOM_PAD) -> None:
+    """Frame the panel on its DRAWN (colored) points, padded by `pad` of the span
+    on each side, so panels stop spanning the full 50–750 Da when the family
+    clusters in a narrow window. No-op when fewer than two distinct points exist
+    (matplotlib's autoscale already gives a sensible view)."""
+    if len(xs) < 2:
+        return
+    x0, x1 = min(xs), max(xs)
+    y0, y1 = min(ys), max(ys)
+    dx = (x1 - x0) * pad or 1.0
+    dy = (y1 - y0) * pad or (abs(y0) * pad or 1e-3)
+    ax.set_xlim(x0 - dx, x1 + dx)
+    ax.set_ylim(y0 - dy, y1 + dy)
+
+
 def _panel(ax, mass: np.ndarray, fmass: dict, base: str, color: str, label: str,
            element: str | None = None, *, min_len: int, highlight_min_len: int,
            top_chains: int) -> tuple[int, int]:
-    """Draw one family small-multiple over a grey KMD cloud at `base`.
+    """Draw one family small-multiple over a grey KMD cloud at `base`, then ZOOM
+    to the bounding box of the family's DRAWN (colored) points (~10% pad).
 
     Homology family (element=None): connect the longest ladders OF THE BASE UNIT —
     every highlighted ladder runs horizontal (only the base unit flattens, so we
     never draw a tilted line). Returns (#ladders, #peaks).
     Contaminant family (element set): highlight EVERY element-bearing peak and
-    connect whatever short ladders exist — the family shows even without a >=4 rung
-    ladder. Returns (#ladders, #element-bearing peaks)."""
+    connect its ladders. Returns (#ladders, #element-bearing peaks).
+    Connector lines are drawn only for ladders with > PANEL_MIN_MEMBERS members."""
     y = kmd(mass, base)
     ax.scatter(mass, y, s=5, c="#CBC9C0", alpha=0.45, linewidths=0, zorder=1)
     ax.set_title(f"{label} · base {base}", fontsize=9.5, loc="left", color=color)
+    drawn_x: list[float] = []        # colored points -> the zoom bounding box
+    drawn_y: list[float] = []
 
     if element:
         em = element_members(fmass, element)
         if em:
             ex = np.array(list(em.values()))
-            ax.scatter(ex, kmd(ex, base), s=20, c=color, alpha=0.9,
+            ey = kmd(ex, base)
+            ax.scatter(ex, ey, s=20, c=color, alpha=0.9,
                        linewidths=0.4, edgecolors="white", zorder=3)
-        ladders = G.find_homolog_series(em, base, min_len=2)     # connect even pairs
+            drawn_x.extend(ex.tolist()); drawn_y.extend(np.atleast_1d(ey).tolist())
+        ladders = G.find_homolog_series(em, base, min_len=2)
         for chain in ladders[:top_chains]:
+            if len(chain) <= PANEL_MIN_MEMBERS:      # connect only real series (>3)
+                continue
             xs = np.array([em[m] for m in chain])
             ax.plot(xs, kmd(xs, base), color=color, lw=1.0, alpha=0.85, zorder=2)
         longest = max((len(c) for c in ladders), default=0)
@@ -203,15 +235,23 @@ def _panel(ax, mass: np.ndarray, fmass: dict, base: str, color: str, label: str,
             note += f" · longest {longest}"
         ax.text(0.015, 0.965, note, transform=ax.transAxes, fontsize=7, va="top", color="#444")
         ax.tick_params(labelsize=7.5); ax.grid(alpha=0.22)
+        _zoom_to(ax, drawn_x, drawn_y)
         return len(ladders), len(em)
 
-    for s in detect_series(fmass, units=[base], min_len=highlight_min_len)[:top_chains]:
+    # connect+mark every series with > PANEL_MIN_MEMBERS members (the new uniform
+    # connector rule), longest first. `highlight_min_len` is unused now that the
+    # >3 gate governs which series get a connector; kept in the signature for
+    # back-compat with callers that still pass it.
+    for s in detect_series(fmass, units=[base], min_len=PANEL_MIN_MEMBERS + 1)[:top_chains]:
         xs = np.array(s.masses)
-        ax.plot(xs, kmd(xs, base), color=color, lw=1.0, alpha=0.9, zorder=2,
+        ys = kmd(xs, base)
+        ax.plot(xs, ys, color=color, lw=1.0, alpha=0.9, zorder=2,
                 marker="o", ms=3.0, mfc=color, mec="white", mew=0.35)
+        drawn_x.extend(xs.tolist()); drawn_y.extend(np.atleast_1d(ys).tolist())
     alls = detect_series(fmass, units=[base], min_len=min_len)
     npk = len({m for s in alls for m in s.members})
     longest = max((s.length for s in alls), default=0)
+    _zoom_to(ax, drawn_x, drawn_y)
     if alls:
         ax.text(0.015, 0.965, f"{len(alls)} series · {npk} peaks · longest {longest}",
                 transform=ax.transAxes, fontsize=7, va="top", color="#444")
@@ -240,10 +280,10 @@ def render_gka(ledger: pd.DataFrame, path: str, *, min_len: int = 4,
     fmass = _neutral_masses(ledger)
     mass = np.array(list(fmass.values()))
 
-    # homology families need a >=min_len ladder; contaminant (element) families
-    # show whenever the element is present (>= MIN_ELEMENT peaks) — see issue:
-    # siloxanes were assigned but never formed a 4-rung ladder so the panel dropped.
-    panels = present_families(fmass, min_len=min_len)
+    # one unified rule: a family earns a panel only if its longest ladder has
+    # > PANEL_MIN_MEMBERS members (>3). Drops incidental 2-rung pairings (e.g. the
+    # siloxane D3->D4 longest-2 panel) while keeping real >=4-rung ladders.
+    panels = present_families(fmass)
 
     ncols = 2
     ncells = len(panels) + 1                              # + family-rollup cell
@@ -277,8 +317,9 @@ def render_gka(ledger: pd.DataFrame, path: str, *, min_len: int = 4,
     ax2.set_title("Family rollup (peaks · #ladders)", fontsize=9.5, loc="left")
     ax2.tick_params(labelsize=7.5)
 
-    sub = ("Each panel flattens its family's homologous series into horizontal ladders; "
-           "a family is shown only if it forms a series (Si/F highlighted by element)")
+    sub = ("Each panel flattens its family's homologous series into horizontal ladders "
+           "and zooms to its drawn span; a family is shown only if its longest ladder "
+           "has > 3 members (Si/F highlighted by element)")
     fig.text(0.085, 1 - 0.40 / H, title or "GKA homologous-series findings",
              fontsize=12.5, weight="bold", ha="left", color=INK)
     fig.text(0.085, 1 - 0.62 / H, sub, fontsize=7.6, ha="left", color=GREY)
