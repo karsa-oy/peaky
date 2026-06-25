@@ -18,11 +18,11 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-from . import io_mascope as IO
-from . import paths as PT
-from . import profiles as P
-from . import sampling as SS
-from . import timeseries as TS
+from peaky.io import io_mascope as IO
+from peaky import paths as PT
+from peaky.chem import profiles as P
+from peaky.batch import sampling as SS
+from peaky.batch import timeseries as TS
 
 __version__ = "0.2.0"  # + representative-sample selection (5 time-grid + max-TIC)
 
@@ -186,9 +186,9 @@ def generate_report(ctx: RunContext, ts, *, subject: str | None = None,
     from the merged / per-file ledgers already in `ctx.out_dir` and the batch time
     series. No network. Same artifacts the run_clusters / run_vankrevelen /
     run_report scratch chain produced, but in-process via the RunContext."""
-    from . import analyte_viz as V
-    from . import clustering as CLU
-    from . import pdf_report as R
+    from peaky.reporting import analyte_viz as V
+    from peaky.batch import clustering as CLU
+    from peaky.reporting import pdf_report as R
 
     # Pin figures/PDF/workbooks to a FIXED content epoch (not the run time) so the
     # scientific content is byte-identical regardless of WHEN it's run. The run time
@@ -244,7 +244,7 @@ def run_batch(*, batch: str, dataset: str | None = None, reagent: str = "auto",
     time-spaced + max-TIC) or 'brightest' (bin all peaks -> assign each significant
     m/z bin's brightest sample; `coverage_target`/`k_max`/`height_floor` tune it).
     Returns {ctx, assign, cluster, vk, report_pdf}."""
-    from . import assign_batch as AB
+    from peaky.batch import assign_batch as AB
 
     ts_src = None
     if isinstance(ts, str):
@@ -268,8 +268,8 @@ def run_batch(*, batch: str, dataset: str | None = None, reagent: str = "auto",
     # provenance: pin this run to its exact code + input-data hash + config +
     # output hash, and append it to the cross-run registry. Best-effort (never
     # fatal). Runs LAST so ts_path / merged_ledger.csv exist to be hashed.
-    from . import passes as PA
-    from . import provenance as PV
+    from peaky.assignment import passes as PA
+    from peaky.reporting import provenance as PV
     summ = res.get("summary", {}) if isinstance(res, dict) else {}
     PV.record_run(
         run_dir=ctx.out_dir, base_out=os.path.expanduser(base_out),

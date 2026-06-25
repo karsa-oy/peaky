@@ -36,11 +36,11 @@ a1 = D._canonical_ion("C2H3BrO2", "[M+Br]-")     # ion C2H3Br2O2
 a2 = D._canonical_ion("C2H2O2", "[M+HBr+Br]-")    # +H +Br +Br -> C2H3Br2O2
 check("covalent/cluster aliases share one canonical ion", a1 == a2 and a1 is not None, (a1, a2))
 
-prof = D.relaxed_profile(__import__("peaky.contexts", fromlist=["get_context"]).get_context("ambient-air"))
+prof = D.relaxed_profile(__import__("peaky.chem.contexts", fromlist=["get_context"]).get_context("ambient-air"))
 check("relaxed profile lifts the F cap", prof.max_F >= 10 and prof.max_Si >= 6)
 
 # --- integration: brute-find a near-isobar [M-H]- pair, expect density>=2 ---
-import peaky.contexts as X  # noqa: E402
+from peaky.chem import contexts as X  # noqa: E402
 grid = sorted(C._grid_cached(C.parse_ranges(TINY), 30.0, 300.0))
 shift = C.ADDUCT_SHIFTS["[M-H]-"]
 prof_r = D.relaxed_profile(X.get_context("ambient-air"))

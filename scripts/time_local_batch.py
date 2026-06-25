@@ -4,7 +4,7 @@ import pandas as pd
 warnings.filterwarnings("ignore")
 from mascope_tools.composition import CompositionSearchConfig, HeuristicFilterConfig
 from mascope_tools.composition.finder import find_compositions
-from peaky.local_scoring import score_candidates_local
+from peaky.io.local_scoring import score_candidates_local
 
 CFG = {
  "Br": (CompositionSearchConfig(ionizations="+Br-,-H-",

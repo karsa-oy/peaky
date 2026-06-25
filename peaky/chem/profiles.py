@@ -1,0 +1,213 @@
+"""Reagent profiles — ONE config per reagent system, replacing the adducts /
+element-ranges / normaliser / label constants that were copy-pasted inline across
+the time-series, clustering and validation scripts.
+
+A profile is everything the pipeline needs to treat a batch's reagent correctly.
+New reagent = add a ReagentProfile, not edit code. `resolve()` picks one by name
+or auto-detects from a loaded peak table (polarity + the server's own adduct
+mechanisms via io_mascope.detect_adducts).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class ReagentProfile:
+    name: str  # short key, e.g. "Br" / "Ur"
+    label: str  # display label (figures + console), e.g. "Br- CIMS"
+    polarity: str  # "-" or "+"
+    adducts: list[str]  # analyte channels (peaky adduct labels)
+    normaliser: str  # "reagent" | "tic"  (for the TS/correlation layer)
+    reagent_ion_re: str | None  # regex on ion_formula picking the reagent ions
+    ranges: str  # grid element ranges for local enumeration
+    detect_adduct: str | None  # presence of this adduct => this reagent (auto-detect)
+    context: str = "ambient-air"  # default assign.run context (mode + VK priors + caps)
+    # isotopic purity of a labelled reagent (0.98 = 98% 15N); threaded to local
+    # scoring's predict_isotopes for '^X' adducts
+    purity: float | None = None
+    aliases: tuple = field(default_factory=tuple)
+
+
+BR = ReagentProfile(
+    name="Br",
+    label="Br- CIMS",
+    polarity="-",
+    adducts=["[M+Br]-", "[M-H]-", "[M+HBr+Br]-"],
+    normaliser="reagent",
+    reagent_ion_re=r"Br\d-$",
+    ranges="C0-40 H0-80 N0-3 O0-18 S0-2 Cl0-2 Br0-2",
+    detect_adduct="[M+Br]-",
+    context="ambient-air",
+    aliases=("br", "bromide", "br-cims", "br-"),
+)
+
+UR = ReagentProfile(
+    name="Ur",
+    label="Ur+ CIMS",
+    polarity="+",
+    adducts=["[M+H]+", "[M+(CH4N2O)H]+"],
+    normaliser="tic",
+    reagent_ion_re=None,
+    ranges="C0-40 H0-90 N0-8 O0-15 S0-2",
+    detect_adduct="[M+(CH4N2O)H]+",
+    context="uronium",
+    aliases=("ur", "uronium", "urea", "urea-cims", "ur+"),
+)
+
+# NO3⁻ (nitrate) CIMS — PROVISIONAL built-in; validate + refine for your instrument
+# (or override via a --reagent-config file). Negative mode; highly oxygenated
+# molecules detected as the [M+NO3]⁻ cluster (and [M-H]⁻ when acidic). Reagent ions
+# are the NO3⁻ / (HNO3)ₙ·NO3⁻ cluster series.
+NO3 = ReagentProfile(
+    name="NO3",
+    label="NO3- CIMS",
+    polarity="-",
+    adducts=["[M+NO3]-", "[M-H]-"],
+    normaliser="reagent",
+    reagent_ion_re=r"(HNO3)*NO3-?$",
+    ranges="C0-40 H0-60 N0-3 O0-25 S0-2",
+    detect_adduct="[M+NO3]-",
+    context="ambient-air",
+    aliases=("no3", "nitrate", "no3-", "nitrate-cims"),
+)
+
+# ¹⁵N-labelled nitrate CIMS (server reagent '^NO3-'). Same chemistry as NO3 above,
+# but the cluster adduct is the heavy [M+¹⁵NO3]⁻ = [M+^NO3]- (+62.9855, mechanism
+# '+^NO3-'); the deprotonation channel [M-H]- is isotope-independent. Reagent
+# cluster ions ((H^NO3)ₙ·^NO3⁻) usually sit below a >120 m/z acquisition window, so
+# the correlation layer normalises on TIC, not on a reagent ion. detect_adduct is
+# [M+^NO3]- so auto-detect distinguishes it from the ¹⁴N NO3 profile above.
+NO3_15N = ReagentProfile(
+    name="NO3_15N",
+    label="[15N]O3- CIMS",
+    polarity="-",
+    adducts=["[M+^NO3]-", "[M-H]-"],
+    normaliser="tic",
+    reagent_ion_re=None,
+    ranges="C0-40 H0-60 N0-3 O0-25 S0-2",
+    detect_adduct="[M+^NO3]-",
+    context="ambient-air",
+    purity=0.98,  # ~98% 15N reagent
+    aliases=(
+        "no3-15n",
+        "15no3",
+        "15no3-",
+        "^no3",
+        "^no3-",
+        "15n-nitrate",
+        "nitrate-15n",
+        "nitrate-15n-cims",
+    ),
+)
+
+PROFILES: dict[str, ReagentProfile] = {
+    BR.name: BR,
+    UR.name: UR,
+    NO3.name: NO3,
+    NO3_15N.name: NO3_15N,
+}
+_BY_ALIAS = {a: p for p in PROFILES.values() for a in (p.name.lower(), *p.aliases)}
+
+
+# --- registry / config-driven reagents ------------------------------------
+# New reagent = register a ReagentProfile (in code, or from a JSON/TOML config so
+# users add reagents WITHOUT forking the package).
+_CONFIG_FIELDS = (
+    "name",
+    "label",
+    "polarity",
+    "adducts",
+    "normaliser",
+    "reagent_ion_re",
+    "ranges",
+    "detect_adduct",
+    "context",
+    "aliases",
+)
+
+
+def register(profile: "ReagentProfile", *, overwrite: bool = True) -> "ReagentProfile":
+    """Add (or replace) a reagent profile in the registry + alias map."""
+    if not overwrite and profile.name in PROFILES:
+        raise ValueError(f"reagent {profile.name!r} already registered")
+    PROFILES[profile.name] = profile
+    for a in (profile.name.lower(), *profile.aliases):
+        _BY_ALIAS[a] = profile
+    return profile
+
+
+def from_dict(entry: dict) -> "ReagentProfile":
+    """Build a ReagentProfile from a plain dict (config entry)."""
+    kw = {k: entry[k] for k in _CONFIG_FIELDS if k in entry}
+    if "aliases" in kw:
+        kw["aliases"] = tuple(kw["aliases"])
+    return ReagentProfile(**kw)
+
+
+def load_config(path: str) -> list:
+    """Register reagent profiles from a JSON or TOML file (so users add reagents
+    without editing the package). Accepts a top-level list of entries, a
+    `{"reagents": [...]}` wrapper, or a `{name: {fields...}}` mapping. Each entry
+    carries the ReagentProfile fields (name/label/polarity/adducts/normaliser/
+    reagent_ion_re/ranges/detect_adduct, + optional context/aliases)."""
+    import json
+    import os
+
+    p = os.path.expanduser(path)
+    raw = open(p, "rb").read()
+    if p.endswith(".toml"):
+        import tomllib
+
+        data = tomllib.loads(raw.decode())
+    else:
+        data = json.loads(raw.decode())
+    if isinstance(data, dict):
+        entries = (
+            data["reagents"]
+            if isinstance(data.get("reagents"), list)
+            else [{"name": k, **v} for k, v in data.items()]
+        )
+    else:
+        entries = data
+    return [register(from_dict(e)) for e in entries]
+
+
+def resolve(
+    reagent: str = "auto", peaks=None, *, config: str | None = None
+) -> ReagentProfile:
+    """Return a ReagentProfile. `reagent` may be a name/alias, or 'auto' to detect
+    from a loaded peak table (its server adduct mechanisms, then polarity). `config`
+    (a JSON/TOML path) registers extra/override reagents before resolving."""
+    if config:
+        load_config(config)
+    if reagent and reagent.lower() in _BY_ALIAS:
+        return _BY_ALIAS[reagent.lower()]
+    if reagent != "auto":
+        raise KeyError(f"unknown reagent {reagent!r}; known: {sorted(_BY_ALIAS)}")
+    if peaks is None:
+        raise ValueError("reagent='auto' needs a peaks table to detect from")
+    from peaky.io import io_mascope as IO
+
+    seen = set(IO.detect_adducts(peaks))
+    for p in PROFILES.values():
+        if p.detect_adduct in seen:
+            return p
+    # fall back on polarity if no diagnostic adduct matched
+    pol = _detect_polarity(peaks)
+    for p in PROFILES.values():
+        if p.polarity == pol:
+            return p
+    raise ValueError(f"could not auto-detect reagent (adducts={seen}, polarity={pol})")
+
+
+def _detect_polarity(peaks) -> str | None:
+    for col in ("polarity", "sample_batch_name", "ionization_mechanism"):
+        if col in getattr(peaks, "columns", []):
+            s = " ".join(map(str, peaks[col].dropna().unique()[:20]))
+            if "+" in s and "-" not in s:
+                return "+"
+            if "-" in s and "+" not in s:
+                return "-"
+    return None

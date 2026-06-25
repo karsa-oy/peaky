@@ -22,7 +22,7 @@ import pandas as pd
 
 warnings.filterwarnings("ignore")
 
-from peaky.local_scoring import adduct_to_mech, score_candidates_local  # noqa: E402
+from peaky.io.local_scoring import adduct_to_mech, score_candidates_local  # noqa: E402
 
 # reagent -> (adducts, element ranges) from peaky/profiles.py
 REAGENTS = {

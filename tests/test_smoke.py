@@ -26,22 +26,21 @@ for name in ("run", "run_batch", "run_assign_batch", "run_pipeline", "PassConfig
              "get_context", "resolve_reagent", "ReagentProfile", "build_report"):
     check(f"public API exposes {name}", hasattr(ma, name))
 
-# 2) every package submodule imports (NO network — io_mascope's SDK import is lazy)
-SUBMODULES = [
-    "chemistry", "contexts", "ledger", "io_mascope", "isotopes", "series_gka",
-    "ladders", "series_detect", "reagents", "passes", "residual", "siloxane",
-    "analyte_viz", "degeneracy", "cleanup", "sampling", "assign_batch", "cluster",
-    "clustering", "composition", "plausibility", "pdf_report", "gka_figure",
-    "profiles", "timeseries", "tiers", "report", "assign", "pipeline", "cli",
-    "gka_widget", "__main__",
-]
-for m in SUBMODULES:
+# 2) every package submodule imports (NO network — io_mascope's SDK import is lazy).
+# Discovered by walking the sub-packages, so this survives module moves/additions.
+import pkgutil  # noqa: E402
+
+SUBMODULES = sorted(
+    info.name for info in pkgutil.walk_packages(ma.__path__, "peaky.")
+    if not info.ispkg
+)
+for full in SUBMODULES:
     try:
-        importlib.import_module(f"peaky.{m}")
+        importlib.import_module(full)
         ok, detail = True, ""
     except Exception as e:                            # noqa: BLE001
         ok, detail = False, f"{type(e).__name__}: {e}"
-    check(f"import peaky.{m}", ok, detail)
+    check(f"import {full}", ok, detail)
 
 # 3) third-party stack present (the deps not transitively guaranteed by mascope-sdk)
 for lib in ("pandas", "numpy", "scipy", "matplotlib", "openpyxl", "dotenv"):

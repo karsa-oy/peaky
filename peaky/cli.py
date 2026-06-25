@@ -29,7 +29,7 @@ from pathlib import Path
 def _require_creds() -> None:
     """Fail fast with an actionable message if no Mascope creds are resolvable
     (before any expensive work). Process env vars satisfy this without a file."""
-    from . import io_mascope as IO
+    from peaky.io import io_mascope as IO
 
     if os.environ.get("MASCOPE_URL") and os.environ.get("MASCOPE_ACCESS_TOKEN"):
         return
@@ -77,7 +77,7 @@ def _run_guarded(fn) -> int:
 # --------------------------------------------------------------------------- #
 def cmd_list(args) -> None:
     _require_creds()
-    from . import io_mascope as IO
+    from peaky.io import io_mascope as IO
 
     if args.what == "workspaces":
         ws = IO.list_workspaces()
@@ -115,7 +115,7 @@ def _resolve_reagent(args):
     """Return (adducts, context, note). Forces the analyte channels so a positive
     or sparse-match sample never silently falls back to [M-H]- (wrong polarity).
     adducts=None means 'let assign.run auto-detect from the sample'."""
-    from . import profiles
+    from peaky.chem import profiles
 
     config = getattr(args, "reagent_config", None)
     if args.adducts:
@@ -126,7 +126,7 @@ def _resolve_reagent(args):
         return list(prof.adducts), (args.context or prof.context), \
             f"{prof.name} ({prof.label})"
     # auto: detect from the sample's own peaks (cached, so assign.run reuses it)
-    from . import io_mascope as IO
+    from peaky.io import io_mascope as IO
 
     client = IO.connect()
     raw = IO.fetch_peaks(client, args.sample_id, use_cache=not args.no_cache)
@@ -142,7 +142,11 @@ def _resolve_reagent(args):
 
 def cmd_assign(args) -> None:
     _require_creds()
-    from . import assign, gka_widget, io_mascope, passes, report
+    from peaky.assignment import assign
+    from peaky.reporting import gka_widget
+    from peaky.io import io_mascope
+    from peaky.assignment import passes
+    from peaky.reporting import report
 
     cfg = passes.PassConfig(ppm=args.ppm, search_ppm=args.search_ppm,
                             height_cutoff=args.height_cutoff)
@@ -202,7 +206,7 @@ def cmd_assign(args) -> None:
 
 def cmd_batch(args) -> None:
     _require_creds()
-    from . import pipeline as PL
+    from peaky import pipeline as PL
 
     res = PL.run_batch(batch=args.batch, dataset=args.dataset, reagent=args.reagent,
                        base_out=resolve_out_dir(args.out_dir), ts=args.ts,
@@ -221,8 +225,8 @@ def cmd_batch(args) -> None:
 def cmd_report(args) -> None:
     # offline: regenerate cluster figures + Van Krevelen + the PDF report from an
     # existing run folder's ledgers (no assignment, no network).
-    from . import pipeline as PL
-    from . import profiles as P
+    from peaky import pipeline as PL
+    from peaky.chem import profiles as P
 
     prof = P.resolve(args.reagent)
     run_dir = os.path.expanduser(args.run_dir)
@@ -240,7 +244,7 @@ def cmd_report(args) -> None:
 def cmd_gka(args) -> None:
     import pandas as pd
 
-    from . import gka_widget
+    from peaky.reporting import gka_widget
 
     led = pd.read_csv(args.ledger_csv)
     pts = gka_widget.build_points(led)
@@ -360,7 +364,7 @@ def build_parser() -> argparse.ArgumentParser:
 def _workspace_root() -> str:
     """The clone/workspace root (holds .env.example + the package). Falls back to
     the cwd for a non-editable install where the package isn't next to the repo."""
-    from . import paths
+    from peaky import paths
     repo = os.path.dirname(paths.PKG_ROOT)  # parent of peaky/ == the clone root
     if not os.path.exists(os.path.join(repo, ".env.example")) \
             and os.path.exists(os.path.join(os.getcwd(), ".env.example")):
@@ -373,7 +377,7 @@ def resolve_out_dir(explicit: str | None) -> str:
     .env by `peaky setup`, pointing at the workspace's output/) > ~/peaky-output."""
     if explicit:
         return os.path.expanduser(explicit)
-    from . import io_mascope as IO
+    from peaky.io import io_mascope as IO
     try:                                  # make PEAKY_OUTPUT_DIR from .env visible
         from dotenv import load_dotenv
         load_dotenv(IO._find_env())
@@ -388,7 +392,7 @@ def cmd_setup(args) -> None:
     import shutil
 
     import peaky
-    from . import io_mascope as IO
+    from peaky.io import io_mascope as IO
 
     repo = _workspace_root()
     env_path = os.path.join(repo, ".env")
