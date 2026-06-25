@@ -11,7 +11,7 @@ git clone https://github.com/karsa-oy/peaky.git && cd peaky
 python3 -m pip install -e .   # pulls mascope-sdk + pandas/numpy/scipy/matplotlib/openpyxl; registers `peaky`
 peaky setup                   # creates .env + output/, verifies, prints what to do next
 ```
-Needs Python ≥ 3.11. Everything (incl. `mascope-sdk`) installs from public PyPI —
+Needs Python ≥ 3.12. Everything (incl. `mascope-sdk`) installs from public PyPI —
 no private index, no Mascope account needed just to install. `peaky setup` is
 idempotent — re-run it any time to re-check the workspace. After it runs you have
 **one self-contained folder**:

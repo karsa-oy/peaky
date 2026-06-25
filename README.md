@@ -47,7 +47,7 @@ in the loop and it asks when a choice (reagent, cutoff) actually matters.
 
 ## Install
 
-Needs Python ≥ 3.11. Everything (including `mascope-sdk`) installs from public PyPI —
+Needs Python ≥ 3.12. Everything (including `mascope-sdk`) installs from public PyPI —
 no private index, and **no Mascope account is needed just to install or to run the
 offline tests.** (On PyPI the distribution is **`mascope-peaky`** — `peaky` was
 taken; the import package and CLI are still `peaky`.)
@@ -160,7 +160,7 @@ offline suite (no network) must stay green:
 pytest tests/                        # or run any tests/test_*.py as a standalone script
 ```
 
-CI runs the suite on Python 3.11–3.13 with no credentials.
+CI runs the suite on Python 3.12–3.13 with no credentials.
 
 - **How Peaky works** — the ledger model, pass sequence, data flow, module map:
   **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** (start here).
