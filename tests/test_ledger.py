@@ -164,38 +164,6 @@ L.lock_peaks(led6, ["p2"])
 check("displace refuses a locked peak",
       raises(lambda: L.displace_to_isotopologue(led6, "p2", "p1", iso_label="81Br")))
 
-# ---- mark_fragment (Stage 3 adduct-less in-source fragment relabel) ----
-led7 = fresh()
-L.commit_assignment(led7, "p1", neutral_formula="C5H10O", adduct="[M+H]+",
-                    ion_score=0.9, ppm_error=0.1, pass_no=1, method="grid",
-                    confidence="Good", commentary="m0")
-L.mark_fragment(led7, "p1", "in-source fragment of C6H10O2 (CO)")
-check("mark_fragment: M0 -> fragment role", L.role_of(led7, "p1") == L.ROLE_FRAGMENT)
-check("mark_fragment: commentary recorded",
-      led7.loc[led7.peak_id == "p1", "commentary"].iloc[0] == "in-source fragment of C6H10O2 (CO)")
-check("mark_fragment: neutral_formula kept (the fragment IS that neutral)",
-      led7.loc[led7.peak_id == "p1", "neutral_formula"].iloc[0] == "C5H10O")
-check("mark_fragment: fragment role validates clean", L.validate(led7) == [], L.validate(led7))
-check("mark_fragment: refuses an unexplained peak (only an M0 owner)",
-      raises(lambda: L.mark_fragment(led7, "p2", "x")))
-# locked M0 is refused
-led8 = fresh()
-L.commit_assignment(led8, "p1", neutral_formula="C5H10O", adduct="[M+H]+",
-                    ion_score=0.9, ppm_error=0.1, pass_no=1, method="grid",
-                    confidence="Good", commentary="m0")
-L.lock_peaks(led8, ["p1"])
-check("mark_fragment: refuses a locked peak",
-      raises(lambda: L.mark_fragment(led8, "p1", "x")))
-# an M0 owning iso children is refused (would orphan them)
-led9 = fresh()
-L.commit_assignment(led9, "p1", neutral_formula="C5H10O", adduct="[M+H]+",
-                    ion_score=0.9, ppm_error=0.1, pass_no=1, method="grid",
-                    confidence="Good", commentary="m0")
-L.attach_isotopologue(led9, "p2", "p1", iso_label="13C")
-check("mark_fragment: refuses an M0 with isotopologue children",
-      raises(lambda: L.mark_fragment(led9, "p1", "x")))
-
-
 def test_all():
     assert FAIL == 0, f"{FAIL} checks failed"
 

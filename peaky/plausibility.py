@@ -26,8 +26,7 @@ import pandas as pd
 from . import chemistry as C
 from . import ledger as L
 
-__version__ = "0.2.0"   # + Stage 3 demote/relabel hardening (O-monster, carbon-
-                        # cluster, adduct-less fragment, series coherence)
+__version__ = "0.2.0"   # + Stage 3 demote hardening (O-monster, carbon-cluster)
 
 # thresholds (loose on purpose — flag the clear coincidences only)
 N_HIGH_OC = 3       # N>=3 combined with...
@@ -153,13 +152,13 @@ def scan(merged, *, polarity: str | None = None) -> list[dict]:
 
 
 # ===========================================================================
-# Stage 3: demote / relabel-ONLY hardening (never deletes a row)
+# Stage 3: demote-ONLY hardening (never deletes a row)
 #
-# Every function below either DEMOTES an Assigned M0 to Candidate (+ stamps
-# below_assignability) or RELABELS an M0's role to fragment. None of them can
-# clear/delete a row, so the worst-case failure is an over-cautious Candidate,
-# never a lost peak. Each appends one dict per touched peak to `audit` (when a
-# list is passed) so assign/assign_batch can write tables/plausibility_audit_*.
+# Every function below DEMOTES an Assigned M0 to Candidate (+ stamps
+# below_assignability). None of them can clear/delete a row, so the worst-case
+# failure is an over-cautious Candidate, never a lost peak. Each appends one dict
+# per touched peak to `audit` (when a list is passed) so assign/assign_batch can
+# write tables/plausibility_audit_*.
 # ===========================================================================
 
 def _is_saturated(note) -> bool:
@@ -273,292 +272,10 @@ def demote_carbon_clusters(ledger: pd.DataFrame, *, audit=None, log=print) -> di
 def demote_implausible(ledger: pd.DataFrame, *, audit=None, log=print) -> dict:
     """The two shared-oracle demotes that fire on a single-file or merged ledger
     without a time series: O-monster + carbon-cluster. Both are demote-only and
-    feed the same audit list. (The adduct-less-fragment relabel and the
-    series-coherence dissolve need the spectrum / time series, so they run
-    separately at the batch level.)"""
+    feed the same audit list."""
     o = demote_oxygen_monsters(ledger, audit=audit, log=log)
     c = demote_carbon_clusters(ledger, audit=audit, log=log)
     return {**o, **c}
-
-
-# --- adduct-less in-source fragment -> role=fragment (batch/merged level) ----
-# A real molecule ionises through its adduct channels (in a urea source: +NH4,
-# +urea·H, +Na on top of the bare +H). An in-source FRAGMENT is generated in the
-# inlet from a heavier parent, so it shows up almost entirely as the bare protonated
-# ion with NO adduct partners. The relabel needs the FULL triangulation:
-#   (a) adduct ratio (Σ adduct channels)/[M+H]+ < FRAG_ADDUCT_RATIO with a big bare
-#       [M+H]+, AND
-#   (b) a mass-consistent CO-VARYING parent: a heavier assigned neutral at a facile
-#       neutral loss whose time-series trace beats the incidental co-rider ceiling.
-# (a) alone only earns a scrutiny COMMENTARY flag (never a relabel) -- a low-adduct
-# species could simply be a poor adduct-former. Composition gate: hydrocarbon / low-O
-# (fragments are the de-oxygenated/-dehydrated cores, not fresh O-rich oxidation).
-FRAG_ADDUCT_RATIO = 0.05         # Σ(adduct)/[M+H]+ below this -> adduct-less
-FRAG_BARE_MIN = 0.0              # the bare [M+H]+ must be present (height>this)
-FRAG_PARENT_R_MIN = 0.5          # parent TS correlation must beat this co-rider floor
-FRAG_OC_MAX = 0.5                # composition gate: fragment cores are low-O
-# facile neutral losses an in-source fragment forms from its parent (formula, label)
-_FRAG_LOSSES = [
-    ("H2O", "H2O"),
-    ("CO", "CO"),
-    ("CO2", "CO2"),
-    ("CH2O3", "CO+H2O"),   # CO + H2O combined (formic-equivalent)
-]
-_POS_ADDUCTS = ("[M+NH4]+", "[M+Na]+", "[M+K]+", "[M+(CH4N2O)H]+")
-
-
-def _facile_loss(parent_cnt: dict, child_cnt: dict):
-    """If child = parent - (a facile neutral loss), return the loss label, else None.
-    Element-exact: every element of the loss must be removable from the parent."""
-    child = {k: v for k, v in child_cnt.items() if v}
-    for loss_formula, label in _FRAG_LOSSES:
-        cand = dict(parent_cnt)
-        ok = True
-        for el, k in C.parse_formula(loss_formula).items():
-            cand[el] = cand.get(el, 0) - k
-            if cand[el] < 0:
-                ok = False
-                break
-        if ok and {k: v for k, v in cand.items() if v} == child:
-            return label
-    return None
-
-
-def relabel_adduct_less_fragments(merged: pd.DataFrame, *, ts_peaks=None,
-                                  polarity: str = "+", audit=None,
-                                  r_min: float = FRAG_PARENT_R_MIN, log=print) -> dict:
-    """Relabel an adduct-less protonated M0 as an in-source FRAGMENT of a heavier
-    co-varying parent -- ONLY on the full triangulation (adduct-ratio AND a
-    mass-consistent co-varying parent). When only the adduct-ratio leg holds, add a
-    scrutiny commentary flag but DO NOT relabel. Positive mode only (the adduct
-    grammar is the +NH4/+urea/+Na family). Relabel-only: role M0->fragment, the
-    neutral/mz/score are unchanged."""
-    if polarity != "+" or not {"neutral_formula", "adduct"} <= set(merged.columns):
-        return {"relabeled": 0, "flagged": 0}
-    if "commentary" not in merged.columns:    # both legs annotate commentary
-        merged["commentary"] = pd.NA
-    # adduct inventory per neutral: bare [M+H]+ height vs the Σ adduct-channel height
-    h = (merged["height"] if "height" in merged.columns
-         else merged.get("ion_score", pd.Series(1.0, index=merged.index)))
-    bare, addsum, present = {}, {}, {}
-    for i in merged.index:
-        nf = str(merged.at[i, "neutral_formula"] or "")
-        if not nf or nf == "nan":
-            continue
-        ad = str(merged.at[i, "adduct"] or "")
-        hv = float(h.at[i]) if pd.notna(h.at[i]) else 0.0
-        present.setdefault(nf, {})[ad] = i
-        if ad == "[M+H]+":
-            bare[nf] = max(bare.get(nf, 0.0), hv)
-        elif ad in _POS_ADDUCTS:
-            addsum[nf] = addsum.get(nf, 0.0) + hv
-
-    keeps_parent = _make_parent_test(merged, ts_peaks, r_min)
-    relabeled = flagged = 0
-    for nf, chans in present.items():
-        if "[M+H]+" not in chans:
-            continue
-        b = bare.get(nf, 0.0)
-        if b <= FRAG_BARE_MIN:
-            continue
-        ratio = addsum.get(nf, 0.0) / b if b else 9.99
-        if ratio >= FRAG_ADDUCT_RATIO:
-            continue                                  # forms adducts -> a real molecule
-        cnt = C.parse_formula(nf)
-        if cnt.get("C", 0) < 1 or _oc(cnt) > FRAG_OC_MAX:
-            continue                                  # composition gate: low-O cores only
-        i = chans["[M+H]+"]
-        # leg (b): a heavier assigned co-varying parent at a facile loss
-        parent = _find_covarying_parent(merged, nf, cnt, keeps_parent)
-        if parent is None:
-            # only leg (a): scrutiny flag, NO relabel
-            _append_note(merged, i,
-                         f"adduct-less (Σadduct/[M+H]+ {ratio:.2f} < {FRAG_ADDUCT_RATIO}) "
-                         "-- scrutinise as a possible in-source fragment")
-            flagged += 1
-            continue
-        pf, loss = parent
-        note = f"in-source fragment of {pf} ({loss})"
-        try:
-            # a real per-file ledger (peak_id + role + locked) goes through the
-            # invariant-enforcing API; the merged align() frame (no locked column)
-            # is relabelled by index.
-            if {"peak_id", "role", "locked"} <= set(merged.columns):
-                L.mark_fragment(merged, merged.at[i, "peak_id"], note)
-            else:
-                _mark_fragment_byidx(merged, i, note)
-        except Exception as e:
-            log(f"[plausibility] fragment relabel skipped for {nf}: {e}")
-            continue
-        if audit is not None:
-            audit.append({
-                "mz": merged.at[i, "mz"] if "mz" in merged.columns else None,
-                "neutral_formula": nf, "before_tier": str(merged.at[i, "tier"])
-                if "tier" in merged.columns else "",
-                "after_tier_or_role": "fragment", "reason": note,
-                "evidence": f"Σadduct/[M+H]+={ratio:.2f}", "degeneracy_note": "",
-                "n_iso": _iso_count(merged.at[i, "isotopologues"])
-                if "isotopologues" in merged.columns else 0})
-        relabeled += 1
-    log(f"[plausibility] adduct-less fragments: {relabeled} relabeled (full "
-        f"triangulation), {flagged} flagged (adduct-ratio only)")
-    return {"relabeled": relabeled, "flagged": flagged}
-
-
-def _mark_fragment_byidx(merged, i, note):
-    """Role->fragment on a merged frame that has no peak_id / role column: set the
-    role column (creating it if absent, defaulting M0) so report.py's role filter
-    and the VK/cluster drivers see the fragment. commentary is ensured by the
-    caller."""
-    if "role" not in merged.columns:
-        merged["role"] = L.ROLE_M0
-    merged.at[i, "role"] = L.ROLE_FRAGMENT
-    merged.at[i, "commentary"] = note
-
-
-def _find_covarying_parent(merged, child_nf, child_cnt, keeps_parent):
-    """Return (parent_formula, loss_label) for a heavier ASSIGNED neutral that is a
-    facile-loss parent of `child_nf` AND co-varies above the co-rider ceiling, else
-    None. Deterministic: scans candidate parents in sorted order, takes the first
-    co-varying facile-loss match."""
-    for pf in sorted({str(x) for x in merged["neutral_formula"].dropna()}):
-        if pf == child_nf:
-            continue
-        pcnt = C.parse_formula(pf)
-        if C.neutral_mass(pcnt) <= C.neutral_mass(child_cnt):
-            continue
-        loss = _facile_loss(pcnt, child_cnt)
-        if loss is None:
-            continue
-        if keeps_parent(child_nf, pf):
-            return pf, loss
-    return None
-
-
-def _make_parent_test(merged, ts_peaks, r_min):
-    """Return covaries(child_nf, parent_nf) -> bool. The FULL triangulation's leg (b)
-    needs CO-VARIATION evidence, so WITHOUT a time series no parent ever qualifies
-    (the relabel is suppressed and the species only earns the scrutiny flag) --
-    deliberately conservative: a structural facile-loss link alone is not proof of
-    in-source fragmentation. WITH a batch time series it is the log1p-trace
-    correlation >= r_min between the child [M+H]+ and the parent's brightest
-    channel, which must beat the incidental co-rider ceiling."""
-    if ts_peaks is None or not len(getattr(ts_peaks, "index", [])):
-        return lambda child, parent: False   # no TS -> no co-variation -> no relabel
-
-    from . import timeseries as TS
-    mat, bin_mz = TS.build_matrix(ts_peaks)
-    if not len(mat):
-        return lambda child, parent: False
-    bm = bin_mz.sort_values()
-    arr = bm.to_numpy(); idx = bm.index.to_numpy()
-
-    def _logtrace(nf, adduct):
-        try:
-            mz = C.ion_mz(nf, adduct)
-        except Exception:
-            return None
-        j = np.searchsorted(arr, mz); best = None
-        for k in (j - 1, j):
-            if 0 <= k < len(arr):
-                ppm = abs(arr[k] - mz) / mz * 1e6
-                if ppm <= 8 and (best is None or ppm < best[1]):
-                    best = (idx[k], ppm)
-        if best is None or best[0] not in mat.columns:
-            return None
-        return np.log1p(mat[best[0]].fillna(0.0).clip(lower=0).to_numpy())
-
-    def covaries(child, parent):
-        ct = _logtrace(child, "[M+H]+")
-        if ct is None:
-            return False
-        for ad in ("[M+H]+", "[M+NH4]+", "[M+(CH4N2O)H]+", "[M+Na]+"):
-            pt = _logtrace(parent, ad)
-            if pt is None:
-                continue
-            ok = np.isfinite(ct) & np.isfinite(pt)
-            if ok.sum() >= 6 and np.std(ct[ok]) > 0 and np.std(pt[ok]) > 0 \
-                    and np.corrcoef(ct[ok], pt[ok])[0, 1] >= r_min:
-                return True
-        return False
-    return covaries
-
-
-# --- series coherence: dissolve mutually-uncorrelated detected series ---------
-# A real homolog / dehydrogenation series co-elutes (its members share a source),
-# so its members' time traces are mutually correlated. A SPURIOUS series (the
-# C5H2/C5H4 -H2 mass ladder the residual explainer chains through noise) has members
-# whose traces are internally uncorrelated (r ~ 0-0.25). When the median pairwise
-# log1p-correlation of a series falls below SERIES_R_MIN, the series is incoherent:
-# un-commit its members (demote to Candidate + below_assignability so they are never
-# silently lost). A co-varying real series is never touched.
-SERIES_R_MIN = 0.5
-
-
-def dissolve_incoherent_series(merged: pd.DataFrame, *, ts_peaks=None, audit=None,
-                               r_min: float = SERIES_R_MIN, log=print) -> dict:
-    """Demote the members of a detected series whose time traces are mutually
-    UNCORRELATED (median pairwise log1p-correlation < r_min). Needs a series
-    membership column (series_unit) AND a time series; inert without either.
-    Demote-only (Candidate + below_assignability), never deletes a member."""
-    if ts_peaks is None or "series_unit" not in merged.columns \
-            or "neutral_formula" not in merged.columns:
-        return {"series_dissolved": 0, "members_demoted": 0}
-    from . import timeseries as TS
-    mat, bin_mz = TS.build_matrix(ts_peaks)
-    if not len(mat):
-        return {"series_dissolved": 0, "members_demoted": 0}
-    bm = bin_mz.sort_values()
-    arr = bm.to_numpy(); idx = bm.index.to_numpy()
-
-    def _logtrace(nf, ad):
-        try:
-            mz = C.ion_mz(str(nf), str(ad))
-        except Exception:
-            return None
-        j = np.searchsorted(arr, mz); best = None
-        for k in (j - 1, j):
-            if 0 <= k < len(arr):
-                ppm = abs(arr[k] - mz) / mz * 1e6
-                if ppm <= 8 and (best is None or ppm < best[1]):
-                    best = (idx[k], ppm)
-        if best is None or best[0] not in mat.columns:
-            return None
-        return np.log1p(mat[best[0]].fillna(0.0).clip(lower=0).to_numpy())
-
-    has_role = "role" in merged.columns
-    series_n = members_n = 0
-    for unit, g in merged.dropna(subset=["series_unit"]).groupby("series_unit"):
-        if has_role:
-            g = g[g["role"] == L.ROLE_M0]
-        if len(g) < 3:                       # need >=3 members for a coherence read
-            continue
-        traces = []
-        for _, r in g.iterrows():
-            t = _logtrace(r["neutral_formula"], r.get("adduct", "[M+H]+"))
-            if t is not None and np.std(t) > 0:
-                traces.append(t)
-        if len(traces) < 3:
-            continue
-        rs = []
-        for a in range(len(traces)):
-            for b in range(a + 1, len(traces)):
-                ok = np.isfinite(traces[a]) & np.isfinite(traces[b])
-                if ok.sum() >= 6:
-                    rs.append(np.corrcoef(traces[a][ok], traces[b][ok])[0, 1])
-        if not rs or float(np.median(rs)) >= r_min:
-            continue                          # coherent (or unmeasurable) -> spare it
-        med = float(np.median(rs))
-        for i in g.index:
-            reason = (f"incoherent series {unit} (median pairwise r {med:.2f} < "
-                      f"{r_min}) -- members do not co-vary, likely a spurious mass ladder")
-            ni = _iso_count(merged.at[i, "isotopologues"]) if "isotopologues" in merged.columns else 0
-            _demote_row(merged, i, reason=reason, audit=audit,
-                        evidence=f"series_r={med:.2f}", degeneracy_note=None, n_iso=ni)
-            members_n += 1
-        series_n += 1
-    log(f"[plausibility] dissolved {series_n} incoherent series ({members_n} members demoted)")
-    return {"series_dissolved": series_n, "members_demoted": members_n}
 
 
 _AUDIT_COLS = ["mz", "neutral_formula", "before_tier", "after_tier_or_role",

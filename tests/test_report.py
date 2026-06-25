@@ -97,37 +97,6 @@ check("summary has peak count", (ss["metric"] == "peaks total").any())
 check("summary has tier rows", (ss["section"] == "Tiers").any())
 check("summary has sample id", (ss["value"] == "TEST").any())
 
-# fragment role: relabelled M0 -> fragment flows to its own sheet + ownership +
-# coverage, but is kept OUT of the analyte (Assigned/Candidates/Unique) sheets.
-fled = L.new_ledger(pd.DataFrame(
-    {"peak_id": ["P", "Q"], "mz": [180.10, 162.09], "height": [5e4, 2e4]}))
-L.commit_assignment(fled, "P", neutral_formula="C6H12O3", adduct="[M+H]+",
-                    ion_formula="C6H13O3+", ion_score=0.95, compound_score=0.95,
-                    ppm_error=0.1, pass_no=1, method="cheminfo+grid",
-                    confidence="High", commentary="parent")
-qi = fled.index[fled["peak_id"] == "Q"][0]
-fled.at[qi, "role"] = L.ROLE_FRAGMENT
-fled.at[qi, "neutral_formula"] = "C6H10O2"
-fled.at[qi, "adduct"] = "[M+H]+"
-fled.at[qi, "commentary"] = "in-source fragment of C6H12O3 (H2O)"
-fsheets = R.build_sheets(fled, "ambient-air", sample_id="FRAG")
-check("Fragment ions sheet present", "Fragment ions" in fsheets, list(fsheets))
-fr = fsheets["Fragment ions"]
-check("fragment row carries parent from commentary",
-      len(fr) == 1 and fr["parent"].iloc[0] == "C6H12O3", fr.to_dict("records"))
-check("fragment excluded from Assigned (not an analyte)",
-      "C6H10O2" not in set(fsheets["Assigned"]["neutral_formula"]))
-check("fragment excluded from Unique formulas",
-      "C6H10O2" not in set(fsheets["Unique formulas"].get("neutral_formula", pd.Series(dtype=object))))
-check("fragment kept in Peak ownership", "Q" in set(fsheets["Peak ownership"]["peak_id"]))
-fss = R.summary_stats(fled, sample_id="FRAG")
-check("coverage lists fragment ions row",
-      ((fss["section"] == "Coverage") & (fss["metric"] == "fragment ions")).any())
-# a ledger with NO fragments must not grow a fragment coverage row
-nss = R.summary_stats(led, sample_id="TEST")
-check("no fragment coverage row when there are no fragments",
-      not ((nss["section"] == "Coverage") & (nss["metric"] == "fragment ions")).any())
-
 # excel write (needs openpyxl)
 try:
     import openpyxl  # noqa: F401

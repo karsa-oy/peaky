@@ -16,7 +16,6 @@ from ledger columns, so they are reproducible.
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 import numpy as np
@@ -50,18 +49,6 @@ def _alts_to_text(cell) -> str:
             seg += ")"
         parts.append(seg)
     return "; ".join(parts)
-
-
-_FRAG_PARENT_RE = re.compile(r"fragment of ([A-Za-z0-9+\-\[\]().]+)")
-
-
-def _fragment_parent(cell) -> object:
-    """Pull the parent neutral out of a fragment commentary string
-    ("in-source fragment of <parent> (<loss>)"), or NA when absent."""
-    if cell is None or (isinstance(cell, float) and pd.isna(cell)):
-        return pd.NA
-    m = _FRAG_PARENT_RE.search(str(cell))
-    return m.group(1) if m else pd.NA
 
 
 def _iso_to_text(cell) -> str:
@@ -239,19 +226,6 @@ def build_sheets(ledger: pd.DataFrame, context: str = "ambient-air",
         "mz", "height", "commentary", "peak_id"]].copy().sort_values(
         "height", ascending=False)
 
-    # in-source fragments: real signal attributed to a heavier assigned parent
-    # at a facile neutral loss (relabelled by the plausibility step). Listed
-    # separately so they are visible but kept OUT of the analyte aggregations.
-    frag = led[led["role"] == L.ROLE_FRAGMENT].copy()
-    if len(frag):
-        frag["parent"] = frag["commentary"].map(_fragment_parent)
-        frag = (frag[["mz", "neutral_formula", "adduct", "parent",
-                      "commentary", "height", "peak_id"]]
-                .sort_values("height", ascending=False))
-    else:
-        frag = pd.DataFrame(columns=["mz", "neutral_formula", "adduct", "parent",
-                                     "commentary", "height", "peak_id"])
-
     # below-assignability: M0 commits flagged as mass-saturated O-monsters -- the
     # base mass fits but ~dozens of plausible ions sit within <=1 ppm, so the
     # formula is one arbitrary pick, NOT an identification. Listed as a constrained
@@ -278,7 +252,6 @@ def build_sheets(ledger: pd.DataFrame, context: str = "ambient-air",
         "Peak ownership": ownership,
         "Target list": target,
         "Reagent ions": reag,
-        "Fragment ions": frag,
     }
 
 
@@ -301,21 +274,16 @@ def summary_stats(ledger: pd.DataFrame, *, context: str = "",
     add("Run", "peaks total", n)
 
     role_label = {L.ROLE_M0: "M0 (has formula)", L.ROLE_ISO: "isotopologue children",
-                  L.ROLE_REAGENT: "reagent ions", L.ROLE_FRAGMENT: "fragment ions",
+                  L.ROLE_REAGENT: "reagent ions",
                   L.ROLE_UNEXPLAINED: "unexplained"}
     for role, label in role_label.items():
         cnt = st["by_role"].get(role, 0)
-        # fragment role only ever appears after the plausibility relabel; skip its
-        # all-zero row on runs that produced none, so the Summary stays unchanged.
-        if role == L.ROLE_FRAGMENT and not cnt:
-            continue
         add("Coverage", label,
             f"{cnt}  ({100 * st['count_frac_by_role'].get(role, 0):.1f}% of peaks, "
             f"{100 * st['signal_by_role'].get(role, 0):.1f}% of signal)")
     expl = (st["signal_by_role"].get(L.ROLE_M0, 0)
             + st["signal_by_role"].get(L.ROLE_ISO, 0)
-            + st["signal_by_role"].get(L.ROLE_REAGENT, 0)
-            + st["signal_by_role"].get(L.ROLE_FRAGMENT, 0))
+            + st["signal_by_role"].get(L.ROLE_REAGENT, 0))
     add("Coverage", "signal explained", f"{100 * expl:.1f}%")
 
     m0 = ledger[ledger["role"] == L.ROLE_M0]
@@ -398,11 +366,6 @@ def legend_sheet() -> pd.DataFrame:
         ("Methods", "completion:known-neutral", "Pass 5: cross-channel "
          "partners + series-gap fills of already-assigned neutrals "
          "(no new formula space)."),
-        ("Sheets", "Fragment ions", "In-source fragments: real signal "
-         "attributed to a heavier assigned parent neutral at a facile loss "
-         "(H2O / CO / CO2). Counted as explained signal but kept OUT of the "
-         "analyte counts, Van Krevelen and clustering (not an independent "
-         "compound). 'parent' names the neutral it was lost from."),
         ("Provenance", "ledger.csv", "The per-peak ledger is the source of "
          "truth; every sheet here is a mechanical view of it. Commentary "
          "strings are generated from ledger columns and are reproducible."),
@@ -583,7 +546,7 @@ def write_markdown(result: dict, path: str | Path) -> Path:
          f"({st['by_role']['unexplained']}/{st['n_peaks']} unexplained)  |  "
          if "count_frac_by_role" in st else "- ")
         + f"Signal explained: "
-        f"{100*(st['signal_by_role']['M0']+st['signal_by_role']['iso_child']+st['signal_by_role']['reagent']+st['signal_by_role'].get('fragment', 0)):.1f}%",
+        f"{100*(st['signal_by_role']['M0']+st['signal_by_role']['iso_child']+st['signal_by_role']['reagent']):.1f}%",
     ]
     if tier_line:
         lines.append(f"- Tiers: {tier_line}")
