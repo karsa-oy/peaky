@@ -311,20 +311,10 @@ def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
     if prof.polarity == "+":
         from . import cleanup
         cleanup.prefer_amine_over_ammonium(merged, ts_peaks=ts_peaks, r_min=amine_r_min, log=log)
-    # HARDENED plausibility, adduct-/TS-aware (merged level, demote/relabel-only):
-    #   * adduct-less in-source fragments -> role=fragment (full triangulation:
-    #     adduct ratio + a mass-consistent co-varying parent). Positive mode only.
-    #   * series-coherence: dissolve detected series whose members are mutually
-    #     uncorrelated in time (needs ts_peaks + a series_unit column).
     from . import plausibility as PL
     summary_plaus = {}
-    if prof.polarity == "+":
-        summary_plaus["fragments"] = PL.relabel_adduct_less_fragments(
-            merged, ts_peaks=ts_peaks, polarity=prof.polarity, audit=plaus_audit, log=log)
-    summary_plaus["series"] = PL.dissolve_incoherent_series(
-        merged, ts_peaks=ts_peaks, audit=plaus_audit, log=log)
-    # one audit row per touched peak (per-file O/C-monster + carbon-cluster demotes
-    # AND the merged fragment/series checks); always written for a stable artifact set.
+    # one audit row per touched peak (per-file O/C-monster + carbon-cluster demotes);
+    # always written for a stable artifact set.
     n_audit = PL.write_audit(plaus_audit, os.path.join(TAB, f"plausibility_audit_{prof.name}.csv"))
     log(f"[assign_batch] plausibility audit: {n_audit} touched peaks "
         f"-> tables/plausibility_audit_{prof.name}.csv")

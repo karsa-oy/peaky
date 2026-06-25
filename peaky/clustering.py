@@ -28,7 +28,6 @@ import pandas as pd
 
 from . import analyte_viz as V
 from . import cluster as CL
-from . import ledger as L
 from . import paths as PT
 from . import timeseries as TS
 
@@ -65,13 +64,7 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
     if merged is None:
         merged = os.path.join(OUT, "merged_ledger.csv")
     merged = pd.read_csv(merged) if isinstance(merged, str) else merged.copy()
-    # stamp the M0 role the analyte clustering expects, but PRESERVE any 'fragment'
-    # relabel (plausibility step) so those rows are dropped from the analyte
-    # channel set below — a fragment is not an independent analyte to cluster.
-    if "role" in merged.columns:
-        merged["role"] = merged["role"].where(merged["role"] == L.ROLE_FRAGMENT, "M0")
-    else:
-        merged["role"] = "M0"
+    merged["role"] = "M0"                                  # analyte_table expects a role col
 
     if isinstance(ts, str):
         ts = pd.read_parquet(os.path.expanduser(ts))

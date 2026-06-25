@@ -67,11 +67,9 @@ check("scan empty frame -> []", PL.scan(pd.DataFrame()) == [])
 
 
 # ===========================================================================
-# Stage 3: HARDENED demote/relabel gates (the shared oracle + the demotes)
+# Stage 3: HARDENED demote gates (the shared oracle + the demotes)
 # ===========================================================================
-import numpy as np                      # noqa: E402
 from peaky import chemistry as C        # noqa: E402
-from peaky import ledger as L           # noqa: E402
 
 # --- shared oracle: is_oxygen_monster / is_carbon_cluster ---
 def cf(s): return C.parse_formula(s)
@@ -170,80 +168,6 @@ PL.demote_implausible(ledboth, audit=[], log=lambda *a: None)
 check("demote_implausible: demote-only, never deletes a row", len(ledboth) == n_before)
 check("demote_implausible: no row left without a tier value",
       ledboth["tier"].isin(["Assigned", "Candidate"]).all())
-
-# --- adduct-less fragment relabel (full triangulation needs TS) ---
-_parent, _child = "C6H12O3", "C5H12O2"     # child = parent - CO (a facile loss)
-check("fragment: facile-loss CO detected",
-      PL._facile_loss(C.parse_formula(_parent), C.parse_formula(_child)) == "CO")
-_mzc, _mzp = C.ion_mz(_child, "[M+H]+"), C.ion_mz(_parent, "[M+H]+")
-_t = np.linspace(1, 100, 30)
-_rows = []
-for _s, _sc in enumerate(_t):
-    _rows.append(dict(sample_item_id=f"s{_s}", mz=_mzc, height=_sc * 10))
-    _rows.append(dict(sample_item_id=f"s{_s}", mz=_mzp, height=_sc * 8 + 0.01 * _s))
-_ts = pd.DataFrame(_rows)
-mfrag = pd.DataFrame([
-    dict(peak_id="pc", mz=_mzc, neutral_formula=_child, adduct="[M+H]+", tier="Assigned", ion_score=0.9, height=5000.0, role="M0"),
-    dict(peak_id="pp", mz=_mzp, neutral_formula=_parent, adduct="[M+H]+", tier="Assigned", ion_score=0.9, height=8000.0, role="M0"),
-    dict(peak_id="pn", mz=C.ion_mz(_parent, "[M+NH4]+"), neutral_formula=_parent, adduct="[M+NH4]+", tier="Assigned", ion_score=0.8, height=2000.0, role="M0"),
-])
-afr = []
-of = PL.relabel_adduct_less_fragments(mfrag, ts_peaks=_ts, polarity="+", audit=afr, log=lambda *a: None)
-check("fragment: adduct-less child + co-varying parent -> relabeled (full triangulation)",
-      of["relabeled"] == 1, of)
-check("fragment: child role -> fragment", mfrag.loc[0, "role"] == L.ROLE_FRAGMENT)
-check("fragment: commentary names the parent + loss",
-      mfrag.loc[0, "commentary"] == f"in-source fragment of {_parent} (CO)", mfrag.loc[0, "commentary"])
-check("fragment: parent (forms adducts) untouched", mfrag.loc[1, "role"] == "M0")
-check("fragment: audit records the relabel as a role change",
-      len(afr) == 1 and afr[0]["after_tier_or_role"] == "fragment")
-
-# only leg (a): adduct-less but NO time series -> scrutiny flag, NO relabel
-mfrag2 = pd.DataFrame([
-    dict(mz=_mzc, neutral_formula=_child, adduct="[M+H]+", tier="Assigned", ion_score=0.9, height=5000.0),
-    dict(mz=_mzp, neutral_formula=_parent, adduct="[M+H]+", tier="Assigned", ion_score=0.9, height=8000.0),
-    dict(mz=C.ion_mz(_parent, "[M+NH4]+"), neutral_formula=_parent, adduct="[M+NH4]+", tier="Assigned", ion_score=0.8, height=2000.0),
-])
-of2 = PL.relabel_adduct_less_fragments(mfrag2, ts_peaks=None, polarity="+", audit=[], log=lambda *a: None)
-check("fragment: leg-(a)-only (no TS) -> flag, never relabel", of2 == {"relabeled": 0, "flagged": 1}, of2)
-check("fragment: scrutiny flag written to commentary",
-      "scrutinise" in str(mfrag2.loc[0, "commentary"]))
-check("fragment: negative mode -> no-op",
-      PL.relabel_adduct_less_fragments(mfrag2.copy(), ts_peaks=None, polarity="-", audit=[], log=lambda *a: None)
-      == {"relabeled": 0, "flagged": 0})
-
-# --- series coherence: dissolve mutually-uncorrelated series only ---
-_forms = ["C5H2", "C5H4", "C5H6"]
-_rng = np.random.RandomState(0)
-def _series_ts(corr):
-    base = _rng.rand(40) * 100
-    rows = []
-    for fm in _forms:
-        mz = C.ion_mz(fm, "[M+H]+")
-        trace = (base * (1 + 0.01 * _rng.rand(40)) if corr else _rng.rand(40) * 100) + 1
-        for s in range(40):
-            rows.append(dict(sample_item_id=f"s{s}", mz=mz, height=trace[s]))
-    return pd.DataFrame(rows)
-def _series_merged():
-    return pd.DataFrame([dict(mz=C.ion_mz(fm, "[M+H]+"), neutral_formula=fm, adduct="[M+H]+",
-                              tier="Assigned", ion_score=0.8, role="M0", series_unit="-H2 ladder",
-                              below_assignability=False, commentary="", isotopologues="[]") for fm in _forms])
-ms_inc = _series_merged()
-audit_s = []
-os_inc = PL.dissolve_incoherent_series(ms_inc, ts_peaks=_series_ts(False), audit=audit_s, log=lambda *a: None)
-check("series: mutually-uncorrelated series dissolved", os_inc == {"series_dissolved": 1, "members_demoted": 3}, os_inc)
-check("series: all members -> Candidate + below_assignability",
-      (ms_inc["tier"] == "Candidate").all() and ms_inc["below_assignability"].all())
-check("series: audit one row per demoted member", len(audit_s) == 3)
-ms_coh = _series_merged()
-os_coh = PL.dissolve_incoherent_series(ms_coh, ts_peaks=_series_ts(True), audit=[], log=lambda *a: None)
-check("series: co-varying real series spared", os_coh["series_dissolved"] == 0 and (ms_coh["tier"] == "Assigned").all())
-check("series: no series_unit column -> inert",
-      PL.dissolve_incoherent_series(ms_inc.drop(columns=["series_unit"]), ts_peaks=_series_ts(False),
-                                    audit=[], log=lambda *a: None) == {"series_dissolved": 0, "members_demoted": 0})
-check("series: no time series -> inert",
-      PL.dissolve_incoherent_series(_series_merged(), ts_peaks=None, audit=[], log=lambda *a: None)
-      == {"series_dissolved": 0, "members_demoted": 0})
 
 # --- write_audit: deterministic + always a header ---
 import tempfile, os as _os    # noqa: E402
