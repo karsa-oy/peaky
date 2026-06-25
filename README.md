@@ -39,9 +39,11 @@ Peaky is a deterministic Python toolbox with two faces:
 - a **natural-language interface** — installed as a Claude Code skill, you drive it by asking; and
 - a **CLI** (`peaky`) for scripted / headless runs.
 
-Mascope's `match_compounds` is the only scorer, and the chemistry gates (integer
-DBE, Senior, O-cap, evidence-gated heteroatoms/halogens) are structural. **No LLM is
-in the assignment loop** — the AI orchestrates, it never does the chemistry — which is
+Mascope's scoring maths is the only scorer — run in-process by default via
+`mascope_tools` (same IsoSpec + `score_pattern`), with the network `match_compounds`
+as an opt-in fallback — and the chemistry gates (integer DBE, Senior, O-cap,
+evidence-gated heteroatoms/halogens) are structural. **No LLM is in the assignment
+loop** — the AI orchestrates, it never does the chemistry — which is
 why results are reproducible and auditable. It is not an autonomous agent; you stay
 in the loop and it asks when a choice (reagent, cutoff) actually matters.
 
@@ -152,9 +154,9 @@ Peaky is validated end-to-end on the **orange-peeling** CIMS experiment
 
 ## Development
 
-One ledger DataFrame (one row per peak; passes only fill/annotate), Mascope is the
-only scorer, chemistry gates are structural. Every change ships with a test, and the
-offline suite (no network) must stay green:
+One ledger DataFrame (one row per peak; passes only fill/annotate), Mascope's scoring
+maths is the only scorer (in-process by default), chemistry gates are structural. Every
+change ships with a test, and the offline suite (no network) must stay green:
 
 ```bash
 pytest tests/                        # or run any tests/test_*.py as a standalone script

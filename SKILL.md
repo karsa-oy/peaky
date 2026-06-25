@@ -34,10 +34,12 @@ Canonical home and iteration repo: `~/.claude/skills/mascope-peak-assign/`.
 
 Division of labor is the core design decision:
 
-- **Mascope is the scoring oracle.** `match_compounds` returns a
-  compound → ion → isotopologue tree; every node carries its own `match_score`
-  and the attributed `sample_peak_id`. We never invent a match score; we hand it
-  candidate neutral formulas and read its per-isotopologue verdict.
+- **Mascope is the scoring oracle.** Its isotope-scored maths runs **in-process by
+  default** via `mascope_tools` (`local_scoring.py`; IsoSpec + `score_pattern`),
+  with the network `match_compounds` as an opt-in fallback (`PEAKY_LOCAL_SCORING=0`).
+  Either way we get, per candidate ion, a per-isotopologue verdict (each
+  isotopologue's `match_score` + the attributed `sample_peak_id`). We never invent a
+  match score; we hand it candidate neutral formulas and read its verdict.
 - **We own candidate generation, chemistry plausibility, series logic, and
   arbitration** — i.e. _which_ formulas are worth asking about and _which_
   answer wins each peak.
@@ -343,7 +345,7 @@ already open. `peaky assign` emits one per run (plus a second over the unexplain
 offline suite must stay green**, no network (io_mascope live smoke gated behind
 `MASCOPE_LIVE=1`). `python3 tests/test_smoke.py` is a 2-second no-creds install check.
 Every module has a matching `tests/test*<module>.py`; CI (`.github/workflows/test.yml`)
-runs the suite on 3.11–3.13 with no credentials. Add a test with each change; keep it green.
+runs the suite on 3.12–3.13 with no credentials. Add a test with each change; keep it green.
 See `docs/ARCHITECTURE.md` for the design (ledger model, pass sequence, data
 flow), `README.md` for the dev loop, and `docs/ROADMAP.md` for current state +
 the open quality work + lessons.
