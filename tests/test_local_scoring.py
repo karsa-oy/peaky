@@ -45,6 +45,10 @@ check("_category(0.2) == unlikely", LS._category(0.2) == "unlikely")
 check("threshold boundary 0.8 -> probable", LS._category(0.8) == "probable")
 check("threshold boundary 0.4 -> possible", LS._category(0.4) == "possible")
 
-assert FAIL == 0, f"{FAIL} checks failed"
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+def test_local_scoring():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)
