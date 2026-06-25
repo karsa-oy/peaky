@@ -71,21 +71,56 @@ check("family_summary: oxidation family present", byname["oxidation"]["n_series"
 check("family_summary: every FAMILY represented",
       set(byname) == {lab for lab, *_ in GF.FAMILIES}, set(byname))
 
-# --- contaminant (element) families: shown ONLY if they form a series (ladder) --
+# --- panel-show rule: a family shows ONLY if its longest ladder has > 3 members --
 check("element_members: Si collected; F-monsters excluded, real PFCAs kept",
       set(GF.element_members(fmass, "Si")) == set(SI)
       and set(GF.element_members(fmass, "F")) == set(PFCA), GF.element_members(fmass, "F"))
-check("detect_series: Si has a short (2-rung) C2H6OSi ladder but no >=4 one",
+check("detect_series: Si has only a short (2-rung) C2H6OSi ladder (not > 3)",
       GF.detect_series(fmass, units=["C2H6OSi"], min_len=4) == []
       and len(__import__("peaky.series_gka", fromlist=["find_homolog_series"])
               .find_homolog_series(GF.element_members(fmass, "Si"), "C2H6OSi", min_len=2)) >= 1)
 shown = [f[0] for f in GF.present_families(fmass)]
-check("present_families: siloxane SHOWS on its short C2H6OSi ladder (D3->D4)",
-      "siloxane" in shown, shown)
-check("present_families: fluorinated SHOWS on the real PFCA CF2 ladder (monsters excluded)",
-      "fluorinated" in shown and set(GF.element_members(fmass, "F")) == set(PFCA), shown)
-check("present_families: organic families still need their ladder",
+check("present_families: siloxane DROPPED (longest C2H6OSi ladder is 2, not > 3)",
+      "siloxane" not in shown, shown)
+check("present_families: fluorinated DROPPED (longest PFCA CF2 ladder is 3, not > 3)",
+      "fluorinated" not in shown, shown)
+check("present_families: alkyl/oxidation SHOW (their ladders are > 3)",
       "alkyl" in shown and "oxidation" in shown, shown)
+check("_longest_ladder: reports the longest base-unit ladder per family",
+      GF._longest_ladder(fmass, GF.FAMILIES[0]) == 5            # alkyl CH2 chain
+      and GF._longest_ladder(fmass, GF.FAMILIES[3]) == 2,       # siloxane D3->D4
+      [GF._longest_ladder(fmass, f) for f in GF.FAMILIES])
+
+# --- per-panel zoom: frame the drawn span padded ~10%, not the full mass axis --
+import matplotlib                                                    # noqa: E402
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt                                      # noqa: E402
+
+_fig, _ax = plt.subplots()
+GF._zoom_to(_ax, [100.0, 200.0], [-0.1, 0.1])
+_x0, _x1 = _ax.get_xlim()
+check("_zoom_to: x range is the drawn span padded ~10% each side",
+      abs(_x0 - 90.0) < 1e-9 and abs(_x1 - 210.0) < 1e-9, (_x0, _x1))
+plt.close(_fig)
+
+_fig, _ax = plt.subplots()
+_ax.set_xlim(50, 750)                              # a full-range axis to override
+GF._zoom_to(_ax, [300.0], [0.0])                   # a single drawn point -> no-op
+check("_zoom_to: no-op with < 2 drawn points", _ax.get_xlim() == (50.0, 750.0),
+      _ax.get_xlim())
+plt.close(_fig)
+
+# a rendered alkyl panel must zoom to its CH2-chain span (~70-156 Da), not 50-750
+_fig, _ax = plt.subplots()
+_mass = np.array(list(fmass.values()))
+GF._panel(_ax, _mass, fmass, "CH2", "#1D9E75", "alkyl", None,
+          min_len=4, highlight_min_len=5, top_chains=10)
+_x0, _x1 = _ax.get_xlim()
+_chain = [fmass[f] for f in CH2_CHAIN]
+check("_panel: alkyl panel is zoomed to its drawn CH2 ladder span",
+      _x0 > 50 and _x1 < 750 and _x0 < min(_chain) and _x1 > max(_chain),
+      (_x0, _x1, min(_chain), max(_chain)))
+plt.close(_fig)
 
 # --- render smoke test -----------------------------------------------------
 with tempfile.TemporaryDirectory() as d:
