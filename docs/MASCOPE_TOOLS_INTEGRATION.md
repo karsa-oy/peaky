@@ -25,13 +25,11 @@ bounded isotope score).
   keep its own arbitration and use the library only for enumerate + score.
 - **Score parity is "similar"** (sufficient per spec): local vs backend on real ions
   e.g. `Br2-` 0.975 vs 1.0, `Br3-` 0.938 vs 0.994.
-- **15N nitrate adduct MASS fixed** in `mascope_tools` (was missing): `parse_ionization`
-  could not mass `+^NO3-` (pyteomics can't mass the `^N` symbol). Added
-  `utils.CARET_ISOTOPES = {"^N": "N[15]"}` + `utils.composition_mass()`; `+^NO3-` now
-  masses to 62.985401, 15N-14N nitrate delta = 0.997035 (exact). *File:
-  `mascope/libraries/tools/src/mascope_tools/composition/utils.py` — uncommitted in
-  that repo.* **This fixes only the MASS — 15N isotope-pattern SCORING is still broken;
-  see "Known limitation: 15N" below.**
+- **15N-labelled nitrate fully handled** (`mascope_tools` >= 2026.06.25): `+^NO3-`
+  masses correctly (62.985401) AND `predict_isotopes` produces the labelled envelope
+  (15N base + ~2% 14N satellite) via a self-contained custom-element convolution, with
+  per-reagent purity (`NO3_15N.purity = 0.98`). Validated by a molmass parity test.
+  Merged to mascope `develop` and released on PyPI.
 - **`peaky/local_scoring.py` built**: `score_candidates_local(peaks, formulas, adducts)`
   returns peaky's exact `flatten_match_tree` schema, looping `predict_isotopes` +
   `score_pattern` per candidate (no per-peak cap). Validated on `6B76`: schema matches,
@@ -85,39 +83,27 @@ by ~+0.07** (probable 0.8->~0.87, possible 0.4->~0.47) rather than recalibrating
 4. **Validate full pipeline** — run all 6 passes with local scoring on the Bromide
    subset, diff assignments vs the committed backend run
    (`peaky-output/2025-08-11-Bromide-...T120446Z/`).
-5. **15N-labelled nitrate scoring** — currently broken (mass-only); see "Known
-   limitation: 15N" below for the three tested gaps and the fix needed.
+5. **15N-labelled nitrate scoring** — DONE in `mascope_tools` >= 2026.06.25
+   (custom-element `predict_isotopes` + per-reagent purity).
 6. **Dependency** — add `mascope-tools` to peaky `pyproject.toml` (public PyPI); during
    dev use a `[tool.uv.sources]` editable override on the local checkout (like mascope-sdk).
 7. **Optional memory win** — emit only matched isotopologues (+ M0) instead of the full
    predicted envelope to shrink the per-sample frame further.
 
-## Known limitation: 15N-labelled nitrate scoring (NOT handled)
+## 15N-labelled nitrate scoring (resolved in mascope_tools >= 2026.06.25)
 
-The 15N-nitrate reagent (`NO3_15N`, adduct `[M+^NO3]-`) is **NOT correctly scored
-locally** — only the adduct mass is fixed. This is NOT a regression (it is a new path;
-the backend still scores 15N via its own re-anchor), but it must be closed before local
-scoring can replace the backend for 15N work. Three layered, tested gaps:
+Previously broken (mass-only). `predict_isotopes` now handles labelled `^X` custom
+elements self-contained: it computes the base (non-custom) envelope with IsoSpec, then
+convolves it with the labelled element's distribution (multinomial for `^N2`, Cartesian
+for several), yielding the **15N base + ~2% 14N satellite ~0.997 Da below**. Purity is a
+parameter (`predict_isotopes(..., purity=...)`), carried per reagent
+(`NO3_15N.purity = 0.98`); `combine_formula_and_ionization` forms the labelled ion via
+the `^N`-aware `parse_composition`. A molmass parity test guards against drift.
 
-1. **Ion construction fails.** `combine_formula_and_ionization(neutral, +^NO3-)` ->
-   `PyteomicsError: Invalid formula: O3^N` — pyteomics rejects the `^N` symbol, so the
-   ion is never formed.
-2. **IsoSpec can't express a heavy isotope via the formula string.**
-   `IsoThreshold(formula="...N[15]...")` -> `ValueError: garbage inside "[15]"`. No
-   isotope notation is accepted through the formula string at all.
-3. **The 98/2 distribution can't be modelled that way anyway.** A named isotope is 100%
-   pure; the reagent is **98% 15N / 2% 14N**. Partial labelling is only expressible via
-   IsoSpec's low-level custom-abundance API (`IsoSpecPy.Iso` with explicit
-   `isotopeMasses` / `isotopeProbabilities`).
-
-**Fix (in `mascope_tools`, not peaky):** `predict_isotopes` needs a labelled-atom path
-that (a) detects the `^N` carried by the adduct, (b) builds the distribution via the
-custom-abundance `Iso` API — natural atoms at natural abundance + the labelled N as
-`{15N: 0.98, 14N: 0.02}` — yielding the 15N base (98%) AND the 14N satellite (2%, ~0.997
-Da below). The purity (0.98) should be a parameter (a reagent property), not hardcoded.
-Note: the backend does not model 98/2 either (it treats the reagent N as natural
-abundance, then peaky `_reanchor_labelled_reagent` re-anchors), so a correct local path
-would be MORE accurate than the server.
+The Mascope backend still has its own (molmass-based) `predict_isotopes`; converging it
+onto this shared implementation and retiring the molmass fork is tracked as a separate
+issue. (Historically the backend modelled the reagent N as natural abundance and peaky's
+`_reanchor_labelled_reagent` re-anchored; the local path is now the more direct route.)
 
 ## Quick repro
 
