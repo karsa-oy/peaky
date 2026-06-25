@@ -1,8 +1,10 @@
 # Local scoring via `mascope_tools` (WIP)
 
-Status: **spike validated, foundation built, not yet wired as default.** Goal: replace
-the network `match_compounds` hot loop with in-process `mascope_tools.composition`,
-which is the same Mascope scoring maths run locally (IsoSpec + `score_pattern`).
+Status: **wired (opt-in `PEAKY_LOCAL_SCORING=1`) and full-pipeline-validated on Bromide;
+one integration bug found & fixed; threshold recalibration is the remaining open call.**
+Goal: replace the network `match_compounds` hot loop with in-process
+`mascope_tools.composition`, the same Mascope scoring maths run locally (IsoSpec +
+`score_pattern`).
 
 ## Why
 
@@ -66,6 +68,43 @@ reagents. The match score itself is indicative only; the local score is ~0.07
 optimistic vs the backend. So when switching to local, **shift peaky's tier thresholds
 by ~+0.07** (probable 0.8->~0.87, possible 0.4->~0.47) rather than recalibrating the
 (honest) library score. No score-weight tuning needed.
+
+## Full-pipeline validation (Bromide, 6 representative samples)
+
+Ran the SAME batch end-to-end three ways on today's code and diffed final per-file M0
+assignments peak-by-peak (`scripts/diff_runs.py`, keyed on `sample_item_id|peak_id`):
+
+- **server path** (`match_compounds`): ~35 min, 1774 M0 peaks — the baseline.
+- **local path, first cut**: ~18 min but only 1591 M0 peaks, **0.874** agreement.
+  Diagnosed a **−10% coverage regression**: 486 server-confident peaks (eff≥0.8) left
+  `unexplained`, dominated by the `[M-H]-` channel (66 local vs **582** server M0s).
+- **local path, after the fix**: ~8–18 min, 2149 M0 peaks, **0.932** agreement,
+  `[M-H]-` fully recovered (594 M0s).
+
+**The bug (fixed):** the server names deprotonation `-H+` ("remove a proton H⁺") with
+`ionization_mechanism_polarity='-'`, but it yields an ANION. The dispatch reverse-maps
+mechanism_ids straight to that name and hands it to `parse_ionization`, which reads the
+trailing `+` as net charge **+1** — so every `[M-H]-` candidate was scored as a +1
+cation, predicted the wrong m/z and matched nothing, silently dropping the whole
+deprotonation channel (37% of Bromide assignments). The parity eval never hit this
+because it used `adduct_to_mech` (correct `-H-`); only the pipeline dispatch uses
+`_mechanism_names`. **Fix:** `_mechanism_names` normalises the trailing sign to the
+mechanism's polarity (`-H+`→`-H-`); consistent adduct names are untouched. Guarded by
+`tests/test_mechanism_names.py`. (Positive-mode Uronium — `+H+`/`+NH4+` — was never
+affected, consistent with its 0.98 eval agreement.)
+
+**Post-fix residual differences are benign:** local assigns *more* than the server
+(2149 vs 1774), but the 599 local-only M0s are mostly real (median eff 0.845, 46%≥0.8;
+server had them `unexplained`/`iso_child`), and the 224 local misses are the server's
+*weak* ones (median eff 0.670) that local mostly re-reads as `iso_child`. The
+disagreement set is now M0-vs-iso_child interpretation calls plus the systematic
+**+0.052 score offset** (local runs optimistic, same as the eval's +0.07).
+
+**Open call — threshold recalibration:** the +0.052 offset inflates the Assigned tier
+(1739 vs 1361). Either de-bias the local `eff_score` by ~−0.05 to the server scale (one
+spot, keeps all existing gates/margins) OR shift peaky's tier thresholds +0.05 for the
+local path. Both are cosmetic for *which* peaks get found (the extra local peaks are
+mostly real); they matter for tier-as-confidence parity with historical server runs.
 
 ## Remaining to make it the default (next steps)
 

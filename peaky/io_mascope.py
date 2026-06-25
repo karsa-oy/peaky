@@ -593,15 +593,47 @@ def _reanchor_labelled_reagent(ion_rows: list[dict], *, delta: float, label: str
 MATCH_WORKERS = 5   # concurrent match_compounds batches (I/O-bound; server-safe)
 
 
+def _polarity_sign(pol) -> str | None:
+    """Server polarity field -> '+' / '-' (tolerates '+'/'-', 'pos'/'neg', ±1)."""
+    s = str(pol).strip().lower()
+    if s in ("+", "pos", "positive", "1", "+1"):
+        return "+"
+    if s in ("-", "neg", "negative", "-1"):
+        return "-"
+    return None
+
+
 def _mechanism_names(client, mechanism_ids: list[str] | None) -> list[str]:
-    """Reverse-map resolved ionization-mechanism ids -> their mascope names
-    ('+Br-', '-H+', '+^NO3-'), which mascope_tools.parse_ionization consumes."""
+    """Reverse-map resolved ionization-mechanism ids -> mascope mechanism strings
+    that `mascope_tools.parse_ionization` charges CORRECTLY.
+
+    The server's name trailing sign is the *added/removed species'* sign, not the
+    net ion charge: deprotonation is named '-H+' (remove H+) yet yields an ANION.
+    `parse_ionization` reads the trailing sign as the net charge, so '-H+' would
+    score as a +1 cation and match nothing -- silently dropping the whole [M-H]-
+    channel. The server disambiguates via `ionization_mechanism_polarity`, so we
+    normalise the trailing sign to that polarity ('-H+' -> '-H-'); '+Br-'/'+NH4+'
+    etc. already agree and are unchanged."""
     if not mechanism_ids:
         return []
     table = client.ionization.list()
-    id2name = {r.ionization_mechanism_id: r.ionization_mechanism
-               for r in table.itertuples()}
-    return [id2name[m] for m in mechanism_ids if m in id2name]
+    id2 = {
+        r.ionization_mechanism_id: (
+            r.ionization_mechanism,
+            r.ionization_mechanism_polarity,
+        )
+        for r in table.itertuples()
+    }
+    out = []
+    for m in mechanism_ids:
+        if m not in id2:
+            continue
+        name, pol = id2[m]
+        sign = _polarity_sign(pol)
+        if sign and name and len(name) > 1 and name[-1] in "+-" and name[-1] != sign:
+            name = name[:-1] + sign  # '-H+' (deprotonation, neg polarity) -> '-H-'
+        out.append(name)
+    return out
 
 
 def _score_candidates_local(client, sample_id, formulas, mechanism_ids):
