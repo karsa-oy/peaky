@@ -26,6 +26,10 @@ classifiers = [
 
 dependencies = [
     "mascope-sdk>=2026.6.12",
+    # In-process scoring backend, now the DEFAULT (PEAKY_LOCAL_SCORING=0 falls back
+    # to the network match_compounds path). >=2026.6.25 carries the 15N-labelled
+    # custom-element isotope prediction. See docs/MASCOPE_TOOLS_INTEGRATION.md.
+    "mascope-tools>=2026.6.25",
     "pandas>=2.1",
     "pyarrow>=14",          # parquet engine — the per-batch TS (*_ts.parquet) is read/written across the pipeline
     "numpy>=1.24",
@@ -41,10 +45,9 @@ dev = ["pytest>=8.0"]
 # (pdf_report.compress_pdf). Absent these, the report still builds; only the
 # `_compressed.pdf` is skipped.
 compress = ["PyMuPDF>=1.23", "Pillow>=9.0"]
-# Experimental in-process scoring backend (local, no network) via mascope_tools.
-# See docs/MASCOPE_TOOLS_INTEGRATION.md. >=2026.6.25 carries the 15N-labelled
-# custom-element isotope prediction (Br/Ur work on older releases too).
-local-scoring = ["mascope-tools>=2026.6.25"]
+# Back-compat: `mascope-peaky[local-scoring]` used to pull in the (then-optional)
+# local backend. It is now a core dependency, so this extra is a harmless no-op.
+local-scoring = []
 
 [project.urls]
 Repository = "https://github.com/karsa-oy/peaky"

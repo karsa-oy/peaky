@@ -72,3 +72,17 @@ def test_polarity_sign_tolerant():
     assert IO._polarity_sign("POS") == "+"
     assert IO._polarity_sign("-1") == "-"
     assert IO._polarity_sign("?") is None
+
+
+def test_local_scoring_default_on_and_opt_out(monkeypatch):
+    # default (unset) -> local scoring on
+    monkeypatch.delenv("PEAKY_LOCAL_SCORING", raising=False)
+    assert IO._local_scoring_enabled() is True
+    # explicit truthy stays on
+    for v in ("1", "true", "yes", "on"):
+        monkeypatch.setenv("PEAKY_LOCAL_SCORING", v)
+        assert IO._local_scoring_enabled() is True
+    # escape hatch back to the server path
+    for v in ("0", "false", "no", "off", ""):
+        monkeypatch.setenv("PEAKY_LOCAL_SCORING", v)
+        assert IO._local_scoring_enabled() is False
