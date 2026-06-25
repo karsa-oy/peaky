@@ -80,6 +80,8 @@ check("flatten([]) -> empty df", len(IO.flatten_match_tree([])) == 0)
 
 
 # ---------- score_candidates failure policy ----------
+# This exercises the SERVER (match_compounds) batching/failure path; local scoring
+# is now the default, so force the server path for these checks.
 class _Matching:
     def match_compounds(self, sample_id, formulas, match_params, ionization_mechanism_ids):
         if "BAD" in formulas:
@@ -91,18 +93,26 @@ class _Client:
     matching = _Matching()
 
 
+_prev_local = os.environ.get("PEAKY_LOCAL_SCORING")
+os.environ["PEAKY_LOCAL_SCORING"] = "0"
 try:
-    IO.score_candidates(_Client(), "SID", ["A", "BAD"], batch=1, workers=1)
-    raised = False
-except RuntimeError as e:
-    raised = "match_compounds failed" in str(e) and "BAD" in str(e)
-check("score_candidates raises on partial batch failure by default", raised)
+    try:
+        IO.score_candidates(_Client(), "SID", ["A", "BAD"], batch=1, workers=1)
+        raised = False
+    except RuntimeError as e:
+        raised = "match_compounds failed" in str(e) and "BAD" in str(e)
+    check("score_candidates raises on partial batch failure by default", raised)
 
-partial = IO.score_candidates(_Client(), "SID", ["A", "BAD"], batch=1,
-                              workers=1, allow_partial=True)
-check("score_candidates allow_partial records failures",
-      len(partial.attrs.get("match_batch_failures", [])) == 1,
-      partial.attrs)
+    partial = IO.score_candidates(_Client(), "SID", ["A", "BAD"], batch=1,
+                                  workers=1, allow_partial=True)
+    check("score_candidates allow_partial records failures",
+          len(partial.attrs.get("match_batch_failures", [])) == 1,
+          partial.attrs)
+finally:
+    if _prev_local is None:
+        os.environ.pop("PEAKY_LOCAL_SCORING", None)
+    else:
+        os.environ["PEAKY_LOCAL_SCORING"] = _prev_local
 
 # ---------- fetch_batch_peaks escapes regex metacharacters in the batch name -----
 # The ^ in a '^Nitrate' (15N) batch name is a regex anchor; the TS loader must
