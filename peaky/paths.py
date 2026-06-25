@@ -23,6 +23,18 @@ from __future__ import annotations
 
 import os
 
+# The installed package root (the `peaky/` directory). Resolve bundled resources
+# (e.g. `data/peaklists/`) and the workspace root from HERE, not from each calling
+# module's `__file__`, so modules stay correct regardless of which sub-package they
+# live in. `paths.py` itself stays at the package root, so this anchor is stable.
+PKG_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def pkg_data(*parts: str) -> str:
+    """Absolute path to a bundled data resource under `peaky/data/`."""
+    return os.path.join(PKG_ROOT, "data", *parts)
+
+
 # Names that intentionally stay at the run root (not routed into a subdir).
 ROOT_ANCHORS = frozenset({"merged_ledger.csv", "run_manifest.json", "batch_summary.json"})
 

@@ -50,12 +50,18 @@ def _degen_summary(led) -> dict:
 def _module_hashes() -> dict:
     """sha1 of each module file -- the manifest must pin the EXACT code of a
     run; static version strings are not bumped on every edit (v15-vs-v16
-    lesson: two runs differed only via an un-versioned passes.py edit)."""
+    lesson: two runs differed only via an un-versioned passes.py edit).
+
+    Anchored at the package root and RECURSIVE (`rglob`) so it keeps pinning every
+    module regardless of sub-package nesting; keys are package-relative POSIX paths
+    (e.g. `chem/chemistry.py`) so they stay unique across sub-packages."""
     import hashlib
     from pathlib import Path
-    d = Path(__file__).parent
-    return {p.name: hashlib.sha1(p.read_bytes()).hexdigest()[:12]
-            for p in sorted(d.glob("*.py"))}
+
+    from . import paths
+    d = Path(paths.PKG_ROOT)
+    return {p.relative_to(d).as_posix(): hashlib.sha1(p.read_bytes()).hexdigest()[:12]
+            for p in sorted(d.rglob("*.py"))}
 
 
 def run(sample_id: str, context: str = "ambient-air", *,

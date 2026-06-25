@@ -360,8 +360,8 @@ def build_parser() -> argparse.ArgumentParser:
 def _workspace_root() -> str:
     """The clone/workspace root (holds .env.example + the package). Falls back to
     the cwd for a non-editable install where the package isn't next to the repo."""
-    from . import io_mascope as IO
-    repo = os.path.dirname(os.path.dirname(os.path.abspath(IO.__file__)))
+    from . import paths
+    repo = os.path.dirname(paths.PKG_ROOT)  # parent of peaky/ == the clone root
     if not os.path.exists(os.path.join(repo, ".env.example")) \
             and os.path.exists(os.path.join(os.getcwd(), ".env.example")):
         return os.getcwd()

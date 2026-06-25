@@ -27,10 +27,13 @@ import os
 from dataclasses import dataclass
 
 from . import chemistry as C
+from .paths import pkg_data
 
 __version__ = "0.1.0"
 
-_DIR = os.path.join(os.path.dirname(__file__), "data", "peaklists")
+# Bundled peaklist catalog. Resolved from the package root (paths.pkg_data), not
+# this module's __file__, so it survives `reflists` moving into a sub-package.
+_DIR = pkg_data("peaklists")
 
 # batch-name / label keywords -> experimental-context tag (the metadata "unlock").
 # Conservative: only fire on clearly source-diagnostic words.
