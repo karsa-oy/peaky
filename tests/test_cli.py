@@ -113,7 +113,8 @@ with tempfile.TemporaryDirectory() as d:
     out = os.path.join(d, "w.html")
     rc = cli.main(["--env", os.path.join(d, "creds.env"), "gka", csv, "-o", out])
     check("`gka` subcommand returns 0", rc == 0, rc)
-    check("`gka` writes an HTML file", os.path.exists(out) and "<html" in Path(out).read_text())
+    check("`gka` writes an HTML file",
+          os.path.exists(out) and "<html" in Path(out).read_text(encoding="utf-8"))
     check("--env sets MASCOPE_ENV", os.environ.get("MASCOPE_ENV") == os.path.join(d, "creds.env"))
 
 def test_all():

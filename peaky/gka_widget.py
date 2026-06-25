@@ -169,7 +169,8 @@ def main(argv=None):
     led = pd.read_csv(a.ledger_csv)
     pts = build_points(led)
     out = a.out or (Path(a.ledger_csv).with_suffix("").as_posix() + "_gka.html")
-    Path(out).write_text(render_html(pts, Path(a.ledger_csv).stem, a.ppm))
+    Path(out).write_text(
+        render_html(pts, Path(a.ledger_csv).stem, a.ppm), encoding="utf-8")
     print(f"wrote {out}  ({len(pts)} points: "
           f"{sum(1 for p in pts if p[2]==0)} backbone / "
           f"{sum(1 for p in pts if p[2]==1)} low / "

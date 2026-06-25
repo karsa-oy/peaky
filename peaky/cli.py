@@ -177,13 +177,16 @@ def cmd_assign(args) -> None:
     manifest = {k: v for k, v in out.items() if k != "ledger"}
     Path(f"{base}_manifest.json").write_text(json.dumps(manifest, indent=2, default=str))
     Path(f"{base}_gka.html").write_text(
-        gka_widget.render_html(gka_widget.build_points(led), args.sample_id, args.ppm))
+        gka_widget.render_html(gka_widget.build_points(led), args.sample_id, args.ppm),
+        encoding="utf-8")  # HTML carries non-ASCII glyphs (▶/⏸); force UTF-8 on Windows
     # second widget over the UNEXPLAINED residual only — the honest place to hunt
     # for missed homologous structure
     un = led[led["role"] == "unexplained"]
-    Path(f"{base}_gka_unexplained.html").write_text(gka_widget.render_html(
-        gka_widget.build_points(un),
-        f"{args.sample_id} — UNEXPLAINED residual ({len(un)} peaks)", args.ppm))
+    Path(f"{base}_gka_unexplained.html").write_text(
+        gka_widget.render_html(
+            gka_widget.build_points(un),
+            f"{args.sample_id} — UNEXPLAINED residual ({len(un)} peaks)", args.ppm),
+        encoding="utf-8")
 
     st = out["stats"]
     expl = 100 * (st["signal_by_role"]["M0"] + st["signal_by_role"]["iso_child"]
@@ -242,7 +245,9 @@ def cmd_gka(args) -> None:
     led = pd.read_csv(args.ledger_csv)
     pts = gka_widget.build_points(led)
     out = args.out or (Path(args.ledger_csv).with_suffix("").as_posix() + "_gka.html")
-    Path(out).write_text(gka_widget.render_html(pts, Path(args.ledger_csv).stem, args.ppm))
+    Path(out).write_text(
+        gka_widget.render_html(pts, Path(args.ledger_csv).stem, args.ppm),
+        encoding="utf-8")  # HTML carries non-ASCII glyphs (▶/⏸); force UTF-8 on Windows
     print(f"wrote {out}  ({len(pts)} points)")
 
 
