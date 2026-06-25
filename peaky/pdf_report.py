@@ -105,6 +105,10 @@ def load_context(out_dir: str, *, tag: str, label: str, ts_path: str | None = No
     if rows:
         a = pd.concat(rows, ignore_index=True)
         ctx["role_count"] = a["role"].value_counts().to_dict()
+        # the BRIGHTEST representative full ledger (max total height) — the
+        # mass-defect / mass-error QC figure (qc_massdefect) reads it whole (all
+        # roles incl iso_child + unexplained), not the M0-only merged ledger.
+        ctx["bright_ledger"] = max(rows, key=lambda r: float(r["h"].sum()))
         ctx["role_signal"] = {k: float(v) for k, v in a.groupby("role")["h"].sum().items()}
         # signal share split into analyte (M0+iso) / reagent / unexplained — for an
         # honest "explained" headline: a Br- spectrum is mostly the reagent ion, so
@@ -839,6 +843,26 @@ def gka(ctx, pdf):
     _image_page(pdf, png, "")           # figure carries its own title
 
 
+def qc_massdefect(ctx, pdf):
+    """Two-panel mass-defect / mass-error QC figure, rendered from the BRIGHTEST
+    representative sample's FULL ledger (all roles, incl iso_child + unexplained) —
+    NOT the M0-only merged ledger. Panel (a): mass defect vs m/z over the five
+    tier/role categories (Assigned/Candidate · parent/iso-child + unexplained);
+    panel (b): ppm mass error vs m/z for the Assigned + Candidate M0 rows with a
+    0-line and a linear trend (a calibration-drift read). Skips when there is no
+    per-file ledger to source from."""
+    from . import qc_figure as QC
+    led = ctx.get("bright_ledger")
+    if led is None or not len(led) or "mz" not in getattr(led, "columns", []):
+        return
+    fig_dir = ctx.get("fig_dir") or ctx["out_dir"]
+    os.makedirs(fig_dir, exist_ok=True)
+    png = os.path.join(fig_dir, f"massdefect_masserror_{ctx['tag']}.png")
+    QC.render_qc(led, png, title=ctx.get("batch_name") or ctx["label"])
+    ctx["fig"]["qc"] = png
+    _image_page(pdf, png, "")           # figure carries its own title
+
+
 def families(ctx, pdf):
     for p in ctx["fig"].get("changing", []):
         _image_page(pdf, p, "")                         # A4-portrait page, own title
@@ -1072,7 +1096,7 @@ def assignments_table(ctx, pdf):
 
 
 SECTIONS = [cover, findings, coverage, composition, scrutiny, reference_lists, gka,
-            families, changers, clusters, methods, assignments_table]
+            qc_massdefect, families, changers, clusters, methods, assignments_table]
 
 
 def build(out_dir: str, *, tag: str, label: str, ts_path: str | None = None,

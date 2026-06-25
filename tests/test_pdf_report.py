@@ -31,12 +31,18 @@ with tempfile.TemporaryDirectory() as d:
         dict(mz=247.0, neutral_formula="C3H2F6O", adduct="[M+Br]-", tier="Assigned", ion_score=0.8, n_files=4, formula_agree=True),
         dict(mz=400.0, neutral_formula="C9H12N4O12", adduct="[M+Na]+", tier="Candidate", ion_score=0.94, n_files=1, formula_agree=True),  # N-monster, flagged
     ]).to_csv(f"{d}/merged_ledger.csv", index=False)
-    # one per-file ledger with roles (drives the role breakdown)
+    # one per-file ledger with roles (drives the role breakdown); the M0 row
+    # carries a tier + ppm_error + peak_id so the mass-defect/mass-error QC figure
+    # (qc_massdefect) has a calibrated point and a parented iso-child.
     pd.DataFrame([
-        dict(mz=169.1223, role="M0", neutral_formula="C10H16O2", height=10000),
-        dict(mz=170.1256, role="iso_child", neutral_formula=None, height=1100),
-        dict(mz=250.0, role="reagent", neutral_formula=None, height=500),
-        dict(mz=300.0, role="unexplained", neutral_formula=None, height=80),
+        dict(peak_id=1, mz=169.1223, role="M0", neutral_formula="C10H16O2", height=10000,
+             tier="Assigned", ppm_error=0.3, parent_peak_id=None),
+        dict(peak_id=2, mz=170.1256, role="iso_child", neutral_formula=None, height=1100,
+             tier=None, ppm_error=None, parent_peak_id=1),
+        dict(peak_id=3, mz=250.0, role="reagent", neutral_formula=None, height=500,
+             tier=None, ppm_error=None, parent_peak_id=None),
+        dict(peak_id=4, mz=300.0, role="unexplained", neutral_formula=None, height=80,
+             tier=None, ppm_error=None, parent_peak_id=None),
     ]).to_csv(f"{d}/per_file/s1_ledger.csv", index=False)
     pd.DataFrame({"neutral_formula": ["C10H16O2", "C10H14O2", "C9H12O2"],
                   "cluster": [1, 1, 1], "cv": [0.5, 0.6, 0.4],
@@ -54,6 +60,9 @@ with tempfile.TemporaryDirectory() as d:
           ctx.get("adduct_counts"))
     check("load_context: role breakdown present", "unexplained" in ctx.get("role_count", {}),
           ctx.get("role_count"))
+    check("load_context: brightest full per-file ledger retained for the QC figure",
+          ctx.get("bright_ledger") is not None and "role" in ctx["bright_ledger"].columns,
+          None if ctx.get("bright_ledger") is None else list(ctx["bright_ledger"].columns)[:3])
     check("load_context: role-signal split (analyte/reagent/unexplained)",
           set(ctx.get("role_signal_frac", {})) == {"analyte", "reagent", "unexplained"},
           ctx.get("role_signal_frac"))
@@ -79,6 +88,14 @@ with tempfile.TemporaryDirectory() as d:
                     sections=[R.findings, R.scrutiny])
     check("build: findings+scrutiny sections standalone OK",
           os.path.exists(out_f) and os.path.getsize(out_f) > 1500)
+
+    # the mass-defect / mass-error QC section builds standalone + writes its figure
+    out_q = R.build(d, tag="Ur", label="Ur⁺ CIMS", out_pdf=f"{d}/rq.pdf",
+                    sections=[R.qc_massdefect])
+    check("build: qc_massdefect section standalone OK",
+          os.path.exists(out_q) and os.path.getsize(out_q) > 1500)
+    check("build: qc_massdefect wrote the figure under figures/",
+          os.path.exists(f"{d}/figures/massdefect_masserror_Ur.png"))
 
     out = R.build(d, tag="Ur", label="Ur⁺ CIMS", generated="2026-01-01")
     check("build: PDF created", os.path.exists(out), out)
