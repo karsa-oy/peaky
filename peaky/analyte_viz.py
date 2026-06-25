@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 
 from . import chemistry as C
+from . import ledger as L
 from . import timeseries as TS
 
 __version__ = "0.1.0"
@@ -100,6 +101,28 @@ def analyte_table(ledger: pd.DataFrame, *, exclude_contaminant: bool = True
     else:
         m0 = m0.drop_duplicates("neutral_formula", keep="first")
     return m0.reset_index(drop=True)
+
+
+def fragment_table(ledger: pd.DataFrame) -> pd.DataFrame:
+    """The in-source fragments (role==fragment), with H/C, O/C and N count on
+    the NEUTRAL — the same Van Krevelen coordinates as analyte_table, so they
+    can be over-plotted as a flagged grey marker. Empty (no fragment rows) is the
+    common case and returns an empty frame with the VK columns."""
+    cols = ["neutral_formula", "adduct", "oc", "hc", "nC", "nH", "nO", "nN", "nS"]
+    if "role" not in ledger.columns:
+        return pd.DataFrame(columns=cols)
+    fr = ledger[ledger["role"] == L.ROLE_FRAGMENT].copy()
+    fr = fr[fr["neutral_formula"].notna() & (fr["neutral_formula"].astype(str) != "")]
+    if not len(fr):
+        return pd.DataFrame(columns=cols)
+    cnt = fr["neutral_formula"].map(lambda f: C.parse_formula(str(f)))
+    for col, el in (("nC", "C"), ("nH", "H"), ("nO", "O"), ("nN", "N"), ("nS", "S")):
+        fr[col] = cnt.map(lambda c, el=el: c.get(el, 0))
+    fr = fr[fr["nC"] > 0].copy()
+    fr["hc"] = fr["nH"] / fr["nC"]
+    fr["oc"] = fr["nO"] / fr["nC"]
+    fr = fr.drop_duplicates("neutral_formula", keep="first")
+    return fr[[c for c in cols if c in fr.columns]].reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------
@@ -379,6 +402,7 @@ def render_van_krevelen(analytes: pd.DataFrame, path: str, *, title: str = "") -
 
 _BACKBONE_ORDER = ("CHO", "CHON", "CHOS")
 _BACKBONE_COLORS = {"CHO": "#1D9E75", "CHON": "#7F77DD", "CHOS": "#D85A30"}
+_FRAGMENT_COLOR = "#7A7A7A"   # in-source fragments: grey, flagged, not analytes
 
 
 def backbone_class(formula: str) -> str:
@@ -394,10 +418,15 @@ def backbone_class(formula: str) -> str:
 
 
 def render_van_krevelen_full(analytes: pd.DataFrame, path: str, *, title: str = "",
-                             xmax: float = 1.4, ymax: float = 4.2, dpi: int = 150) -> str:
+                             xmax: float = 1.4, ymax: float = 4.2, dpi: int = 150,
+                             fragments: pd.DataFrame | None = None) -> str:
     """Van Krevelen showing EVERY assigned peak, coloured by CHO/CHON/CHOS BACKBONE
     (Si/F/halogen folded into their backbone class, not split out). Changing
     analytes solid with a white edge; flat ones dimmed. Size = log intensity.
+
+    `fragments` (role==fragment neutrals, from fragment_table) are over-plotted
+    as a distinct grey marker with a 'fragment' legend entry — visible but flagged
+    as not-an-analyte. No-op when None / empty.
     """
     import matplotlib
     matplotlib.use("Agg")
@@ -420,6 +449,11 @@ def render_van_krevelen_full(analytes: pd.DataFrame, path: str, *, title: str = 
             ax.scatter(gc["oc"], gc["hc"], s=sz.loc[gc.index], c=col, alpha=0.9,
                        linewidths=0.4, edgecolors="white")
         ax.scatter([], [], c=col, s=60, label=f"{kl}  (n={len(g)})")
+    if fragments is not None and len(fragments):
+        ax.scatter(fragments["oc"], fragments["hc"], s=44, c=_FRAGMENT_COLOR,
+                   marker="X", alpha=0.85, linewidths=0.4, edgecolors="white")
+        ax.scatter([], [], c=_FRAGMENT_COLOR, s=60, marker="X",
+                   label=f"fragment  (n={len(fragments)})")
     ax.scatter([], [], c="0.5", s=60, alpha=0.3, label="faded = flat · solid = changing")
     ax.set_xlabel("O/C", fontsize=12); ax.set_ylabel("H/C", fontsize=12)
     ax.set_xlim(0, xmax); ax.set_ylim(0.3, ymax)
@@ -472,7 +506,14 @@ def van_krevelen_batch(out_dir, ts, profile, *, merged=None, tag=None, label=Non
     if merged is None:
         merged = os.path.join(OUT, "merged_ledger.csv")
     merged = pd.read_csv(merged) if isinstance(merged, str) else merged.copy()
-    merged["role"] = "M0"
+    # the merged ledger is assigned-compound rows; stamp the M0 role analyte_table
+    # expects, but PRESERVE any 'fragment' relabel (plausibility step) so those
+    # rows are kept off the Van Krevelen analyte aggregations.
+    if "role" in merged.columns:
+        merged["role"] = merged["role"].where(
+            merged["role"] == L.ROLE_FRAGMENT, "M0")
+    else:
+        merged["role"] = "M0"
     if isinstance(ts, str):
         ts = pd.read_parquet(os.path.expanduser(ts))
     ts = ts.copy()
@@ -490,14 +531,20 @@ def van_krevelen_batch(out_dir, ts, profile, *, merged=None, tag=None, label=Non
         an, f"{FIG}/van_krevelen_{tag}.png",
         title=f"{label}{subj} — Van Krevelen ({len(an)} analytes, {nchg} changing)")
 
-    # (2) FULL VK — EVERY assigned peak, coloured by composition (Si/F/halogen shown)
+    # (2) FULL VK — EVERY assigned peak, coloured by composition (Si/F/halogen shown).
+    # in-source fragments (role==fragment) are over-plotted grey, flagged, and kept
+    # OUT of the analyte table / counts (no-op when there are none).
     anf = analyte_table(merged, exclude_contaminant=False)
     anf = attach_dynamics(anf, ts, profile.adducts, mode="raw", bin_minutes=BIN_MIN)
     anf["fclass"] = anf["neutral_formula"].map(full_class)
+    frag = fragment_table(merged)
+    if len(frag):
+        log(f"{tag} FULL: {len(frag)} in-source fragments greyed (excluded from analytes)")
     log(f"{tag} FULL: {len(anf)} assigned neutrals; classes {anf['fclass'].value_counts().to_dict()}")
     render_van_krevelen_full(
         anf, f"{FIG}/van_krevelen_full_{tag}.png",
-        title=f"Van Krevelen — {batch_name}   ({len(anf)} assigned compounds)")
+        title=f"Van Krevelen — {batch_name}   ({len(anf)} assigned compounds)",
+        fragments=frag)
     anf[["neutral_formula", "adduct", "tier", "oc", "hc", "fclass", "median_cps", "cv", "changing"]] \
         .to_csv(f"{TAB}/van_krevelen_full_{tag}.csv", index=False)
     log(f"wrote {FIG}/van_krevelen_full_{tag}.png")

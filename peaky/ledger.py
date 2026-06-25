@@ -6,7 +6,7 @@ provenance + commentary, and the commit API enforces the structural invariants
 so no pass can corrupt the shared state:
 
   I1. Each peak has exactly one role: 'unexplained' | 'M0' | 'iso_child'
-      | 'reagent'.
+      | 'reagent' | 'artifact' | 'fragment'.
   I2. An 'iso_child' row points (parent_peak_id) to a peak that owns an M0
       assignment.
   I3. A peak that is already locked is immutable to later passes.
@@ -33,6 +33,9 @@ ROLE_ISO = "iso_child"
 ROLE_REAGENT = "reagent"
 ROLE_ARTIFACT = "artifact"   # instrumental: ringing / shoulder of a much
                              # brighter peak; not a real ion (not unexplained)
+ROLE_FRAGMENT = "fragment"   # in-source fragment of an assigned parent neutral;
+                             # real signal (counts as explained) but NOT an
+                             # independent analyte -> excluded from analyte aggs
 
 # Canonical column set. Identity columns come from the peak source; the rest are
 # filled by the assignment passes.
@@ -339,7 +342,7 @@ def validate(ledger: pd.DataFrame) -> list[str]:
         problems.append(f"duplicate peak_id rows: {dups[:5]}")
     # role domain
     bad_roles = set(ledger["role"]) - {ROLE_UNEXPLAINED, ROLE_M0, ROLE_ISO,
-                                       ROLE_REAGENT, ROLE_ARTIFACT}
+                                       ROLE_REAGENT, ROLE_ARTIFACT, ROLE_FRAGMENT}
     if bad_roles:
         problems.append(f"unknown roles: {bad_roles}")
     # I2: every iso_child points to an M0 owner
@@ -377,7 +380,8 @@ def stats(ledger: pd.DataFrame) -> dict:
     h_total = float(eff.sum(skipna=True))
     out = {"n_peaks": n, "by_role": {}, "signal_by_role": {},
            "count_frac_by_role": {}, "n_synthetic": int(synthetic.sum())}
-    for role in (ROLE_M0, ROLE_ISO, ROLE_REAGENT, ROLE_ARTIFACT, ROLE_UNEXPLAINED):
+    for role in (ROLE_M0, ROLE_ISO, ROLE_REAGENT, ROLE_FRAGMENT, ROLE_ARTIFACT,
+                 ROLE_UNEXPLAINED):
         rolem = led["role"] == role
         out["by_role"][role] = int((rolem & real).sum())
         out["signal_by_role"][role] = (
