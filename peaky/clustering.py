@@ -28,6 +28,7 @@ import pandas as pd
 
 from . import analyte_viz as V
 from . import cluster as CL
+from . import ledger as L
 from . import paths as PT
 from . import timeseries as TS
 
@@ -64,7 +65,13 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
     if merged is None:
         merged = os.path.join(OUT, "merged_ledger.csv")
     merged = pd.read_csv(merged) if isinstance(merged, str) else merged.copy()
-    merged["role"] = "M0"                                  # analyte_table expects a role col
+    # stamp the M0 role the analyte clustering expects, but PRESERVE any 'fragment'
+    # relabel (plausibility step) so those rows are dropped from the analyte
+    # channel set below — a fragment is not an independent analyte to cluster.
+    if "role" in merged.columns:
+        merged["role"] = merged["role"].where(merged["role"] == L.ROLE_FRAGMENT, "M0")
+    else:
+        merged["role"] = "M0"
 
     if isinstance(ts, str):
         ts = pd.read_parquet(os.path.expanduser(ts))
@@ -103,7 +110,7 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
     # ---- assigned analytes, clustered PER ION CHANNEL (formula+adduct) ----------
     # Cluster each ion channel SEPARATELY (not the per-neutral SUM): channels of one
     # neutral often diverge in time, so summing blends divergent shapes.
-    chan = merged.dropna(subset=["neutral_formula"]).copy()
+    chan = merged[merged["role"] == "M0"].dropna(subset=["neutral_formula"]).copy()
     chan = chan[chan["neutral_formula"].astype(str) != ""]
     chan["key"] = chan["neutral_formula"].astype(str) + "|" + chan["adduct"].astype(str)
     chan = chan.drop_duplicates("key")

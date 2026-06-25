@@ -41,6 +41,20 @@ check("no Si-bearing analyte survives",
 r = an[an.neutral_formula == "C7H16O3"].iloc[0]
 check("H/C and O/C on the neutral", abs(r.hc - 16/7) < 1e-6 and abs(r.oc - 3/7) < 1e-6,
       (r.hc, r.oc))
+
+# --- fragment role: kept off the analyte table, surfaced by fragment_table ---
+led_fr = pd.concat([led, pd.DataFrame([
+    dict(role="fragment", neutral_formula="C6H10O2", adduct="[M+H]+", tier="")])],
+    ignore_index=True)
+an_fr = V.analyte_table(led_fr)
+check("fragment role excluded from analyte_table",
+      "C6H10O2" not in set(an_fr["neutral_formula"]), an_fr["neutral_formula"].tolist())
+ftab = V.fragment_table(led_fr)
+check("fragment_table picks the fragment with VK coords",
+      len(ftab) == 1 and abs(ftab.iloc[0].oc - 2/6) < 1e-6 and abs(ftab.iloc[0].hc - 10/6) < 1e-6,
+      ftab.to_dict("records"))
+check("fragment_table is empty (no-op) when no fragment rows",
+      len(V.fragment_table(led)) == 0)
 check("CHON vs CHO class",
       an[an.neutral_formula == "C9H19NO"].iloc[0].klass == "CHON"
       and r.klass == "CHO")
