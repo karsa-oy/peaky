@@ -23,6 +23,8 @@ class ReagentProfile:
     ranges: str                     # grid element ranges for local enumeration
     detect_adduct: str | None       # presence of this adduct => this reagent (auto-detect)
     context: str = "ambient-air"    # default assign.run context (mode + VK priors + caps)
+    purity: float | None = None     # isotopic purity of a labelled reagent (e.g. 0.98 = 98% 15N);
+                                    # threaded to local scoring's predict_isotopes for '^X' adducts
     aliases: tuple = field(default_factory=tuple)
 
 
@@ -65,7 +67,7 @@ NO3_15N = ReagentProfile(
     adducts=["[M+^NO3]-", "[M-H]-"],
     normaliser="tic", reagent_ion_re=None,
     ranges="C0-40 H0-60 N0-3 O0-25 S0-2",
-    detect_adduct="[M+^NO3]-", context="ambient-air",
+    detect_adduct="[M+^NO3]-", context="ambient-air", purity=0.98,  # ~98% 15N reagent
     aliases=("no3-15n", "15no3", "15no3-", "^no3", "^no3-", "15n-nitrate",
              "nitrate-15n", "nitrate-15n-cims"))
 
