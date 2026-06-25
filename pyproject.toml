@@ -42,9 +42,9 @@ dev = ["pytest>=8.0"]
 # `_compressed.pdf` is skipped.
 compress = ["PyMuPDF>=1.23", "Pillow>=9.0"]
 # Experimental in-process scoring backend (local, no network) via mascope_tools.
-# See docs/MASCOPE_TOOLS_INTEGRATION.md. NOTE: 15N-nitrate scoring needs an
-# unreleased mascope_tools fix; the Br/Ur paths work on the published version.
-local-scoring = ["mascope-tools>=2026.5.4"]
+# See docs/MASCOPE_TOOLS_INTEGRATION.md. >=2026.6.25 carries the 15N-labelled
+# custom-element isotope prediction (Br/Ur work on older releases too).
+local-scoring = ["mascope-tools>=2026.6.25"]
 
 [project.urls]
 Repository = "https://github.com/karsa-oy/peaky"
