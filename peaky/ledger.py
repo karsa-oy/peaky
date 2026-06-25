@@ -313,6 +313,29 @@ def mark_reagent(ledger: pd.DataFrame, peak_id, label: str, *,
     return ledger
 
 
+def mark_fragment(ledger: pd.DataFrame, peak_id, label: str) -> pd.DataFrame:
+    """Relabel an M0 owner as an in-source FRAGMENT of a heavier assigned parent
+    (the plausibility adduct-less-fragment triangulation). The peak keeps its
+    neutral_formula / mz / score (the fragment IS that neutral); only the role
+    changes, so it stays out of the analyte aggregations but counts as explained
+    signal. Only an M0 owner may be relabelled (never an iso_child / reagent), and
+    a locked peak is refused -- a fragment relabel must never undo a hard commit."""
+    i = _row_index(ledger, peak_id)
+    if bool(ledger.at[i, "locked"]):
+        raise LedgerError(f"peak {peak_id!r} is locked; refusing to mark fragment")
+    if str(ledger.at[i, "role"]) != ROLE_M0:
+        raise LedgerError(f"peak {peak_id!r} is not an M0 owner (role "
+                          f"{ledger.at[i, 'role']!r}); refusing to mark fragment")
+    # an M0 with iso children would orphan them (I2); fragments are leaf neutrals
+    kids = ledger.index[ledger["parent_peak_id"] == peak_id]
+    if len(kids):
+        raise LedgerError(f"peak {peak_id!r} owns isotopologue children; refusing "
+                          "to relabel it a fragment")
+    ledger.at[i, "role"] = ROLE_FRAGMENT
+    ledger.at[i, "commentary"] = label
+    return ledger
+
+
 def mark_artifact(ledger: pd.DataFrame, peak_id, label: str) -> pd.DataFrame:
     """Mark a peak as an instrumental artifact (ringing/shoulder of a brighter
     peak). Only an UNEXPLAINED peak may be reclassified -- never demote a

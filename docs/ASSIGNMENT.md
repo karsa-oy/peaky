@@ -96,7 +96,7 @@ Mascope still scores every commit, so the honesty principle holds.
 ## Plausibility hardening
 
 A set of post-tiering gates demote (never delete) commitments that fit by mass but whose
-isotope evidence or ionization chemistry does not actually support them: **carbon-cluster**
+isotope evidence or ionization chemistry does not actually support them: **carbon-rich**
 (an F-free formula with implausibly low H/C), **implausible-ionization** (a heteroatom-free
 hydrocarbon detected through an anion channel that needs an acidic / H-bond site),
 **speculative-residual** (a residual commit resting on off-calibration charge, uncorroborated
@@ -104,6 +104,27 @@ multi-nitrogen, a zero-anchor series, or a single minor channel), and a **reagen
 relabel** (Br runs) that re-reads bromomethane fragments mis-assigned as a bare element +
 Br-cluster on their invariant ion composition. Each is conservative — it lowers a tier or
 relabels a role, it never fabricates an assignment.
+
+A second, **hardened** layer (`peaky/plausibility.py`) shares one oracle between the scrutiny
+flags and the demotes, so a flagged formula and a demoted formula can never disagree:
+
+- **Oxygen-lattice monster** — `O/C > 1.3` **and** the degeneracy audit flags the mass as
+  saturated. It is deliberately *not* niso-gated: a ¹³C satellite confirms the carbon count,
+  not the oxygen count, so a real ¹³C twin must not exempt a monster. Real HOMs top out at
+  `O/C ≈ 1.14` and are spared by the ratio cut.
+- **Carbon cluster** — `DBE/C ≥ 1.0` (equivalently `H ≤ N+2`), F-free, C ≥ 2, with a
+  **half-integer-DBE (radical) exemption**. The `≥ 1.0` cutoff spares real aromatics
+  (pyridine, coumarin, umbelliferone, furfural, phthalic anhydride all sit below 1.0).
+- **Adduct-less in-source fragment** (positive mode, merged level) — relabels an M0 as
+  `role=fragment` *only* on the full triangulation: an adduct ratio `Σ(adduct)/[M+H]+ < 0.05`
+  **and** a mass-consistent co-varying parent at a facile loss (H₂O/CO/CO₂/CO+H₂O). The
+  adduct ratio alone earns a scrutiny commentary flag, never a relabel.
+- **Series coherence** — dissolves a detected homolog/dehydrogenation series whose members
+  are mutually uncorrelated in time (median pairwise log1p-r < 0.5); a co-varying real series
+  is never touched.
+
+Every touch is logged to `tables/plausibility_audit_<tag>.csv` (one row per peak: before/after
+tier-or-role, the reason, and the supporting evidence).
 
 ## The structural chemistry gates
 

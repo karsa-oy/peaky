@@ -47,6 +47,7 @@ shared by the writers and the report reader so the filenames can't drift.
 | `clusters_changing_<tag>.csv` / `.xlsx` | Cluster membership; the XLSX has one tab per cluster (formula / channel / m/z / match_score / tier). |
 | `clusters_flat_<tag>.csv`, `clusters_changers_<tag>.csv`, `clusters_unassigned_<tag>.csv` | Membership for the flat / changers / unassigned figures. |
 | `channel_agreement_<tag>.csv` | QC: how often a multi-channel neutral's ion channels agree in time. |
+| `plausibility_audit_<tag>.csv` | One row per peak the hardened plausibility layer touched (demoted or relabelled): `before_tier`, `after_tier_or_role`, the `reason`, the supporting `evidence` (O/C or DBE/C or series r), the `degeneracy_note`, and `n_iso`. Always written (header-only when nothing was touched). |
 
 ### `report/` — the PDF
 

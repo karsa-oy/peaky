@@ -18,6 +18,36 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   avoid colliding with the renamed tier; the role word "assigned" is otherwise
   unchanged.
 
+### Added (plausibility hardening — Stage 3, demote/relabel-only)
+- **One shared plausibility oracle** (`peaky/plausibility.py`): `is_oxygen_monster`
+  (`O/C > 1.3`) and `is_carbon_cluster` (`DBE/C >= 1.0`, F-free, C≥2, half-integer-DBE
+  radicals EXEMPT) now back BOTH the scrutiny `implausible()`/`scan()` flags and the
+  new tier demotes, so a flagged formula and a demoted formula can never disagree. The
+  carbon-cluster cutoff is `DBE/C >= 1.0` (NOT the earlier 0.75 proposal, which wrongly
+  caught real aromatics — pyridine/coumarin/umbelliferone/furfural/phthalic anhydride
+  all sit below 1.0 and are spared).
+- **Per-file demotes** (`demote_oxygen_monsters`, `demote_carbon_clusters`, wired into
+  `assign.run` after tiering): an oxygen-lattice monster (`O/C > 1.3` AND degeneracy
+  mass-saturated — *not* niso-gated, since a ¹³C confirms carbon count, not the O count)
+  or a carbon cluster is demoted Assigned→Candidate + `below_assignability`. Never
+  deletes a row.
+- **Batch/merged-level checks** (wired into `assign_batch.run`): the adduct-less
+  **in-source fragment** relabel (M0→`role=fragment`) fires only on the full
+  triangulation — an adduct ratio `Σ(adduct)/[M+H]+ < 0.05` AND a mass-consistent
+  co-varying parent at a facile loss (H₂O/CO/CO₂/CO+H₂O) whose time-series trace beats
+  the co-rider correlation ceiling; adduct-ratio alone earns a scrutiny commentary flag
+  only. **Series-coherence** dissolves a detected homolog/dehydrogenation series whose
+  members are mutually uncorrelated in time (median pairwise log1p-r < 0.5).
+- **New artifact `tables/plausibility_audit_<tag>.csv`** — one row per touched peak
+  (`mz, neutral_formula, before_tier, after_tier_or_role, reason, evidence, degeneracy_note,
+  n_iso`); always written (header-only when nothing was touched) so the artifact set is
+  stable. `merged_ledger.csv` gains `role`/`commentary` columns when a fragment relabel
+  or scrutiny flag is recorded (fragments carry `role=fragment`; downstream analyte/VK/
+  cluster aggregations already exclude that role).
+- **New ledger API `ledger.mark_fragment`** — relabel an M0 owner as a fragment role
+  (invariant-checked: refuses a locked peak, a non-M0 peak, or an M0 that owns
+  isotopologue children).
+
 ## [Unreleased] — 0.5.0 (reference peaklists + chemical-plausibility hardening)
 
 Adds a context-gated literature/contaminant peaklist layer and closes a set of

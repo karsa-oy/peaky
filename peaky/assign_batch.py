@@ -286,11 +286,13 @@ def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
         log(f"[assign_batch] reference lists active: {[rl.id for rl in reflists_active]} "
             f"(context {sorted(_tags) or 'contaminants-only'})")
     per_file, offsets, per_stats = {}, {}, []
+    plaus_audit: list = []     # per-file O-monster / carbon-cluster demotes, pooled
     for i, sid in enumerate(sample_ids, 1):
         log(f"[assign_batch] ({i}/{len(sample_ids)}) assigning {sid} ...")
         res = A.run(sid, context=context, log=log, reflists_active=reflists_active, **assign_kw)
         led = res["ledger"]
         led.to_csv(os.path.join(pfdir, f"{sid}_ledger.csv"), index=False)
+        plaus_audit.extend(res.get("plausibility_audit") or [])
         per_file[sid] = _m0(led)
         try:
             offsets[sid] = IO.estimate_offset(IO.fetch_peaks(client, sid, use_cache=True))
@@ -309,6 +311,23 @@ def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
     if prof.polarity == "+":
         from . import cleanup
         cleanup.prefer_amine_over_ammonium(merged, ts_peaks=ts_peaks, r_min=amine_r_min, log=log)
+    # HARDENED plausibility, adduct-/TS-aware (merged level, demote/relabel-only):
+    #   * adduct-less in-source fragments -> role=fragment (full triangulation:
+    #     adduct ratio + a mass-consistent co-varying parent). Positive mode only.
+    #   * series-coherence: dissolve detected series whose members are mutually
+    #     uncorrelated in time (needs ts_peaks + a series_unit column).
+    from . import plausibility as PL
+    summary_plaus = {}
+    if prof.polarity == "+":
+        summary_plaus["fragments"] = PL.relabel_adduct_less_fragments(
+            merged, ts_peaks=ts_peaks, polarity=prof.polarity, audit=plaus_audit, log=log)
+    summary_plaus["series"] = PL.dissolve_incoherent_series(
+        merged, ts_peaks=ts_peaks, audit=plaus_audit, log=log)
+    # one audit row per touched peak (per-file O/C-monster + carbon-cluster demotes
+    # AND the merged fragment/series checks); always written for a stable artifact set.
+    n_audit = PL.write_audit(plaus_audit, os.path.join(TAB, f"plausibility_audit_{prof.name}.csv"))
+    log(f"[assign_batch] plausibility audit: {n_audit} touched peaks "
+        f"-> tables/plausibility_audit_{prof.name}.csv")
     merged.to_csv(os.path.join(out_dir, "merged_ledger.csv"), index=False)
     jitter.to_csv(os.path.join(TAB, "jitter.csv"), index=False)
 
@@ -324,6 +343,8 @@ def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
         "n_in_all_files": int((merged["n_files"] == len(sample_ids)).sum()) if len(merged) else 0,
         "n_single_file": int((merged["n_files"] == 1).sum()) if len(merged) else 0,
         "formula_disagreements": int((~merged["formula_agree"]).sum()) if len(merged) else 0,
+        "plausibility": summary_plaus,
+        "plausibility_audit_rows": n_audit,
         "per_file": per_stats,
     }
     with open(os.path.join(out_dir, "batch_summary.json"), "w") as fh:

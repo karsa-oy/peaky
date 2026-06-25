@@ -10,8 +10,8 @@ import argparse
 import json
 
 from . import (chemistry, cleanup, contexts, degeneracy, io_mascope, isotopes,
-               ladders, ledger, passes, reagents, reflists, residual, series_gka,
-               siloxane, tiers, timeseries)
+               ladders, ledger, passes, plausibility, reagents, reflists, residual,
+               series_gka, siloxane, tiers, timeseries)
 
 __version__ = "0.4.0"
 
@@ -30,6 +30,7 @@ MODULE_VERSIONS = {
     "tiers": tiers.__version__,
     "degeneracy": degeneracy.__version__,
     "cleanup": cleanup.__version__,
+    "plausibility": plausibility.__version__,
     "siloxane": siloxane.__version__,
     "timeseries": timeseries.__version__,
 }
@@ -306,6 +307,14 @@ def run(sample_id: str, context: str = "ambient-air", *,
     # speculative residual-tail: residual:* commits that reached Assigned on weak
     # evidence (off-cal z, no-iso multi-N, 0-anchor series, sole minor channel).
     cleanup.demote_speculative_residual(led, cfg, log=log)
+    # HARDENED plausibility (shared oracle, demote-only): the oxygen-lattice
+    # monster (O/C>1.3 AND mass-saturated) and carbon-cluster (DBE/C>=1.0, F-free,
+    # radicals exempt) gates. Run AFTER tiering + degeneracy (it reads
+    # degeneracy_note) so it has the last word on tier; the touched peaks are
+    # collected for tables/plausibility_audit_<tag>.csv (written by assign_batch).
+    plaus_audit: list = []
+    summaries["plausibility"] = plausibility.demote_implausible(
+        led, audit=plaus_audit, log=log)
     # RESCUE-VERIFY (last, post-tiering so it sets its own tier): match the still-
     # unexplained residual by mass to active reference peaklists and SCORE those
     # formulas with the server -- isotope-confirmed -> literature-anchored M0;
@@ -341,6 +350,7 @@ def run(sample_id: str, context: str = "ambient-air", *,
     log(f"[run] stats {json.dumps(st)}")
     return {"ledger": led, "stats": st, "summaries": summaries,
             "prescan": pre.as_dict(), "problems": problems,
+            "plausibility_audit": plaus_audit,
             "module_versions": MODULE_VERSIONS,
             "module_hashes": _module_hashes(), "context": profile.label,
             "sample_id": sample_id}
