@@ -565,5 +565,5 @@ def write_markdown(result: dict, path: str | Path) -> Path:
     if result.get("problems"):
         lines += ["", "## ⚠ Ledger validation problems", ""]
         lines += [f"- {p}" for p in result["problems"]]
-    Path(path).write_text("\n".join(lines))
+    Path(path).write_text("\n".join(lines), encoding="utf-8")  # non-ASCII (—, ⁻, ≥, ⚠)
     return Path(path)
