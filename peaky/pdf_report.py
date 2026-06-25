@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 
 from . import paths as PT
+from . import reflists as RL
 
 __version__ = "0.1.0"
 
@@ -121,6 +122,25 @@ def load_context(out_dir: str, *, tag: str, label: str, ts_path: str | None = No
                                      if k and k != "nan"}
         ctx["expl_mz"] = np.sort(a.loc[a["role"].astype(str) != "unexplained",
                                        "mz"].dropna().to_numpy())
+        ctx["_flag_ev_src"] = a          # kept for scrutiny-evidence enrichment below
+        # isotopes confirmed per (neutral, channel) — union of isotopologue labels
+        # across the representative files (each M0 row carries an `isotopologues`
+        # JSON list of {label, score, peak_id}). Feeds the assignment appendix.
+        iso_by_channel: dict = {}
+        if "isotopologues" in a.columns:
+            m0i = a[a["role"] == "M0"]
+            for nf, ad, raw in zip(m0i["neutral_formula"].astype(str),
+                                   m0i["adduct"].astype(str), m0i["isotopologues"]):
+                if not (isinstance(raw, str) and raw.strip().startswith("[")):
+                    continue
+                try:
+                    labs = [d.get("label") for d in json.loads(raw)]
+                except Exception:
+                    labs = []
+                labs = [str(l) for l in labs if l]
+                if labs:
+                    iso_by_channel.setdefault((nf, ad), set()).update(labs)
+        ctx["iso_by_channel"] = iso_by_channel
         # mass error (ppm) by category for the accuracy plot
         if "ppm_error" in a.columns:
             m0 = a[a["role"] == "M0"]
@@ -138,6 +158,32 @@ def load_context(out_dir: str, *, tag: str, label: str, ts_path: str | None = No
             tot = float(asig.sum()) or 1.0
             ctx["adduct_signal"] = {k: float(v) / tot for k, v in asig.items()}
 
+        # REFERENCE-LIST prior: unlock literature peaklists from the run's context
+        # (batch-name/label metadata), then (1) corroborate Candidate-tier neutrals
+        # by formula membership and (2) rescue UNEXPLAINED peaks by mass under the
+        # actual reagent adducts. Soft + provenance-tagged; never overrides a tier.
+        try:
+            tags = RL.resolve_context_tags(ctx.get("batch_name") or "", ctx.get("label") or "")
+            lists = RL.active_lists(RL.load_catalog(), context_tags=tags)
+            if lists:
+                cand = merged.loc[merged.get("tier") == "Candidate", "neutral_formula"].dropna()
+                corr = RL.match_assigned(cand.unique(), lists)
+                adducts = list(ctx.get("adduct_counts", {}).keys()) or ["[M-H]-"]
+                un_mz = a.loc[a["role"] == "unexplained", "mz"].dropna()
+                un_mz = sorted(set(round(float(x), 5) for x in un_mz))
+                rescue = RL.match_by_mass(un_mz, lists, adducts, tol_ppm=4.0)
+                by_id = {L.id: L for L in lists}            # attach compound names (contaminants)
+                for m in rescue:
+                    nm = (by_id.get(m["list"]).meta_of or {}).get(m["formula"], {})
+                    m["name"] = nm.get("name", "")
+                ctx["reflist"] = {
+                    "tags": sorted(tags), "lists": [L.id for L in lists],
+                    "cites": [L.cite() for L in lists],
+                    "n_candidate": int(cand.nunique()), "corroborated": corr,
+                    "n_unexplained": len(un_mz), "rescue": rescue}
+        except Exception:
+            pass
+
     # signal-weighted composition + ammonium/amine degeneracy (composition page)
     from . import composition as CMP
     nsig = ctx.get("neutral_signal", {})
@@ -150,7 +196,16 @@ def load_context(out_dir: str, *, tag: str, label: str, ts_path: str | None = No
     # + chemical-plausibility QC of the assignments
     ctx["positive"] = any(str(k).rstrip().endswith("+") for k in ctx.get("adduct_counts", {}))
     from . import plausibility as PL
-    ctx["flagged"] = PL.scan(merged, polarity=("+" if ctx["positive"] else "-"))
+    pol = "+" if ctx["positive"] else "-"
+    ctx["flagged"] = PL.scan(merged, polarity=pol)
+    # enrich each flagged neutral with its evidence (ppm / isotopes / margin / sane
+    # alternative) so the scrutiny page shows WHY it is suspect and whether a saner
+    # formula was available — answering "how did we arrive at these?" on the page.
+    ev_src = ctx.pop("_flag_ev_src", None)
+    if ev_src is not None and ctx["flagged"]:
+        ev = _flag_evidence(ev_src, pol)
+        for d in ctx["flagged"]:
+            d.update(ev.get(d["neutral_formula"], {}))
     # single source of truth for "formula disagreements": the merged ledger's own
     # formula_agree column (the artifact the report publishes), with a denominator
     # — not the separate jitter pass, which clusters differently and prints a
@@ -196,7 +251,8 @@ def load_context(out_dir: str, *, tag: str, label: str, ts_path: str | None = No
         except Exception:
             pass
 
-    for key, fn in [("jitter", "jitter_summary.json"), ("batch", "batch_summary.json")]:
+    for key, fn in [("jitter", "jitter_summary.json"), ("batch", "batch_summary.json"),
+                    ("clusters", "clusters_summary.json")]:
         p = f"{out_dir}/{fn}"
         if os.path.exists(p):
             ctx[key] = json.load(open(p))
@@ -300,6 +356,45 @@ def _adduct_label(a) -> str:
 _ISO_C13 = 1.0033548   # 13C - 12C; used to recover isotopologue mass error
 
 
+def _flag_evidence(a, polarity):
+    """Per-neutral evidence for the scrutiny page: smallest |ppm|, count of CONFIRMED
+    isotopologues (0 = no corroboration), eff_margin to the runner-up, and whether a
+    chemically PLAUSIBLE alternative existed within the candidate set (parsed from the
+    `alternatives` JSON) — i.e. whether the implausible fit was forced or passed over a
+    saner one. Returns {neutral_formula: {ppm, iso, margin, sane_alt}}."""
+    from . import plausibility as PL
+    out = {}
+    if "neutral_formula" not in a.columns:
+        return out
+    m0 = a[a["role"] == "M0"]
+    for nf, sub in m0.groupby(m0["neutral_formula"].astype(str)):
+        r = sub.iloc[(sub["ppm_error"].abs().argmin()
+                      if "ppm_error" in sub.columns and sub["ppm_error"].notna().any() else 0)]
+        iso = 0
+        raw = r.get("isotopologues")
+        if isinstance(raw, str) and raw.strip().startswith("["):
+            try:
+                iso = len(json.loads(raw))
+            except Exception:
+                iso = 0
+        sane = None
+        alt = r.get("alternatives")
+        if isinstance(alt, str) and alt.strip().startswith("["):
+            try:
+                for d in json.loads(alt):
+                    af = d.get("formula")
+                    if af and PL.implausible(af, tier="Candidate", polarity=polarity) is None:
+                        sane = f"{af} @ {d.get('ppm'):+.2f} ppm" if d.get("ppm") is not None else af
+                        break
+            except Exception:
+                pass
+        out[nf] = {"ppm": float(r["ppm_error"]) if pd.notna(r.get("ppm_error")) else None,
+                   "iso": int(iso),
+                   "margin": float(r["eff_margin"]) if pd.notna(r.get("eff_margin")) else None,
+                   "sane_alt": sane}
+    return out
+
+
 def _iso_ppm(per_file_frames):
     """Isotopologue mass error (ppm): per file, match each M0's predicted 13C M+1
     (parent ion m/z + 1.00335) to the nearest iso_child peak. iso_child rows carry
@@ -332,8 +427,10 @@ def cover(ctx, pdf):
     batch = ctx.get("batch_name") or ctx["label"]
     fig.text(0.08, 0.93, "Peak Assignment Report", fontsize=20, weight="bold", color=INK)
     fig.text(0.08, 0.895, batch, fontsize=14, color=INK)
-    fig.text(0.08, 0.872, f"{ctx['label']} · representative-sample pipeline", fontsize=11,
-             color=GREY)
+    _pipe = ("single-sample" if ctx.get("n_files", 1) <= 1
+             else "brightest-coverage" if str(ctx.get("batch", {}).get("select")) == "brightest"
+             else "representative-sample")
+    fig.text(0.08, 0.872, f"{ctx['label']} · {_pipe} pipeline", fontsize=11, color=GREY)
     meta = ctx.get("version", "")
     if ctx.get("generated"):
         meta = f"{meta}  ·  generated {ctx['generated']}" if meta else f"generated {ctx['generated']}"
@@ -352,6 +449,16 @@ def cover(ctx, pdf):
               f"({idn} Identified / {cn} Candidate)"),
         ("b", f"Distinct neutral compounds:       {ctx['n_neutrals']}"),
     ]
+    rc = ctx.get("role_count", {})
+    if rc:
+        tot = sum(rc.values())
+        asg = rc.get("M0", 0) + rc.get("iso_child", 0) + rc.get("reagent", 0)
+        scope = "" if ctx.get("n_files", 1) <= 1 else f" (pooled over {ctx['n_files']} files)"
+        head += [
+            ("b", f"Peaks{scope}:".ljust(34) + f"{tot} total"),
+            ("dim", f"   {asg} assigned ({rc.get('M0', 0)} M0 + {rc.get('iso_child', 0)} isotopologues "
+                    f"+ {rc.get('reagent', 0)} reagent + {rc.get('artifact', 0)} artifact) · "
+                    f"{rc.get('unexplained', 0)} unexplained ({_pct(rc.get('unexplained', 0), tot):.0f}%)")]
     if ts:
         head += [
             ("b", f"Spectral coverage:                {ex_c:.0f}% of m/z bins, "
@@ -364,13 +471,16 @@ def cover(ctx, pdf):
             head += [("dim", "   of detected signal:  analyte (M0+iso) "
                              f"{rf['analyte']*100:.0f}%,  reagent ion {rf['reagent']*100:.0f}%,  "
                              f"unexplained {rf['unexplained']*100:.0f}%")]
-    head += [
-        ("gap", 1),
-        ("h", "Representative samples assigned"),
-        ("gap", 0.3),
-        ("b", f"{ctx['n_files']} files: 5 evenly time-spaced + the max-TIC sample, "
-              "merged by m/z."),
-    ]
+    nf = ctx.get("n_files", 1)
+    sel = str(ctx.get("batch", {}).get("select", "representative"))
+    if nf <= 1:
+        sel_txt = "Single sample assigned (no merge)."
+    elif sel == "brightest":
+        sel_txt = (f"{nf} files: brightest-coverage selection — each significant m/z bin "
+                   "assigned in the sample where it is brightest, merged by m/z.")
+    else:
+        sel_txt = (f"{nf} files: 5 evenly time-spaced + the max-TIC sample, merged by m/z.")
+    head += [("gap", 1), ("h", "Samples assigned"), ("gap", 0.3), ("b", sel_txt)]
     for name, role in ctx.get("samples", [])[:8]:
         head.append(("m", f"   {name}   [{role}]"))
     j = ctx.get("jitter", {})
@@ -610,22 +720,104 @@ def scrutiny(ctx, pdf):
     if not fl:
         return
     import matplotlib.pyplot as plt
-    fig = plt.figure(figsize=A4)
-    fig.text(0.08, 0.95, "Assignments flagged for scrutiny", fontsize=15, weight="bold", color=INK)
-    lines = [("dim", f"{len(fl)} Candidate-tier neutral(s) whose formula looks more like a mass"),
+    intro = [("dim", f"{len(fl)} Candidate-tier neutral(s) whose formula looks more like a mass"),
              ("dim", "coincidence than a real molecule (many heteroatoms, very low H/C, or a"),
              ("dim", "wrong-mode halogen). Flagged for review, NOT removed; Identified (isotope-"),
              ("dim", "scored) assignments are never flagged."),
-             ("gap", 0.8),
-             ("m", "   score   neutral                  why"),
-             ("gap", 0.2)]
-    for d in fl[:40]:
+             ("gap", 0.8)]
+    intro += [("dim", "score=match · ppm=mass error · iso=confirmed isotopologues (0=none) · "
+                      "the arrow marks where a chemically plausible alternative existed")]
+    head = [("m", f" {'score':>5} {'ppm':>6} {'iso':>3}  {'neutral':<15} why  (-> sane alternative)"),
+            ("gap", 0.2)]
+    MAXW = 110                                     # hard cap so no row overflows the page width
+    rows = []
+    for d in fl:
         sc = f"{d['ion_score']:.2f}" if d.get("ion_score") is not None else "  -  "
-        lines.append(("m", f"   {sc}   {d['neutral_formula']:22s}  {d['reason']}"))
-    if len(fl) > 40:
-        lines.append(("dim", f"… and {len(fl) - 40} more."))
-    _text_lines(fig, lines, y0=0.88, dy=0.025, size=8.5)
-    _close(pdf, fig)
+        ppm = f"{d['ppm']:+.2f}" if d.get("ppm") is not None else "  -  "
+        iso = str(d.get("iso", "?"))
+        why = d["reason"]
+        if d.get("sane_alt"):
+            why = f"{why}  -> {d['sane_alt']}"
+        line = f" {sc:>5} {ppm:>6} {iso:>3}  {d['neutral_formula']:<15} {why}"
+        rows.append(("m", line if len(line) <= MAXW else line[:MAXW - 1] + "…"))
+    PER = 34                                       # paginate so long flagged lists don't clip
+    npages = max(1, (len(rows) + PER - 1) // PER)
+    for pi in range(npages):
+        fig = plt.figure(figsize=A4)
+        ttl = "Assignments flagged for scrutiny" + ("" if npages == 1 else f"  (page {pi + 1}/{npages})")
+        fig.text(0.06, 0.95, ttl, fontsize=15, weight="bold", color=INK)
+        block = (intro if pi == 0 else []) + head + rows[pi * PER:(pi + 1) * PER]
+        _text_lines(fig, block, x=0.055, y0=0.91, dy=0.0188, size=8.0)
+        _close(pdf, fig)
+
+
+def reference_lists(ctx, pdf):
+    """Reference-list corroboration & rescue (renders only when the run's context
+    unlocked a literature peaklist and something matched). Two findings: assigned
+    Candidate neutrals corroborated by a published list, and UNEXPLAINED peaks that
+    match a known formula by mass under the reagent adducts (leads to verify). A
+    soft prior tagged with its source — never a measurement, never overrides a tier.
+    Also writes tables/reflist_matches_<tag>.csv with the full match set."""
+    rl = ctx.get("reflist")
+    if not rl or (not rl.get("corroborated") and not rl.get("rescue")):
+        return
+    import matplotlib.pyplot as plt
+    corr = rl["corroborated"]; rescue = rl["rescue"]
+    # full match table to disk (nothing hidden behind the page cap)
+    try:
+        tab = PT.run_paths(ctx["out_dir"]).ensure().tables
+        rows = [{"kind": "corroborated_candidate", "obs_mz": "", "neutral_formula": f,
+                 "adduct": "", "ppm": "", "list": h[0]["list"],
+                 "conditions": "|".join(h[0]["conditions"])} for f, h in corr.items()]
+        rows += [{"kind": "unexplained_rescue", "obs_mz": m["obs_mz"],
+                  "neutral_formula": m["formula"], "adduct": m["adduct"], "ppm": m["ppm"],
+                  "list": m["list"], "conditions": m.get("name", "")} for m in rescue]
+        pd.DataFrame(rows).to_csv(f"{tab}/reflist_matches_{ctx['tag']}.csv", index=False)
+    except Exception:
+        pass
+
+    lines = [("dim", "Known-molecule peaklists unlocked by this run's context "
+                     f"({', '.join(rl['tags']) or 'none'}):")]
+    for c in rl["cites"]:
+        c = c if len(c) <= 92 else c[:91] + "…"      # keep the cite on one line
+        lines.append(("dim", f"  • {c}"))
+    lines += [("gap", 0.6),
+              ("h", f"Candidate assignments corroborated: {len(corr)} of {rl['n_candidate']}"),
+              ("gap", 0.25),
+              ("dim", "a Candidate-tier neutral whose formula is a published product of this system"),
+              ("m", "   neutral            seen-in (conditions)")]
+    for f, h in sorted(corr.items())[:12]:
+        lines.append(("m", f"   {f:18s} {', '.join(h[0]['conditions'])}"))
+    if len(corr) > 12:
+        lines.append(("dim", f"   … +{len(corr) - 12} more (tables/reflist_matches_{ctx['tag']}.csv)"))
+
+    nbest = sum(1 for m in rescue if abs(m["ppm"]) <= 1.0)
+    lines += [("gap", 0.7),
+              ("h", f"Unexplained peaks matching a known formula: {len(rescue)} of {rl['n_unexplained']}"),
+              ("gap", 0.25),
+              ("dim", f"matched BY MASS under the reagent adducts ({nbest} within 1 ppm) — LEADS to verify,"),
+              ("dim", "not assignments; isotope/co-variation confirmation still required."),
+              ("m", "    obs m/z     formula      adduct        ppm   identity")]
+    for m in sorted(rescue, key=lambda x: abs(x["ppm"]))[:18]:
+        nm = f"  {m['name']}" if m.get("name") else ""
+        lines.append(("m", f"   {m['obs_mz']:9.4f}   {m['formula']:>10}   {m['adduct']:<12} "
+                           f"{m['ppm']:+.2f}{nm}"))
+    if len(rescue) > 18:
+        lines.append(("dim", f"   … +{len(rescue) - 18} more (tables/reflist_matches_{ctx['tag']}.csv)"))
+    lines += [("gap", 0.6),
+              ("dim", "Soft prior: formula membership is literature evidence, not a measurement. The"),
+              ("dim", "near-0-ppm matches far exceed chance (a list this size yields ~single-digit random"),
+              ("dim", "hits at this tolerance); larger-ppm matches are weaker and flagged by their ppm.")]
+    # paginate so the (variable-length) corroboration + rescue tables never clip
+    PER = 40
+    pages = [lines[i:i + PER] for i in range(0, len(lines), PER)] or [[]]
+    for pi, chunk in enumerate(pages):
+        fig = plt.figure(figsize=A4)
+        ttl = "Reference-list corroboration & rescue" + (
+            "" if len(pages) == 1 else f"  (page {pi + 1}/{len(pages)})")
+        fig.text(0.08, 0.95, ttl, fontsize=15, weight="bold", color=INK)
+        _text_lines(fig, chunk, y0=0.90, dy=0.0195, size=8.5)
+        _close(pdf, fig)
 
 
 def gka(ctx, pdf):
@@ -690,9 +882,60 @@ def changers(ctx, pdf):
         _image_page(pdf, p, "")             # fit-to-A4 (the PNG is already A4 portrait)
 
 
+def _unexplained_gate_page(ctx, pdf):
+    """Caption page placed JUST BEFORE the unexplained-cluster figures: spells out
+    the brightness/persistence/variation gates and the live funnel, so a reader at
+    the figure understands why only a fraction of the unexplained peaks are drawn
+    (the rest are dim/sparse/flat and listed only in the CSV)."""
+    import matplotlib.pyplot as plt
+    cs = ctx.get("clusters", {})
+    un = cs.get("unassigned", {}); g = cs.get("gates", {})
+    if not un:
+        return
+    tag = ctx["tag"]
+    nbins = un.get("n_ts_bins"); nany = un.get("n_unassigned_any")
+    ngate = un.get("n_after_brightness_persistence"); nvary = un.get("n_varying_plotted")
+    nflat = un.get("n_flat_bunched"); ncl = un.get("n_clusters")
+    dropped = (nany - ngate) if (nany is not None and ngate is not None) else None
+    fig = plt.figure(figsize=A4)
+    fig.text(0.08, 0.95, "Unexplained peaks — how this set is gated", fontsize=15,
+             weight="bold", color=INK)
+    lines = [
+        ("b", f"Of {nbins} m/z bins in the time series, {nany} match no assigned species"),
+        ("b", f"(M0 / isotope / reagent / artifact) within {g.get('match_tol_ppm', 8):.0f} ppm. To be TRACKED over"),
+        ("b", "time a bin must additionally clear two bars:"),
+        ("gap", 0.4),
+        ("m", f"   • brightness:  median ≥ {g.get('unassigned_median_cps_floor', 50):.0f} cps"),
+        ("m", f"   • persistence: detected in ≥ {g.get('min_trace_points', 8)} of the time points"),
+        ("gap", 0.4),
+        ("b", f"{ngate} bins pass. These are then split by time behaviour:"),
+        ("gap", 0.3),
+        ("m", f"   • {nvary} VARYING  — a sustained change (cv ≥ {g.get('varying_cv_min', 0.3):.2f}) or a transient"),
+        ("m", f"                burst (peak/median ≥ {g.get('varying_burst_range', 1.7):.1f}); drawn individually,"),
+        ("m", f"                grouped into {ncl} co-varying cluster(s)."),
+        ("m", f"   • {nflat} FLAT / non-varying — bunched into one faint median-only panel."),
+    ]
+    if dropped:
+        lines += [
+            ("gap", 0.6),
+            ("dim", f"The {dropped} bins below the brightness/persistence bar are dim, sparse,"),
+            ("dim", "near-noise peaks — little signal, no trackable shape. They are NOT plotted;"),
+            ("dim", f"the full membership of the gated set is in tables/clusters_unassigned_{tag}.csv."),
+        ]
+    lines += [("gap", 0.8),
+              ("dim", "(Parameter values are listed on the Methods page.)")]
+    _text_lines(fig, lines, y0=0.88, dy=0.030, size=10)
+    _close(pdf, fig)
+
+
 def clusters(ctx, pdf):
-    for p in ctx["fig"].get("flat", []) + ctx["fig"].get("unassigned", []):
+    for p in ctx["fig"].get("flat", []):
         _image_page(pdf, p, "")                         # A4-portrait pages, own titles
+    un = ctx["fig"].get("unassigned", [])
+    if un:
+        _unexplained_gate_page(ctx, pdf)                # explain the funnel first
+        for p in un:
+            _image_page(pdf, p, "")
 
 
 def methods(ctx, pdf):
@@ -711,6 +954,24 @@ def methods(ctx, pdf):
         ("gap", 0.5),
         ("dim", f"Parameters: m/z merge tol {ctx.get('batch', {}).get('tol_ppm', 6.0)} ppm · "
                 "cluster r>0.6 · amine co-variation r>=0.7."),
+    ]
+    g = ctx.get("clusters", {}).get("gates", {})
+    if g:
+        lines += [
+            ("gap", 0.6),
+            ("h", "Time-series gating (cluster & unexplained figures)"), ("gap", 0.3),
+            ("b", f"• A bin/channel is TRACKED only if detected in ≥{g['min_trace_points']} time points and above the"),
+            ("b", f"  brightness floor (unexplained ≥{g['unassigned_median_cps_floor']:.0f} cps median; "
+                  f"assigned ≥{g['assigned_clustering_floor_cps']:.0f} cps)."),
+            ("b", f"• 'Varying' = cv ≥ {g['varying_cv_min']:.2f} OR transient peak/median ≥ {g['varying_burst_range']:.1f}; "
+                  "flat traces are bunched."),
+            ("b", f"• Clusters: correlation r > {g['cluster_corr_r']:.1f} (complete linkage), near-identical shapes"),
+            ("b", f"  merged at r ≥ {g['merge_corr_r']:.2f}, minimum {g['min_cluster_members']} members; "
+                  f"standalone ≥{g['big_change_fold']:g}× changers surfaced separately."),
+            ("b", f"• Unexplained = bins matching no assigned species within {g['match_tol_ppm']:.0f} ppm "
+                  "(see the gate page)."),
+        ]
+    lines += [
         ("gap", 1),
         ("h", "Peak roles"), ("gap", 0.3),
         ("b", "• M0 = an assigned compound's monoisotopic peak (the identification)."),
@@ -735,13 +996,83 @@ def methods(ctx, pdf):
                   ("b", "  protonated +NH3 amine; uncorroborated ones are re-read as the amine"),
                   ("b", "  (co-variation r>=0.7), which raises the CHON count — a parsimony prior,"),
                   ("b", "  not a measurement (see Composition for the degeneracy it leaves).")]
-    _text_lines(fig, lines, y0=0.88, dy=0.026)
+    _text_lines(fig, lines, y0=0.92, dy=0.0216, size=9.5)
     if ctx.get("generated"):
-        fig.text(0.08, 0.06, f"peaky · generated {ctx['generated']}", fontsize=8, color=GREY)
+        fig.text(0.08, 0.035, f"peaky · generated {ctx['generated']}", fontsize=8, color=GREY)
     _close(pdf, fig)
 
 
-SECTIONS = [cover, findings, coverage, composition, scrutiny, gka, families, changers, clusters, methods]
+def assignments_table(ctx, pdf):
+    """Appendix — EVERY assigned compound, with its ion channels and the isotopes
+    confirmed on each. One row per (neutral, channel): a compound assigned on
+    several adducts lists each channel separately, with the neutral printed once
+    per group. Channels are ordered within a compound; compounds are ordered by
+    neutral mass. 'isotopes' = the isotopologue labels the server confirmed for
+    that channel (union across the representative files). Paginated; the full data
+    is also in merged_ledger.csv + the per-file ledgers."""
+    import matplotlib.pyplot as plt
+
+    from . import chemistry as C
+    merged = ctx.get("merged")
+    if merged is None or not len(merged) or "neutral_formula" not in merged.columns:
+        return
+    iso = ctx.get("iso_by_channel", {})
+    df = merged.copy()
+    df["neutral_formula"] = df["neutral_formula"].astype(str)
+    df["adduct"] = df["adduct"].astype(str)
+
+    def _nmass(f):
+        try:
+            return C.neutral_mass(f)
+        except Exception:
+            return float("inf")
+    nm = {f: _nmass(f) for f in df["neutral_formula"].unique()}
+    df["_nm"] = df["neutral_formula"].map(nm)
+    df = df.sort_values(["_nm", "mz"], kind="mergesort")
+
+    # fixed-width monospace columns (A4 portrait fits ~108 mono chars at size 6.5)
+    NW, AW, IW = 15, 19, 44                  # neutral / adduct / isotopes field widths
+    head = f"{'neutral':<{NW}}{'m/z':>10}  {'channel':<{AW}}{'tier':<11}{'score':>6}{'  f':>4}  isotopes"
+    rows: list = [("m", head),
+                  ("dim", "  f = files the channel was seen in · isotopes = confirmed isotopologues "
+                          "(union across files)")]
+    last = None
+    for _, r in df.iterrows():
+        nf, ad = r["neutral_formula"], r["adduct"]
+        shown = "" if nf == last else (nf if len(nf) <= NW else nf[:NW - 1] + "…")
+        last = nf
+        labs = sorted(iso.get((nf, ad), ()), key=lambda s: (len(s), s))
+        itxt = ", ".join(labs)
+        if len(itxt) > IW:
+            itxt = itxt[:IW - 1] + "…"
+        sc = r.get("ion_score")
+        scs = f"{float(sc):.2f}" if pd.notna(sc) else "  - "
+        tier = str(r.get("tier", ""))[:10]
+        nf_files = r.get("n_files", "")
+        adv = ad if len(ad) <= AW else ad[:AW - 1] + "…"
+        rows.append(("m", f"{shown:<{NW}}{float(r['mz']):>10.4f}  {adv:<{AW}}"
+                          f"{tier:<11}{scs:>6}{str(nf_files):>4}  {itxt}"))
+
+    header, body = rows[:2], rows[2:]
+    PER = 50
+    npages = max(1, (len(body) + PER - 1) // PER)
+    n_neutrals = df["neutral_formula"].nunique()
+    for pi in range(npages):
+        fig = plt.figure(figsize=A4)
+        ttl = f"Appendix — assigned compounds: channels & isotopes"
+        if npages > 1:
+            ttl += f"   (page {pi + 1}/{npages})"
+        fig.text(0.06, 0.965, ttl, fontsize=13, weight="bold", color=INK)
+        if pi == 0:
+            fig.text(0.06, 0.945, f"{len(df)} channels across {n_neutrals} distinct neutral "
+                     f"compounds ({ctx['n_m0']} M0 assignments)", fontsize=9, color=GREY)
+        _text_lines(fig, header + body[pi * PER:(pi + 1) * PER],
+                    x=0.06, y0=0.925, dy=0.0172, size=7.0)
+        _close(pdf, fig)
+
+
+SECTIONS = [cover, findings, coverage, composition, scrutiny, reference_lists, gka,
+            families, changers, clusters, methods, assignments_table]
 
 
 def build(out_dir: str, *, tag: str, label: str, ts_path: str | None = None,

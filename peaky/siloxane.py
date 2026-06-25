@@ -39,6 +39,30 @@ UNIT_MASS = C.neutral_mass(SILOXANE_UNIT)        # 74.01879
 MIN_LADDER = 3                                    # peaks to call it a ladder
 LADDER_PPM = 4.0                                  # spacing tolerance
 
+# Si-count INTENSITY gate (from the AP low-T cross-pipeline audit): the 29Si M+1
+# must be ~consistent with the CLAIMED Si count, not merely matched by the oracle.
+# Predicted M+1 fraction = nSi*29Si-abund + nC*13C-abund; a peak whose M+1 is far
+# below that is over-claiming Si (a high-O HOM has only a small 13C M+1) -- e.g.
+# C8H26O5Si4 @393.004 with M+1 ~13% where Si4 needs ~27% was the HOM C10H18O11.
+_SI29_ABUND = 0.0468       # 29Si natural abundance (per Si)
+_C13_ABUND = 0.0107        # 13C natural abundance (per C)
+_D_29SI = 0.999568         # 29Si - 28Si mass
+SI_M1_MIN_FRAC = 0.6       # observed (M+1)/(M0) must be >= this * predicted
+
+
+def _m1_ratio(smz: list, sh: list, m0_mz: float, m0_h: float):
+    """Observed (M+1)/(M0) height ratio: nearest peak ~+1 Da (the 29Si/13C M+1).
+    Returns 0.0 when no peak sits there, None when the M0 height is unusable."""
+    if m0_h <= 0:
+        return None
+    t = m0_mz + _D_29SI
+    j = bisect.bisect_left(smz, t); best = None
+    for k in (j - 1, j):
+        if 0 <= k < len(smz) and abs(smz[k] - t) < 0.006:
+            if best is None or abs(smz[k] - t) < abs(smz[best] - t):
+                best = k
+    return (sh[best] / m0_h) if best is not None else 0.0
+
 
 def _find_ladders(mzs: list[float], heights: list[float], *,
                   min_height: float) -> list[list[int]]:
@@ -125,6 +149,9 @@ def assign_siloxane_ladder(client, sample_id: str, ledger: pd.DataFrame,
     kids = iso
 
     mzs_all = ledger["mz"]
+    _pairs = sorted((float(m), float(h) if pd.notna(h) else 0.0)
+                    for m, h in zip(ledger["mz"], ledger["height"]))
+    _smz = [p[0] for p in _pairs]; _sh = [p[1] for p in _pairs]
     for mz in member_mz:
         sub = base[(base["sample_peak_mz"].astype(float) - mz).abs() < 0.012].copy()
         if sub.empty:
@@ -146,6 +173,21 @@ def assign_siloxane_ladder(client, sample_id: str, ledger: pd.DataFrame,
         if not len(idx):
             continue
         i0 = idx[0]
+        # Si-count intensity gate: the 29Si M+1 must be ~consistent with the claimed
+        # Si count, not merely matched. Skip when the M+1 is far below what nSi
+        # predicts (a high-O HOM masquerading via a 13C-only M+1). Checked BEFORE any
+        # displacement so a real assignment is never cleared for an over-claimed Si fit.
+        ion = C.parse_formula(r["ion_formula"])
+        nSi = ion.get("Si", 0); nCi = ion.get("C", 0)
+        pred_m1 = nSi * _SI29_ABUND + nCi * _C13_ABUND
+        m0h = float(ledger.at[i0, "height"]) if pd.notna(ledger.at[i0, "height"]) else 0.0
+        obs_m1 = _m1_ratio(_smz, _sh, float(r["sample_peak_mz"]), m0h)
+        if nSi > 0 and pred_m1 > 0 and obs_m1 is not None and obs_m1 < SI_M1_MIN_FRAC * pred_m1:
+            log(f"[siloxane] skip {r['compound_formula']} @{mz:.4f}: 29Si M+1 ratio "
+                f"{obs_m1:.3f} << {SI_M1_MIN_FRAC:g}x predicted {pred_m1:.3f} "
+                f"(Si{nSi} over-claimed)")
+            out["si_underclaimed"] = out.get("si_underclaimed", 0) + 1
+            continue
         role = ledger.at[i0, "role"]
         if role == L.ROLE_M0 and bool(ledger.at[i0, "locked"]):
             continue                                  # never override a locked ID

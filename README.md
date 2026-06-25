@@ -25,6 +25,10 @@ Claude    →  the interface    (you drive Peaky by asking in plain language)
   Van Krevelen, and an iterable PDF report.
 - **Reagent-aware** — bromide (Br⁻), urea/uronium (Ur⁺), and nitrate (¹⁴N / ¹⁵N)
   CIMS reagents are built in; add your own with a small JSON/TOML file, no code changes.
+- **Literature-aware** — curated, provenance-tagged reference peaklists (α-pinene
+  OH-oxidation HOM, common MS contaminants) corroborate near-ties and rescue
+  mass-matched unexplained peaks, always re-scored by Mascope before commit — they
+  never override the isotope evidence.
 - **Reproducible by construction** — same inputs → same bytes out (determinism tests,
   byte-stable workbooks/reports), so any figure or assignment can be regenerated exactly.
 

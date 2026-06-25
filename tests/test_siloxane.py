@@ -54,10 +54,13 @@ def _mzp(f):                                     # [M+H]+ at -2.45 ppm
 
 pmz = {f: _mzp(f) for f in FORMS}
 m1 = {f: pmz[f] + 0.9997 for f in FORMS}         # the 29Si M+1 peak
+def _m1h(f):                                     # realistic 29Si+13C M+1 height for Si_k C_n
+    c = C.parse_formula(f)
+    return round((c.get("Si", 0) * 0.0468 + c.get("C", 0) * 0.0107) * 1e5)
 rows = []
 for i, f in enumerate(FORMS):
     rows.append({"peak_id": f"m0_{i}", "mz": round(pmz[f], 5), "height": 1e5})
-    rows.append({"peak_id": f"m1_{i}", "mz": round(m1[f], 5), "height": 2.8e4})
+    rows.append({"peak_id": f"m1_{i}", "mz": round(m1[f], 5), "height": _m1h(f)})
 led = L.new_ledger(pd.DataFrame(rows))
 pid_of = {round(pmz[f], 5): f"m0_{i}" for i, f in enumerate(FORMS)}
 m1pid_of = {round(m1[f], 5): f"m1_{i}" for i, f in enumerate(FORMS)}
@@ -119,6 +122,19 @@ led2 = L.new_ledger(pd.DataFrame(rows))
 s2 = SX.assign_siloxane_ladder(None, "SID", led2, X.get_context("ambient-air"), cfg,
                                score_fn=fake_score, log=lambda *a: None)
 check("inert when context forbids Si (ambient max_Si=1)", s2["committed"] == 0, s2)
+
+# --- Si-count intensity gate: a too-small 29Si M+1 -> skipped (the C10H18O11 case) ---
+check("_m1_ratio: present M+1 -> ratio", abs(SX._m1_ratio([200.0, 200.99957], [1e5, 3e4], 200.0, 1e5) - 0.3) < 1e-6)
+check("_m1_ratio: absent M+1 -> 0.0", SX._m1_ratio([200.0, 250.0], [1e5, 1e5], 200.0, 1e5) == 0.0)
+rows3 = []                                        # Si6 ladder but M+1 only ~13% (needs ~41%)
+for i, f in enumerate(FORMS):
+    rows3.append({"peak_id": f"m0_{i}", "mz": round(pmz[f], 5), "height": 1e5})
+    rows3.append({"peak_id": f"m1_{i}", "mz": round(m1[f], 5), "height": 1.3e4})  # under-intensity
+led3 = L.new_ledger(pd.DataFrame(rows3))
+s3 = SX.assign_siloxane_ladder(None, "SID", led3, PROF, cfg, adducts=["[M+H]+"],
+                               score_fn=fake_score, log=lambda *a: None)
+check("Si-intensity gate: under-intensity M+1 -> NOT committed (over-claimed Si skipped)",
+      s3["committed"] == 0 and s3.get("si_underclaimed", 0) >= 1, s3)
 
 def test_all():
     assert FAIL == 0, f"{FAIL} checks failed"

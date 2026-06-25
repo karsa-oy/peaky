@@ -61,7 +61,8 @@ justify:
 | **4** | **Residual explainer**: resolves ~1.998-Da isotope doublets, deep 2-step series, ppm-disciplined acceptance. |
 | **5** | **Known-neutral completion**: fills cross-channel partners + series gaps of passes 1–4 (no new formula space). |
 | **6** | **Anchored ladder gap-fill**: walks +O/+CH₂/+CO₂/−H₂O diagonals out from Identified anchors, satellite-guarded (Candidate tier). |
-| **cleanup** | Isotope-confirmed recovery of molecules the score gate dropped, bromide-cluster relabelling, ringing-artifact flagging, and (positive mode) re-reading uncorroborated `[M+NH4]+` as the `[M+H]+` amine. |
+| **cleanup** | Isotope-confirmed recovery of molecules the score gate dropped, bromide-cluster relabelling, ringing-artifact flagging, and (positive mode) re-reading uncorroborated `[M+NH4]+` as the `[M+H]+` amine. Post-tier **plausibility demotes** (carbon-cluster, heteroatom-free-hydrocarbon-via-an-anion-channel, speculative-residual) and a Br-run reagent-halocarbon relabel drop over-eager commits one tier — never deleting a peak. |
+| **reflist** | Context-gated **reference peaklists** (literature HOM + common MS contaminants) corroborate near-ties (selection prior) and **rescue** mass-matched unexplained peaks — each rescue re-scored by the server before commit, provenance-tagged, never overriding an isotope-scored Identified. |
 | **tiers** | The final verdict (below). Degeneracy density is measured first so a mass-degenerate commit can't claim Identified. |
 
 (Passes 2/3 run via the `series_gka` / `series_detect` engines under the `passes`
@@ -70,6 +71,39 @@ director. Interleaved sweeps — isotope-envelope completion, **composite detect
 ladder — claim satellites and Si oligomers the CHON-centric heuristics otherwise
 mis-read. CLI toggles: `--no-pass2/3/4`; `--no-pass5` disables **both** Pass 5 and
 the Pass-6 ladder gap-fill.)
+
+## Reference peaklists (literature corroboration)
+
+Peaky can consult **curated, provenance-tagged reference peaklists** — a catalog of
+known neutrals per chemical system, each entry carrying its source, data version, and
+literature references. They are used three ways, all **soft** and none ever overriding
+an isotope-scored Identified:
+
+- **Selection prior** — a candidate that sits on an active list wins a near-tie in
+  arbitration (a small score nudge, not a free pass).
+- **Rescue-verify** — an *unexplained* peak whose mass matches a list entry is handed
+  back to Mascope's `match_compounds`; it is committed only if the server confirms it,
+  otherwise kept as a tentative low-quality Candidate.
+- **Report corroboration** — a dedicated report section + `tables/reflist_matches_*.csv`
+  records which assignments a list corroborated and which peaks it rescued.
+
+Lists are **context-gated** by the run's metadata (the common-contaminant list is
+always active). Seeded with α-pinene OH-oxidation HOM (Kang et al., 830 neutrals) and
+the Keller (2008) MS-contaminant list (59 neutrals); add your own as a self-describing
+JSON file under `peaky/data/peaklists/`. A literature match never *invents* confidence —
+Mascope still scores every commit, so the honesty principle holds.
+
+## Plausibility hardening
+
+A set of post-tiering gates demote (never delete) commitments that fit by mass but whose
+isotope evidence or ionization chemistry does not actually support them: **carbon-cluster**
+(an F-free formula with implausibly low H/C), **implausible-ionization** (a heteroatom-free
+hydrocarbon detected through an anion channel that needs an acidic / H-bond site),
+**speculative-residual** (a residual commit resting on off-calibration charge, uncorroborated
+multi-nitrogen, a zero-anchor series, or a single minor channel), and a **reagent-halocarbon
+relabel** (Br runs) that re-reads bromomethane fragments mis-assigned as a bare element +
+Br-cluster on their invariant ion composition. Each is conservative — it lowers a tier or
+relabels a role, it never fabricates an assignment.
 
 ## The structural chemistry gates
 

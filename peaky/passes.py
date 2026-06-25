@@ -111,6 +111,15 @@ class PassConfig:
     # same neutral independently assigned via a primary channel.
     minor_channels: tuple = ("[M+CO3]-", "[M+O2]-", "[M]-.")
     minor_channel_penalty: float = 0.12
+    # Reference-list selection prior: a candidate neutral on an ACTIVE reference
+    # peaklist (a published product of the sample's chemistry, or a known
+    # contaminant) is far more likely real than a mass-coincidence monster of
+    # similar score. Add a small TIE-BREAK bonus to its eff_score -- enough to win
+    # a near-tie (gap < the 0.05 tie window), never enough to override a clearly
+    # better isotope-scored fit. Empty set / 0.0 -> no-op. Set by assign.run from
+    # the run's context-active reference lists (reflists.active_lists).
+    reflist_formulas: frozenset = frozenset()
+    reflist_prior: float = 0.04
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +344,12 @@ def arbitrate(scored: pd.DataFrame, cfg: PassConfig) -> dict:
                          - base["adduct_label"].isin(cfg.minor_channels)
                          * cfg.minor_channel_penalty
                          - base["cal_penalty"])
+    # reference-list selection prior: a neutral on an active reference peaklist gets
+    # a small tie-break bonus so a known literature/contaminant formula wins a
+    # near-tie over a mass-coincidence monster (a soft prior, not an override).
+    if cfg.reflist_formulas and cfg.reflist_prior:
+        base["eff_score"] += (base["compound_formula"].isin(cfg.reflist_formulas)
+                              * cfg.reflist_prior)
 
     winners = []
     for pid, grp in base.groupby("sample_peak_id"):
@@ -777,6 +792,22 @@ def run_pass0_known(client, sample_id: str, ledger: pd.DataFrame,
                 log(f"[pass0] skip {r['compound_formula']} @{float(r['sample_peak_mz']):.4f}: "
                     f"³⁷Cl envelope not confirmed (n_kids={n_kids})")
                 continue
+            # silanediol / any Si-rich known species: the 29Si M+1 must MATCH the Si
+            # count, not merely exist. A high-O organic is mass-degenerate with a Si_k
+            # oligomer; if the M+1 is too small the Si is over-claimed -> skip, leaving
+            # the peak for the organic grid (the C10H18O11 vs C8H26O5Si4 case @393).
+            _c0 = C.parse_formula(r["compound_formula"])
+            if _c0.get("Si", 0) > 0:
+                _ix = ledger.index[ledger["peak_id"] == pid]
+                _m0h = (float(ledger.at[_ix[0], "height"])
+                        if len(_ix) and pd.notna(ledger.at[_ix[0], "height"]) else 0.0)
+                if not _si_m1_consistent(ledger, float(r["sample_peak_mz"]), _m0h,
+                                         _c0.get("Si", 0), _c0.get("C", 0)):
+                    log(f"[pass0] skip {r['compound_formula']} @{float(r['sample_peak_mz']):.4f}: "
+                        f"29Si M+1 too small for Si{_c0.get('Si', 0)} (over-claimed; likely "
+                        "a high-O organic) -- left for the grid")
+                    out["si_underclaimed"] = out.get("si_underclaimed", 0) + 1
+                    continue
             conf = (f"Good ({tag})" if float(r["ion_score"]) >= 0.7
                     or n_kids >= 2 else f"Low ({tag})")
             L.commit_assignment(
@@ -1032,6 +1063,9 @@ _D13C = 1.0033548          # 13C - 12C
 _DBR = 1.9979535           # 81Br - 79Br
 _R13C = 0.0107             # 13C natural abundance per carbon
 _R81BR = 0.9728            # 81Br/79Br abundance ratio
+_D29SI = 0.999568          # 29Si - 28Si (the Si M+1)
+_R29SI = 0.0468            # 29Si natural abundance per Si
+SI_M1_MIN_FRAC = 0.6       # observed (M+1)/(M0) must be >= this * predicted Si M+1
 
 
 def _peak_near(mzs: "pd.Series", target: float, ppm: float = 5.0):
@@ -1040,6 +1074,24 @@ def _peak_near(mzs: "pd.Series", target: float, ppm: float = 5.0):
     d = (mzs - target).abs()
     i = d.idxmin()
     return i if d.loc[i] <= tol else None
+
+
+def _si_m1_consistent(ledger: pd.DataFrame, m0_mz: float, m0_h: float,
+                      n_si: int, n_c: int) -> bool:
+    """Is the 29Si M+1 intensity consistent with the CLAIMED Si count? A Si_k species'
+    M+1 is dominated by 29Si (n_si*4.68%) plus 13C (n_c*1.07%); when the observed
+    (M+1)/(M0) ratio is far below that, the Si count is over-claimed -- a high-O
+    organic with only a 13C M+1 masquerading as a siloxane (the C10H18O11 vs
+    C8H26O5Si4 degeneracy at m/z 393). True = OK to commit; False = skip."""
+    if n_si <= 0 or m0_h <= 0:
+        return True
+    pred = n_si * _R29SI + n_c * _R13C
+    if pred <= 0:
+        return True
+    j = _peak_near(ledger["mz"], m0_mz + _D29SI, ppm=15.0)
+    obs = (float(ledger.at[j, "height"]) / m0_h
+           if j is not None and pd.notna(ledger.at[j, "height"]) else 0.0)
+    return obs >= SI_M1_MIN_FRAC * pred
 
 
 def complete_isotope_envelopes(ledger: pd.DataFrame, cfg: PassConfig, *,

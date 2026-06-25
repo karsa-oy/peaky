@@ -20,6 +20,7 @@ Pure local compute (no network); reads/writes only under `out_dir`.
 from __future__ import annotations
 
 import glob
+import json
 import os
 
 import numpy as np
@@ -269,7 +270,46 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
                   "cluster": [int(labu[b]) if b in labu_idx else 0 for b in un_bins],
                   "median_cps": [round(float(median_h[b]), 0) for b in un_bins]}).to_csv(f"{TAB}/clusters_unassigned_{tag}.csv", index=False)
 
+    # GATE / FUNNEL summary -> the single source of truth the PDF report reads to
+    # DOCUMENT the thresholds these figures apply and the unexplained funnel counts
+    # (so a reader knows why only N of the unexplained peaks are drawn). Thresholds
+    # come from the real constants in cluster.py / this module, not magic numbers.
+    n_unassigned_any = int(sum(1 for b in mat.columns
+                               if not is_assigned(float(bin_mz[b]))))
+    summary = {
+        "tag": tag,
+        "gates": {
+            "match_tol_ppm": 8.0,                       # is_assigned() tolerance
+            "unassigned_median_cps_floor": 50.0,        # un_bins brightness floor
+            "assigned_clustering_floor_cps": FLOOR,     # assigned-channel floor
+            "min_trace_points": CL.MIN_POINTS,          # persistence gate
+            "varying_cv_min": CL.FLAT_CV,               # sustained-change half
+            "varying_burst_range": CL.PEAK_RANGE,       # transient-burst half
+            "cluster_corr_r": round(1 - CL.DIST_T, 2),  # complete-linkage cut
+            "merge_corr_r": CL.MERGE_R,                 # near-duplicate merge
+            "min_cluster_members": CL.MIN_MEMBERS,
+            "big_change_fold": CL.BIG_CHANGE_FOLD,
+        },
+        "unassigned": {
+            "n_ts_bins": int(mat.shape[1]),
+            "n_unassigned_any": n_unassigned_any,
+            "n_after_brightness_persistence": len(un_bins),
+            "n_varying_plotted": len(un_vary),
+            "n_flat_bunched": len(un_flat),
+            "n_clusters": len(bigu),
+        },
+        "assigned": {
+            "n_dynamic_families": len(rows),
+            "n_channels_in_families": int(sum(len(r[1]) for r in rows)),
+            "n_flat_clusters_demoted": len(flat_rows),
+            "n_big_changers": len(changers),
+            "n_flat_background": len(flat_cols),
+        },
+    }
+    with open(f"{OUT}/clusters_summary.json", "w") as _fh:
+        json.dump(summary, _fh, indent=2)
+
     log(f"DONE — figures in {OUT}")
     return {"changing": rows, "flat_clusters": flat_rows, "changers": changers,
             "unassigned": rowsu, "channel_agreement": ca, "bin_minutes": BIN_MIN,
-            "out_dir": OUT, "tag": tag}
+            "summary": summary, "out_dir": OUT, "tag": tag}

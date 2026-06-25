@@ -25,7 +25,11 @@ N_HIGH_OC = 3       # N>=3 combined with...
 OC_HIGH = 1.0       # ...O/C >= this  -> high-heteroatom coincidence
 N_VERY_HIGH = 4     # N>=4 combined with...
 O_HIGH = 8          # ...O>= this
-HC_FLOOR = 0.35     # H/C below this -> implausibly carbon-rich
+HC_FLOOR = 0.35     # H/C below this -> implausibly carbon-rich (F-FREE formulas only)
+F_HIGH = 4          # F>=this -> heavily fluorinated; F is monoisotopic, so the fit
+                    # has NO isotope twin to confirm it (a fluorine mass coincidence).
+                    # Flagged with the RIGHT reason: low H/C here is F displacing H
+                    # (fluorine-rich), NOT a carbon-rich skeleton.
 
 
 def implausible(neutral_formula: str, *, tier: str | None = None,
@@ -41,16 +45,24 @@ def implausible(neutral_formula: str, *, tier: str | None = None,
     if nc == 0:
         return None                      # carbon-free handled elsewhere (reagent/inorganic)
     h, n, o = c.get("H", 0), c.get("N", 0), c.get("O", 0)
+    f = c.get("F", 0)
     br, cl = c.get("Br", 0), c.get("Cl", 0)
     hc, oc = h / nc, o / nc
+    # Terse labels (the full meaning is spelled out in the scrutiny-page legend);
+    # keeping them short stops the table overflowing the page width.
     if n >= N_HIGH_OC and oc >= OC_HIGH:
-        return f"N{n} with O/C {oc:.1f} (high-heteroatom mass coincidence)"
+        return f"N{n}, O/C {oc:.1f} (heteroatom coincidence)"
     if n >= N_VERY_HIGH and o >= O_HIGH:
-        return f"N{n}O{o} (high-heteroatom mass coincidence)"
-    if hc < HC_FLOOR:
-        return f"H/C {hc:.2f} (implausibly carbon-rich)"
+        return f"N{n}O{o} (heteroatom coincidence)"
+    if f >= F_HIGH:           # heavily fluorinated: 19F is 100% monoisotopic
+        # NB any 13C/81Br satellites the row carries confirm the CARBON count / the
+        # adduct halogen, NOT the fluorine -- 19F has no heavier stable isotope, so
+        # the F COUNT is never isotope-confirmable (do NOT say "no isotope twin").
+        return f"F{f}: 19F monoisotopic, fluorine count not isotope-confirmable"
+    if f == 0 and hc < HC_FLOOR:     # genuine carbon-rich skeleton (F not displacing H)
+        return f"H/C {hc:.2f} (carbon-rich)"
     if polarity == "+" and (br > 0 or cl > 0):
-        return "halogen in the neutral, positive mode (no halogen reagent)"
+        return "halogen in neutral, +mode"
     return None
 
 

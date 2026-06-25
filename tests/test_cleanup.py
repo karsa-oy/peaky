@@ -182,6 +182,110 @@ check("Cl-anchored F kept; low-F kept",
       ledf.loc[3, "tier"] == "Identified" and ledf.loc[4, "tier"] == "Identified")
 
 
+# ---- implausibly carbon-rich demote ----
+ledc = pd.DataFrame([
+    dict(role="M0", neutral_formula="C27H8",    tier="Candidate",  commentary="", below_assignability=False),  # H/C 0.30
+    dict(role="M0", neutral_formula="C36H6O",   tier="Identified", commentary="", below_assignability=False),  # H/C 0.17
+    dict(role="M0", neutral_formula="C10H16O4", tier="Identified", commentary="", below_assignability=False),  # H/C 1.6 keep
+    dict(role="M0", neutral_formula="C11H6F16", tier="Candidate",  commentary="", below_assignability=False),  # F-rich, not C
+])
+outc = CU.demote_implausible_carbon(ledc, log=lambda *a: None)
+check("carbon demote: only the F-free low-H/C clusters (C27H8, C36H6O)", outc == {"c_demoted": 2}, outc)
+check("carbon demote: C36H6O Identified -> Candidate + below_assignability",
+      ledc.loc[1, "tier"] == "Candidate" and bool(ledc.loc[1, "below_assignability"]))
+check("carbon demote: normal C10H16O4 kept",
+      ledc.loc[2, "tier"] == "Identified" and not bool(ledc.loc[2, "below_assignability"]))
+check("carbon demote: F-rich skeleton NOT touched here (F-free rule; F-demote owns it)",
+      not bool(ledc.loc[3, "below_assignability"]))
+
+# ---- implausible-ionization demote (heteroatom-free via anion channel) ----
+ledi = pd.DataFrame([
+    dict(role="M0", neutral_formula="C7H10",   adduct="[M-H]-",   tier="Identified", commentary="", below_assignability=False),  # HC deprotonation
+    dict(role="M0", neutral_formula="C2H2",    adduct="[M+CO3]-", tier="Identified", commentary="", below_assignability=False),  # HC carbonate cluster
+    dict(role="M0", neutral_formula="C10H16",  adduct="[M+Br]-",  tier="Candidate",  commentary="", below_assignability=False),  # HC bromide adduct
+    dict(role="M0", neutral_formula="C6H12O6", adduct="[M-H]-",   tier="Identified", commentary="", below_assignability=False),  # has O -> keep
+    dict(role="M0", neutral_formula="C7H10",   adduct="[M]-.",    tier="Identified", commentary="", below_assignability=False),  # electron attach -> exempt
+])
+outi = CU.demote_implausible_ionization(ledi, log=lambda *a: None)
+check("ionization demote: 3 heteroatom-free via FG-requiring anion channels", outi == {"ionization_demoted": 3}, outi)
+check("ionization demote: C7H10 [M-H]- -> Candidate + below_assignability",
+      ledi.loc[0, "tier"] == "Candidate" and bool(ledi.loc[0, "below_assignability"]))
+check("ionization demote: C2H2 [M+CO3]- demoted",
+      ledi.loc[1, "tier"] == "Candidate" and bool(ledi.loc[1, "below_assignability"]))
+check("ionization demote: oxygenated C6H12O6 [M-H]- kept",
+      ledi.loc[3, "tier"] == "Identified" and not bool(ledi.loc[3, "below_assignability"]))
+check("ionization demote: electron-attachment [M]-. exempt",
+      ledi.loc[4, "tier"] == "Identified" and not bool(ledi.loc[4, "below_assignability"]))
+
+# ---- reagent-precursor / brominated-background halocarbon relabel ----
+ledh = mk([("chbr2", 170.8451, 2e2), ("dbaa", 214.8349, 7e2), ("real", 250.10, 1e4)])
+for pid, neutral, adduct, ionf in [("chbr2", "C", "[M+HBr+Br]-", "CHBr2-"),       # bare-C mis-read
+                                   ("dbaa", "C2HBrO2", "[M+Br]-", "C2HBr2O2-"),    # dibromoacetic acid ion
+                                   ("real", "C10H16O2", "[M+Br]-", "C10H16BrO2-")]:
+    j = ledh.index[ledh["peak_id"] == pid][0]
+    ledh.at[j, "role"] = L.ROLE_M0; ledh.at[j, "neutral_formula"] = neutral
+    ledh.at[j, "adduct"] = adduct; ledh.at[j, "ion_formula"] = ionf
+    ledh.at[j, "method"] = "seed"; ledh.at[j, "confidence"] = "Good"
+    ledh.at[j, "commentary"] = "seed"        # provenance so the M0 rows are I5-valid
+res = CU.relabel_reagent_halocarbons(ledh, reagent="Br", log=lambda *a: None)
+check("halocarbon: relabeled 2 (CHBr2-, C2HBr2O2-)", res["relabeled"] == 2, res)
+check("halocarbon: CHBr2- (bare-C mis-read) -> reagent", L.role_of(ledh, "chbr2") == L.ROLE_REAGENT)
+_d = ledh[ledh["peak_id"] == "dbaa"].iloc[0]
+check("halocarbon: C2HBr2O2- -> named dibromoacetic acid, M0",
+      _d["neutral_formula"] == "C2H2Br2O2" and _d["role"] == L.ROLE_M0)
+check("halocarbon: dibromoacetic acid adduct fixed to [M-H]-", _d["adduct"] == "[M-H]-")
+check("halocarbon: real organobromine untouched",
+      L.role_of(ledh, "real") == L.ROLE_M0
+      and ledh[ledh["peak_id"] == "real"].iloc[0]["neutral_formula"] == "C10H16O2")
+check("halocarbon: ledger valid after relabel", L.validate(ledh) == [])
+# polarity gate: a non-Br reagent profile is a no-op
+ledhu = mk([("x", 170.8451, 2e2)])
+_j = ledhu.index[ledhu["peak_id"] == "x"][0]
+ledhu.at[_j, "role"] = L.ROLE_M0; ledhu.at[_j, "ion_formula"] = "CHBr2-"
+CU.relabel_reagent_halocarbons(ledhu, reagent="Ur", log=lambda *a: None)
+check("halocarbon: non-Br reagent -> no-op", L.role_of(ledhu, "x") == L.ROLE_M0)
+CU.relabel_reagent_halocarbons(ledhu, reagent=None, log=lambda *a: None)
+check("halocarbon: reagent=None -> no-op", L.role_of(ledhu, "x") == L.ROLE_M0)
+
+# ---- F-demote exemption requires a CONFIRMED isotope (audit rule-gap 1) ----
+import json as _json  # noqa: E402
+def _isos(*labels):
+    return _json.dumps([{"label": l, "score": 0.9, "peak_id": "p"} for l in labels])
+ledfi = pd.DataFrame([
+    dict(role="M0", neutral_formula="C8H13F7N2O4S", adduct="[M+Br]-", tier="Identified", commentary="", below_assignability=False, isotopologues="[]"),
+    dict(role="M0", neutral_formula="C8H13F7N2O4S", adduct="[M+Br]-", tier="Identified", commentary="", below_assignability=False, isotopologues=_isos("34S")),
+    dict(role="M0", neutral_formula="C6H4ClF5O",    adduct="[M-H]-",  tier="Identified", commentary="", below_assignability=False, isotopologues=_isos("37Cl")),
+    dict(role="M0", neutral_formula="C6H4ClF5O",    adduct="[M-H]-",  tier="Identified", commentary="", below_assignability=False, isotopologues="[]"),
+    dict(role="M0", neutral_formula="C8HF15O2",     adduct="[M-H]-",  tier="Identified", commentary="", below_assignability=False, isotopologues="[]"),  # PFCA
+])
+ofi = CU.demote_unconfirmed_fluorine(ledfi, log=lambda *a: None)
+check("F-demote(iso): unconfirmed S/Cl F-monsters demoted (2), confirmed/PFCA kept", ofi == {"f_demoted": 2}, ofi)
+check("F-demote(iso): C8H13F7N2O4S no-34S -> Candidate+below",
+      ledfi.loc[0, "tier"] == "Candidate" and bool(ledfi.loc[0, "below_assignability"]))
+check("F-demote(iso): C8H13F7N2O4S with 34S kept Identified", ledfi.loc[1, "tier"] == "Identified")
+check("F-demote(iso): Cl anchor needs 37Cl (confirmed kept, unconfirmed demoted)",
+      ledfi.loc[2, "tier"] == "Identified" and ledfi.loc[3, "tier"] == "Candidate")
+check("F-demote(iso): PFCA still exempt", ledfi.loc[4, "tier"] == "Identified")
+
+# ---- speculative-residual demote (audit rule-gaps 2-4) ----
+class _Cfg:
+    minor_channels = ("[M+CO3]-", "[M+O2]-", "[M]-.")
+    cal_mu, cal_sigma, cal_z_accept = 0.0, 0.4, 2.0
+ledr = pd.DataFrame([
+    dict(role="M0", neutral_formula="C6H5N3",  adduct="[M+Br]-",  tier="Identified", method="residual:iso-pair", ppm_error=-0.5, isotopologues="[]", commentary="", below_assignability=False),
+    dict(role="M0", neutral_formula="C12H6O",  adduct="[M+CO3]-", tier="Identified", method="residual:series",   ppm_error=-0.35, isotopologues="[]", commentary="-2xCH2 (0 supporting anchors)", below_assignability=False),
+    dict(role="M0", neutral_formula="C10H16O4", adduct="[M-H]-",  tier="Identified", method="cheminfo+grid",     ppm_error=0.2, isotopologues="[]", commentary="", below_assignability=False),
+    dict(role="M0", neutral_formula="C9H12O5",  adduct="[M-H]-",  tier="Identified", method="residual:iso-pair", ppm_error=5.0, isotopologues=_isos("13C"), commentary="", below_assignability=False),
+])
+orr = CU.demote_speculative_residual(ledr, _Cfg(), log=lambda *a: None)
+check("residual demote: 3 (N3 / 0-anchor series / off-cal); cheminfo HOM acid protected", orr == {"residual_demoted": 3}, orr)
+check("residual demote: C6H5N3 -> Candidate+below",
+      ledr.loc[0, "tier"] == "Candidate" and bool(ledr.loc[0, "below_assignability"]))
+check("residual demote: C12H6O (0-anchor/sole-minor) -> Candidate", ledr.loc[1, "tier"] == "Candidate")
+check("residual demote: legit cheminfo+grid HOM acid untouched", ledr.loc[2, "tier"] == "Identified")
+check("residual demote: off-cal residual -> Candidate", ledr.loc[3, "tier"] == "Candidate")
+
+
 def test_all():
     assert FAIL == 0, f"{FAIL} checks failed"
 

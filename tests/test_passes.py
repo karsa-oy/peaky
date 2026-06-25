@@ -823,7 +823,9 @@ check("ledger valid after pass5", L.validate(led5) == [], L.validate(led5))
 check("silanediol series composition", P._silanediol_series(3) ==
       ["C2H8O2Si1", "C4H14O3Si2", "C6H20O4Si3"], P._silanediol_series(3))
 mz_n2 = CH.ion_mz("C4H14O3Si2", "[M+Br]-")
-led0 = mk_ledger([("D2", mz_n2, 10712.0), ("D2br", mz_n2 + 1.99795, 10100.0)])
+# Si2 needs a 29Si M+1 ~ 2*4.68% + 4*1.07% = 13.7% of M0 (the Si-count intensity gate)
+led0 = mk_ledger([("D2", mz_n2, 10712.0), ("D2si", mz_n2 + 0.99957, 1500.0),
+                  ("D2br", mz_n2 + 1.99795, 10100.0)])
 
 def fake0(client, sample_id, formulas, *, mechanism_ids=None, **kw):
     rows = []
@@ -932,12 +934,13 @@ def fake_off(client, sample_id, formulas, *, mechanism_ids=None, **kw):
              ppm_error=-2.3, abundance_error=0.02)])
 
 
-led_b = mk_ledger([("O2", mz_off, 10712.0), ("O2br", mz_off + 1.99795, 10100.0)])
+_si_m1 = [("O2si", mz_off + 0.99957, 1500.0)]   # Si2 29Si M+1 (the Si-count intensity gate)
+led_b = mk_ledger([("O2", mz_off, 10712.0), *_si_m1, ("O2br", mz_off + 1.99795, 10100.0)])
 P.run_pass0_known(None, "SID", led_b, PROF5, P.PassConfig(), ADD5,
                   score_fn=fake_off, log=lambda *a: None)
 check("pass0 rejects a -2.3 ppm known species when offset-blind",
       L.role_of(led_b, "O2") == L.ROLE_UNEXPLAINED)
-led_o = mk_ledger([("O2", mz_off, 10712.0), ("O2br", mz_off + 1.99795, 10100.0)])
+led_o = mk_ledger([("O2", mz_off, 10712.0), *_si_m1, ("O2br", mz_off + 1.99795, 10100.0)])
 cfg_seed = P.PassConfig(); cfg_seed.prior_offset = -1.9
 P.run_pass0_known(None, "SID", led_o, PROF5, cfg_seed, ADD5,
                   score_fn=fake_off, log=lambda *a: None)
@@ -1108,6 +1111,29 @@ s_ope1 = P.run_pass0_known(None, "SID", led_ope1, PROF_URO, ACFG,
                            log=lambda *a: None)
 check("pass0 refuses a single-channel organophosphate (no cross-channel support)",
       s_ope1["committed"] == 0, s_ope1)
+
+# ---------- selection prior: a reference-list neutral wins a near-tie ----------
+sp = pd.DataFrame([
+    iso_row(sample_peak_id="Z", compound_formula="C8H12O4", compound_score=0.88,
+            ion_formula="C8H11O4-", ion_score=0.88, ppm_error=0.2),       # not listed
+    iso_row(sample_peak_id="Z", compound_formula="C10H16O5", compound_score=0.86,
+            ion_formula="C10H15O5-", ion_score=0.86, ppm_error=0.2),      # listed HOM
+])
+check("no prior: higher raw wins (C8H12O4)",
+      P.arbitrate(sp, P.PassConfig())["winners"].iloc[0]["neutral"] == "C8H12O4")
+cfg_sp = P.PassConfig(); cfg_sp.reflist_formulas = frozenset({"C10H16O5"})
+check("reflist prior breaks the near-tie toward the listed HOM",
+      P.arbitrate(sp, cfg_sp)["winners"].iloc[0]["neutral"] == "C10H16O5")
+# but the prior must NOT override a clear winner (gap 0.12 > prior 0.04)
+sp2 = pd.DataFrame([
+    iso_row(sample_peak_id="Y", compound_formula="C8H12O4", compound_score=0.92,
+            ion_formula="C8H11O4-", ion_score=0.92, ppm_error=0.2),
+    iso_row(sample_peak_id="Y", compound_formula="C10H16O5", compound_score=0.80,
+            ion_formula="C10H15O5-", ion_score=0.80, ppm_error=0.2),
+])
+check("reflist prior does NOT override a clear winner (gap 0.12 > 0.04)",
+      P.arbitrate(sp2, cfg_sp)["winners"].iloc[0]["neutral"] == "C8H12O4")
+
 
 def test_all():
     assert FAIL == 0, f"{FAIL} checks failed"

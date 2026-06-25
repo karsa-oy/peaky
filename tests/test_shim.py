@@ -41,7 +41,7 @@ check("from mascope_assign import PassConfig works", PassConfig is _PC)
 
 # version is the renamed package's version
 check("mascope_assign.__version__ == peaky.__version__",
-      mascope_assign.__version__ == peaky.__version__ == "0.4.0",
+      mascope_assign.__version__ == peaky.__version__ == "0.5.0",
       f"{mascope_assign.__version__} / {peaky.__version__}")
 
 

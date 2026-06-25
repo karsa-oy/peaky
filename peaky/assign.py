@@ -10,7 +10,7 @@ import argparse
 import json
 
 from . import (chemistry, cleanup, contexts, degeneracy, io_mascope, isotopes,
-               ladders, ledger, passes, reagents, residual, series_gka,
+               ladders, ledger, passes, reagents, reflists, residual, series_gka,
                siloxane, tiers, timeseries)
 
 __version__ = "0.4.0"
@@ -60,9 +60,14 @@ def _module_hashes() -> dict:
 def run(sample_id: str, context: str = "ambient-air", *,
         cfg: passes.PassConfig | None = None, use_cache: bool = True,
         do_pass2: bool = True, do_pass3: bool = True, do_pass4: bool = True,
-        do_pass5: bool = True, ts_peaks=None, adducts=None,
+        do_pass5: bool = True, ts_peaks=None, adducts=None, reflists_active=None,
         log=print, checkpoint_dir=None) -> dict:
     cfg = cfg or passes.PassConfig()
+    # reference-list selection prior: a candidate neutral on an active reference
+    # peaklist wins a near-tie over a mass coincidence (arbitrate reads this set).
+    if reflists_active:
+        cfg.reflist_formulas = frozenset().union(
+            *(set(rl.formulas) for rl in reflists_active)) or frozenset()
     profile = contexts.get_context(context)
     client = io_mascope.connect()
 
@@ -291,6 +296,25 @@ def run(sample_id: str, context: str = "ambient-air", *,
     # re-promote it): demote unconfirmed-fluorine M0 (¹⁹F monoisotopic, no Cl/Br/S
     # anchor, not a PFCA) to Candidate + below_assignability. Last word on tier.
     cleanup.demote_unconfirmed_fluorine(led, log=log)
+    # carbon-cluster de-risking (same arithmetic as the plausibility 'carbon-rich'
+    # flag): an F-free skeleton with H/C below the floor (e.g. C27H8) is a high-mass
+    # coincidence, not a molecule -> Candidate + below_assignability.
+    cleanup.demote_implausible_carbon(led, log=log)
+    # ionization-plausibility: a pure hydrocarbon can't deprotonate or anchor an
+    # anion cluster -> demote heteroatom-free M0 on [M-H]-/[M+Br]-/[M+CO3]-/... .
+    cleanup.demote_implausible_ionization(led, log=log)
+    # speculative residual-tail: residual:* commits that reached Identified on weak
+    # evidence (off-cal z, no-iso multi-N, 0-anchor series, sole minor channel).
+    cleanup.demote_speculative_residual(led, cfg, log=log)
+    # RESCUE-VERIFY (last, post-tiering so it sets its own tier): match the still-
+    # unexplained residual by mass to active reference peaklists and SCORE those
+    # formulas with the server -- isotope-confirmed -> literature-anchored M0;
+    # too dim to confirm -> tentative low-quality Candidate (never lost back to
+    # unexplained); bright-but-uncorroborated/off-cal -> left unexplained.
+    if reflists_active:
+        summaries["reflist_rescue"] = _safe(
+            "reflist_rescue", lambda: reflists.rescue_unexplained_by_reflist(
+                client, sample_id, led, profile, cfg, reflists_active, adducts, log=log))
     tc = led.loc[led["role"] == ledger.ROLE_M0, "tier"].value_counts().to_dict()
     log(f"[run] tiers {tc}")
 

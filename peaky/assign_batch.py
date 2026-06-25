@@ -277,10 +277,18 @@ def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
     # a per-sample match gap can't flip polarity / mis-assign a file. Caller can
     # still override via assign_kw['adducts'].
     assign_kw.setdefault("adducts", list(prof.adducts))
+    # context-unlock the reference peaklists (contaminants always; chemistry-
+    # specific lists when the batch metadata matches) -> selection prior + rescue.
+    from . import reflists as RL
+    _tags = RL.resolve_context_tags(batch or "", getattr(prof, "label", ""))
+    reflists_active = RL.active_lists(RL.load_catalog(), context_tags=_tags)
+    if reflists_active:
+        log(f"[assign_batch] reference lists active: {[rl.id for rl in reflists_active]} "
+            f"(context {sorted(_tags) or 'contaminants-only'})")
     per_file, offsets, per_stats = {}, {}, []
     for i, sid in enumerate(sample_ids, 1):
         log(f"[assign_batch] ({i}/{len(sample_ids)}) assigning {sid} ...")
-        res = A.run(sid, context=context, log=log, **assign_kw)
+        res = A.run(sid, context=context, log=log, reflists_active=reflists_active, **assign_kw)
         led = res["ledger"]
         led.to_csv(os.path.join(pfdir, f"{sid}_ledger.csv"), index=False)
         per_file[sid] = _m0(led)

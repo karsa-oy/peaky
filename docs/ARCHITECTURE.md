@@ -146,7 +146,8 @@ commitments the previous ones justify. (Condensed; the authoritative table is in
 | **6**        | `ladders`         | **anchored ladder gap-fill**: walk +O/+CH₂/+CO₂/−H₂O diagonals out from Identified anchors (Candidate tier) |
 | iso-env      | `isotopes`        | claim each committed peak's full predicted M+2/M+4 envelope; displaces weak M0s that are really a parent's satellite |
 | siloxane     | `siloxane`        | dedicated PDMS/siloxane ladder on spacing + ²⁹Si/³⁰Si envelope (CHON monsters out-score the true Si formula otherwise) |
-| cleanup      | `cleanup`         | isotope-confirmed recovery, bromide-cluster labelling, ringing/sidelobe artifact flagging |
+| cleanup      | `cleanup`         | isotope-confirmed recovery, bromide-cluster labelling, ringing/sidelobe artifact flagging; **plausibility demotes** (carbon-cluster / implausible-ionization / speculative-residual, post-tier) + reagent-halocarbon relabel (Br runs) |
+| reflist      | `reflists`        | **reference peaklists** (context-gated; contaminants always on): near-tie selection prior + mass-match **rescue** re-scored by the server — soft, provenance-tagged, never overrides an isotope-scored Identified |
 | degeneracy   | `degeneracy`      | honest cross-family mass-degeneracy density; an uncorroborated mass-degenerate commit is capped at Candidate |
 | tiers        | `tiers`           | final **Identified / Candidate** verdict (margin, density, mass-error gate, degeneracy-aware) |
 
@@ -268,9 +269,11 @@ predictor), `reagents.py` / `profiles.py` (reagent library + per-reagent config)
 **Assignment** — `ledger.py` (state + invariants + commit API), `passes.py`
 (arbitration + pass director + calibration), `series_gka.py` / `series_detect.py`
 / `ladders.py` (series math, detection, ladder gap-fill), `residual.py` (pass 4),
-`siloxane.py` (PDMS ladder), `cleanup.py` (residual cleanup), `degeneracy.py`
-(mass-degeneracy), `tiers.py` (Identified/Candidate verdict), `plausibility.py`
-(QC), `assign.py` (orchestrator + `PassConfig`).
+`siloxane.py` (PDMS ladder), `cleanup.py` (residual cleanup + plausibility
+demotes), `degeneracy.py` (mass-degeneracy), `tiers.py` (Identified/Candidate
+verdict), `plausibility.py` (QC), `reflists.py` (curated reference-peaklist
+catalog in `data/peaklists/` → near-tie selection prior + mass-match rescue-verify),
+`assign.py` (orchestrator + `PassConfig`).
 
 **Batch** — `sampling.py` (sample selection: representative subset OR
 brightest-coverage), `assign_batch.py`
