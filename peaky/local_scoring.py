@@ -18,6 +18,7 @@ so peaky's passes/arbitration are unchanged — only the *source* of the scores 
 from the server to the local library. Mascope is still the scorer (its authored,
 released code), just executed locally and pinned to a library version.
 """
+
 from __future__ import annotations
 
 import re
@@ -29,7 +30,7 @@ import pandas as pd
 PROBABLE_THRESHOLD = 0.8
 POSSIBLE_THRESHOLD = 0.4
 MATCH_MZ_TOLERANCE_PPM = 5.0
-INTENSITY_TOLERANCE = 0.4   # mascope_tools ISOTOPE_MATCHING_INTENSITY_TOLERANCE
+INTENSITY_TOLERANCE = 0.4  # mascope_tools ISOTOPE_MATCHING_INTENSITY_TOLERANCE
 
 
 def adduct_to_mech(adduct: str) -> str:
@@ -44,7 +45,7 @@ def adduct_to_mech(adduct: str) -> str:
     if not m:
         raise ValueError(f"unrecognised adduct label {adduct!r}")
     core, charge = m.group(1), m.group(2)
-    terms = re.findall(r"[+-][^+-]+", core)        # ['+HBr', '+CO3'] | ['-H'] | ['+Br']
+    terms = re.findall(r"[+-][^+-]+", core)  # ['+HBr', '+CO3'] | ['-H'] | ['+Br']
     adds = "".join(t[1:] for t in terms if t.startswith("+"))
     subs = "".join(t[1:] for t in terms if t.startswith("-"))
     if adds and not subs:
@@ -81,9 +82,16 @@ def score_candidates_local(
     isotopologues carry `sample_peak_id=None` and `ppm_error=None`.
     """
     from mascope_tools.composition import utils
-    from mascope_tools.composition.heuristic_filter import predict_isotopes, score_pattern
+    from mascope_tools.composition.heuristic_filter import (
+        predict_isotopes,
+        score_pattern,
+    )
 
-    peaks = peaks[[mz_col, intensity_col, peak_id_col]].dropna(subset=[mz_col]).sort_values(mz_col)
+    peaks = (
+        peaks[[mz_col, intensity_col, peak_id_col]]
+        .dropna(subset=[mz_col])
+        .sort_values(mz_col)
+    )
     mzs = peaks[mz_col].to_numpy(dtype=float)
     ints = peaks[intensity_col].to_numpy(dtype=float)
     pids = peaks[peak_id_col].to_numpy()
@@ -94,8 +102,12 @@ def score_candidates_local(
     for neutral in formulas:
         for adduct, im in mechs.items():
             try:
-                ion = utils.combine_formula_and_ionization(neutral, im)  # e.g. 'C6H12BrO6-'
-                pred_mz, pred_int, labels = predict_isotopes(ion[:-1], im.charge, purity)
+                ion = utils.combine_formula_and_ionization(
+                    neutral, im
+                )  # e.g. 'C6H12BrO6-'
+                pred_mz, pred_int, labels = predict_isotopes(
+                    ion[:-1], im.charge, purity
+                )
             except Exception:
                 continue
             if len(pred_mz) == 0:
@@ -116,9 +128,10 @@ def score_candidates_local(
                 if lo >= hi:
                     continue
                 k = lo + int(np.argmin(np.abs(mzs[lo:hi] - pmz)))
-                if i == 0:                                   # monoisotopic / base
+                if i == 0:  # monoisotopic / base
                     base_int = ints[k]
-                    obs_int[0] = ints[k]; obs_mz[0] = mzs[k]
+                    obs_int[0] = ints[k]
+                    obs_mz[0] = mzs[k]
                     obs_mz_err[0] = abs(mzs[k] - pmz) / pmz * 1e6
                     matched_pid[0] = pids[k]
                     continue
@@ -127,34 +140,49 @@ def score_candidates_local(
                 rel_obs = ints[k] / base_int
                 ierr = abs(pred_rel[i] - rel_obs) / pred_rel[i]
                 if ierr <= INTENSITY_TOLERANCE:
-                    obs_int[i] = ints[k]; obs_mz[i] = mzs[k]
+                    obs_int[i] = ints[k]
+                    obs_mz[i] = mzs[k]
                     obs_mz_err[i] = abs(mzs[k] - pmz) / pmz * 1e6
                     obs_int_err[i] = ierr
                     matched_pid[i] = pids[k]
 
-            if base_int is None:        # M0 not detected -> not a candidate at all
+            if base_int is None:  # M0 not detected -> not a candidate at all
                 continue
-            score = float(score_pattern(obs_mz, obs_mz_err, obs_int, obs_int_err, pred_rel))
+            score = float(
+                score_pattern(obs_mz, obs_mz_err, obs_int, obs_int_err, pred_rel)
+            )
             cat = _category(score)
 
             for i, label in enumerate(labels):
                 matched = matched_pid[i] is not None
-                rows.append({
-                    "compound_formula": neutral, "compound_score": score,
-                    "compound_category": cat,
-                    "ion_formula": ion, "ion_score": score, "ion_category": cat,
-                    "mechanism_id": im.mascope_notation,
-                    "isotope_formula": ion if label == "M0" else f"[{label}]{ion}",
-                    "iso_label": label, "is_base": (i == 0),
-                    "theo_mz": float(pred_mz[i]), "rel_abundance": float(pred_rel[i]),
-                    "iso_score": score if matched else None,
-                    "iso_category": cat if matched else None,
-                    "sample_peak_id": matched_pid[i],
-                    "sample_peak_mz": float(obs_mz[i]) if matched else None,
-                    "sample_peak_intensity": float(obs_int[i]) if matched else None,
-                    "ppm_error": (float(obs_mz[i]) - float(pred_mz[i])) / float(pred_mz[i]) * 1e6
-                    if matched else None,
-                    "abundance_error": float(obs_int_err[i]) if matched and i > 0 else None,
-                })
+                rows.append(
+                    {
+                        "compound_formula": neutral,
+                        "compound_score": score,
+                        "compound_category": cat,
+                        "ion_formula": ion,
+                        "ion_score": score,
+                        "ion_category": cat,
+                        "mechanism_id": im.mascope_notation,
+                        "isotope_formula": ion if label == "M0" else f"[{label}]{ion}",
+                        "iso_label": label,
+                        "is_base": (i == 0),
+                        "theo_mz": float(pred_mz[i]),
+                        "rel_abundance": float(pred_rel[i]),
+                        "iso_score": score if matched else None,
+                        "iso_category": cat if matched else None,
+                        "sample_peak_id": matched_pid[i],
+                        "sample_peak_mz": float(obs_mz[i]) if matched else None,
+                        "sample_peak_intensity": float(obs_int[i]) if matched else None,
+                        "ppm_error": (float(obs_mz[i]) - float(pred_mz[i]))
+                        / float(pred_mz[i])
+                        * 1e6
+                        if matched
+                        else None,
+                        "abundance_error": float(obs_int_err[i])
+                        if matched and i > 0
+                        else None,
+                    }
+                )
 
     return pd.DataFrame(rows)
