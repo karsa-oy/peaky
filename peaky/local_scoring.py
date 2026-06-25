@@ -68,6 +68,7 @@ def score_candidates_local(
     adducts: list[str],
     *,
     ppm: float = MATCH_MZ_TOLERANCE_PPM,
+    purity: float | None = None,
     mz_col: str = "mz",
     intensity_col: str = "height",
     peak_id_col: str = "peak_id",
@@ -94,7 +95,7 @@ def score_candidates_local(
         for adduct, im in mechs.items():
             try:
                 ion = utils.combine_formula_and_ionization(neutral, im)  # e.g. 'C6H12BrO6-'
-                pred_mz, pred_int, labels = predict_isotopes(ion[:-1], im.charge)
+                pred_mz, pred_int, labels = predict_isotopes(ion[:-1], im.charge, purity)
             except Exception:
                 continue
             if len(pred_mz) == 0:
