@@ -593,6 +593,32 @@ def _reanchor_labelled_reagent(ion_rows: list[dict], *, delta: float, label: str
 MATCH_WORKERS = 5   # concurrent match_compounds batches (I/O-bound; server-safe)
 
 
+def _mechanism_names(client, mechanism_ids: list[str] | None) -> list[str]:
+    """Reverse-map resolved ionization-mechanism ids -> their mascope names
+    ('+Br-', '-H+', '+^NO3-'), which mascope_tools.parse_ionization consumes."""
+    if not mechanism_ids:
+        return []
+    table = client.ionization.list()
+    id2name = {r.ionization_mechanism_id: r.ionization_mechanism
+               for r in table.itertuples()}
+    return [id2name[m] for m in mechanism_ids if m in id2name]
+
+
+def _score_candidates_local(client, sample_id, formulas, mechanism_ids):
+    """Local, in-process scoring (no match_compounds round-trip) producing the same
+    flat per-isotopologue schema as the backend path. Peaks from the cached
+    fetch_peaks; channels from the reverse-mapped mechanism names."""
+    from . import local_scoring
+
+    raw = fetch_peaks(client, sample_id)                      # cached; mz/height/peak_id
+    mechs = _mechanism_names(client, mechanism_ids)
+    out = local_scoring.score_candidates_local(raw, formulas, mechanisms=mechs)
+    out.attrs["match_batches"] = 0
+    out.attrs["match_batch_failures"] = []
+    out.attrs["match_formulas"] = len(formulas)
+    return out
+
+
 def score_candidates(client, sample_id: str, formulas: list[str], *,
                      match_params: dict | None = None,
                      mechanism_ids: list[str] | None = None,
@@ -613,6 +639,11 @@ def score_candidates(client, sample_id: str, formulas: list[str], *,
     formulas = sorted({f for f in formulas if f})
     if not formulas:
         return pd.DataFrame()
+    # Local in-process scoring (mascope_tools) instead of the match_compounds
+    # round-trip. Opt-in for now (PEAKY_LOCAL_SCORING=1) while validating; the
+    # server path below stays as the fallback.
+    if os.environ.get("PEAKY_LOCAL_SCORING"):
+        return _score_candidates_local(client, sample_id, formulas, mechanism_ids)
     mp = dict(DEFAULT_MATCH_PARAMS)
     if match_params:
         mp.update(match_params)
