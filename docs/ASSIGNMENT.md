@@ -26,10 +26,12 @@ claimed each peak and why.
 
 Peaky **never invents a mass or isotope score.** It owns *candidate generation*
 (which formulas are worth asking about), *chemistry plausibility*, *series
-logic*, and *arbitration* (which answer wins a peak). For scoring, it hands
-candidate neutral formulas to Mascope's `match_compounds`, which returns a
-compound → ion → isotopologue tree where every node carries its own
-`match_score` and the attributed peak. Peaky reads that per-isotopologue verdict.
+logic*, and *arbitration* (which answer wins a peak). For scoring it uses
+Mascope's own maths — by default **in-process** via `mascope_tools` (IsoSpec
+envelope + `score_pattern`), with the network `match_compounds` as an opt-in
+fallback (`PEAKY_LOCAL_SCORING=0`). Either way it gets, per candidate ion, a
+per-isotopologue verdict (each isotopologue's `match_score` + the attributed
+peak), which Peaky reads. See `docs/MASCOPE_TOOLS_INTEGRATION.md`.
 **No LLM is anywhere in this loop** — which is exactly why a run is reproducible
 and auditable.
 

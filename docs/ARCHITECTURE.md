@@ -22,9 +22,13 @@ Peaky reads high-resolution CIMS mass-spec peaks from **Mascope** (via
 tiered spreadsheets, figures, and a PDF report. Two hard rules shape everything
 below:
 
-1. **Mascope's `match_compounds` is the only scorer.** Peaky never invents a
-   mass/isotope score. It enumerates candidate formulas, hands them to Mascope,
-   and arbitrates among the scores Mascope returns.
+1. **Mascope is the scorer; Peaky never invents mass/isotope scoring.** It
+   enumerates candidate formulas, scores them with Mascope's *own* scoring maths,
+   and arbitrates among the results. That scoring now runs **in-process by
+   default** via `mascope_tools` (`local_scoring.py` — same IsoSpec +
+   `score_pattern` maths, released by the Mascope authors), with the network
+   `match_compounds` endpoint kept as an opt-in fallback (`PEAKY_LOCAL_SCORING=0`).
+   See [`MASCOPE_TOOLS_INTEGRATION.md`](MASCOPE_TOOLS_INTEGRATION.md).
 2. **The chemistry gates are structural, not statistical.** Integer DBE, Senior's
    rule, the oxygen cap, evidence-gated heteroatoms/halogens — these are valence
    facts, applied identically every run. **No LLM is in the assignment loop**, which
@@ -35,9 +39,11 @@ below:
 ## 2. The core design: one ledger
 
 All pipeline state lives in **a single mutable pandas DataFrame — the ledger**
-(`ledger.py`). One **row per observed peak**. Every stage is a
-`ledger → ledger` function that only *fills or annotates* columns; nothing else
-holds authoritative state.
+(`ledger.py`). One **row per observed peak**. Every stage reads that one ledger
+and *fills or annotates* its columns **in place**, returning only a summary dict;
+nothing else holds authoritative state. (Stage signatures are not yet uniform —
+they take the client/profile/config they need alongside the ledger; unifying them
+behind one `RunState` is a planned cleanup, see `docs/REFACTORING.md`.)
 
 A peak's row carries its **role**, and once it is explained, the formula/adduct
 and the evidence behind it:
@@ -71,8 +77,8 @@ reagent + prescan                       profiles.resolve / reagents.label / isot
 candidate generation                    chemistry.py grid (integer-DBE / Senior / O-cap) per peak
    │
    ▼
-SCORING  ── match_compounds ──►         io_mascope: parallel call, flatten_match_tree → per-isotopologue table
-   │  (Mascope is the oracle)
+SCORING  ── local_scoring ────►         io_mascope.score_candidates: in-process mascope_tools (default)
+   │  (Mascope's maths, run locally;     → per-isotopologue table; match_compounds is the opt-in fallback
    ▼
 arbitration + multi-pass commit         passes.py director (passes 1–6 + sweeps; §4)
    │                                     complexity-penalised, isotopologue-gated; commit M0 owners
@@ -218,10 +224,11 @@ How that's enforced:
   cross-run registry — one compact row per run, loadable with
   `pandas.read_json(lines=True)` to find or diff runs.
 
-The one genuine source of cross-run variation is the live `match_compounds` call
-(server-side), not Peaky. `test_determinism.py` locks the contract: two runs at
-different times over the same inputs → identical figure/xlsx/csv bytes, with the
-PDF differing only by its visible cover timestamp.
+With the default in-process scorer, scoring itself is now deterministic too, so a
+re-run over the same inputs has **no** server-side source of variation (the opt-in
+`match_compounds` fallback re-introduces one). `test_determinism.py` locks the
+contract: two runs at different times over the same inputs → identical
+figure/xlsx/csv bytes, with the PDF differing only by its visible cover timestamp.
 
 ---
 
@@ -273,7 +280,8 @@ predictor), `reagents.py` / `profiles.py` (reagent library + per-reagent config)
 demotes), `degeneracy.py` (mass-degeneracy), `tiers.py` (Assigned/Candidate
 verdict), `plausibility.py` (QC), `reflists.py` (curated reference-peaklist
 catalog in `data/peaklists/` → near-tie selection prior + mass-match rescue-verify),
-`assign.py` (orchestrator + `PassConfig`).
+`assign.py` (single-sample orchestrator; `PassConfig` lives in `passes.py`),
+`local_scoring.py` (in-process mascope_tools scoring backend).
 
 **Batch** — `sampling.py` (sample selection: representative subset OR
 brightest-coverage), `assign_batch.py`
@@ -295,6 +303,6 @@ The offline suite (`tests/`, 850+ assertions, no network) is the contract. Pure
 functions (`flatten_match_tree`, the chemistry gates, the merge, the cluster
 math) are unit-tested against captured fixtures; determinism is locked by
 `test_determinism.py`; the no-network install guarantee by `test_smoke.py`. CI
-runs the suite on Python 3.11–3.13 with **no credentials**. Every change ships
+runs the suite on Python 3.12–3.13 with **no credentials**. Every change ships
 with a test, and the suite must stay green — that is what keeps the pipeline
 trustworthy as it grows.
