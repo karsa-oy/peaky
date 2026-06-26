@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import dataclass, field
 
 from peaky.chem import chemistry
 from peaky.assignment import cleanup
@@ -76,6 +77,183 @@ def _module_hashes() -> dict:
     d = Path(paths.PKG_ROOT)
     return {p.relative_to(d).as_posix(): hashlib.sha1(p.read_bytes()).hexdigest()[:12]
             for p in sorted(d.rglob("*.py"))}
+
+
+@dataclass
+class _RunState:
+    """Mutable run context threaded to every pipeline stage."""
+
+    client: object
+    sample_id: str
+    led: object
+    profile: object
+    pre: object
+    cfg: object
+    adducts: list
+    reagent: object
+    has_halogen: bool
+    do_pass2: bool
+    do_pass3: bool
+    do_pass4: bool
+    do_pass5: bool
+    reflists_active: object
+    ts_peaks: object
+    log: object
+    checkpoint_dir: object
+    summaries: dict = field(default_factory=dict)
+    plaus_audit: list = field(default_factory=list)
+
+
+@dataclass
+class _Stage:
+    """One pipeline step. ``fn(st)`` does the work; ``when(st)`` gates it; ``safe``
+    wraps it so a failure can't lose prior work; ``store`` keeps its summary."""
+
+    name: str
+    fn: object
+    when: object = (lambda st: True)
+    safe: bool = True
+    store: bool = True
+
+
+def _checkpoint(st, tag):
+    if st.checkpoint_dir:
+        from pathlib import Path
+        Path(st.checkpoint_dir).mkdir(parents=True, exist_ok=True)
+        st.led.to_csv(
+            Path(st.checkpoint_dir) / f"{st.sample_id}_ledger_{tag}.csv", index=False)
+
+
+def _safe(st, tag, fn):
+    """Run a stage; a failure (e.g. a server 500) must not lose prior passes' work."""
+    import time as _time
+
+    t0 = _time.time()
+    try:
+        s = fn()
+    except Exception as e:  # noqa: BLE001
+        st.log(f"[run] {tag} FAILED: {type(e).__name__}: {e}")
+        s = {"committed": 0, "locked": 0, "iso_attached": 0, "error": str(e)}
+    s["elapsed_s"] = round(_time.time() - t0, 1)
+    st.log(f"[run] {tag} took {s['elapsed_s']}s")
+    _checkpoint(st, tag)
+    return s
+
+
+def _stage_composite(st):
+    """Composite detection + de-blend. Halide-CIMS only -- in positive urea mode
+    the even-shift residual is ordinary 13C2/18O/34S structure, not a co-component,
+    so the test is skipped. split_composites appends rows, so rebind st.led."""
+    if st.has_halogen:
+        st.summaries["composite"] = _safe(
+            st, "composite", lambda: passes.detect_composites(st.led, st.cfg, log=st.log))
+        n_before = len(st.led)
+        st.led = passes.split_composites(st.led, st.cfg, log=st.log)
+        st.summaries["composite_split"] = {"split": len(st.led) - n_before}
+    else:
+        st.summaries["composite"] = {"flagged": 0, "skipped": "no halogen adduct"}
+        st.summaries["composite_split"] = {"split": 0}
+        st.log("[run] composite test skipped (no halogen adduct -- even-shift "
+               "residual is isotope structure, not a co-component signature)")
+    _checkpoint(st, "audit")
+
+
+def _stage_reagent_post(st):
+    """Final reagent sweep: catch cluster peaks the passes left unexplained."""
+    n = reagents.label_reagents(st.led, st.reagent, ppm=12.0)
+    if n:
+        st.log(f"[run] post-labeled {n} more reagent-cluster peaks")
+
+
+def _stage_timeseries(st):
+    """Time-resolved disposition when a batch TS is supplied (runs last)."""
+    ts_reagent_mzs = None
+    if st.reagent in reagents._POSITIVE_REAGENTS:
+        ts_reagent_mzs = [m for (_l, m, _f) in reagents.build_library(st.reagent)]
+    return timeseries.apply_timeseries(
+        st.led, st.ts_peaks, reagent_mzs=ts_reagent_mzs, log=st.log)
+
+
+# The assignment pipeline AS DATA -- read top to bottom to see exactly what runs,
+# in what order, under what condition. `safe` wraps a stage so a failure can't lose
+# prior work; `store` keeps its summary. Authoritative stage table: ARCHITECTURE.md §4.
+_STAGES = [
+    _Stage("pass0", lambda st: passes.run_pass0_known(
+        st.client, st.sample_id, st.led, st.profile, st.cfg, st.adducts, log=st.log)),
+    _Stage("pass1", lambda st: passes.run_pass1(
+        st.client, st.sample_id, st.led, st.profile, st.pre, st.cfg, st.adducts, log=st.log)),
+    # self-calibrate the mass gate on the pass-1 backbone, then re-grade pass-1's
+    # pre-calibration confidence labels against the fitted center.
+    _Stage("calibrate", lambda st: passes.calibrate(st.led, st.cfg, log=st.log),
+           safe=False, store=False),
+    _Stage("relabel", lambda st: passes.relabel_confidence(st.led, st.cfg, log=st.log),
+           safe=False, store=False),
+    _Stage("pass2", lambda st: passes.run_pass2(
+        st.client, st.sample_id, st.led, st.profile, st.cfg, st.adducts, log=st.log),
+           when=lambda st: st.do_pass2),
+    _Stage("pass3", lambda st: passes.run_pass3(
+        st.client, st.sample_id, st.led, st.profile, st.pre, st.cfg, st.adducts, log=st.log),
+           when=lambda st: st.do_pass3),
+    # claim each committed peak's full M+2/M+4 envelope BEFORE pass 4, then free the
+    # bright low-carbon CHON mass-fits whose 13C contradicts the carbon count.
+    _Stage("iso_env_pre4",
+           lambda st: passes.complete_isotope_envelopes(st.led, st.cfg, log=st.log),
+           when=lambda st: st.do_pass4),
+    _Stage("carbon_clamp_pre4",
+           lambda st: {"demoted": passes.demote_carbon_inconsistent(st.led, st.cfg, log=st.log)},
+           when=lambda st: st.do_pass4),
+    _Stage("pass4", lambda st: residual.explain_residual(
+        st.client, st.sample_id, st.led, st.profile, st.pre, st.cfg, st.adducts,
+        reagent=st.reagent, log=st.log), when=lambda st: st.do_pass4),
+    _Stage("pass5", lambda st: passes.run_pass5_completion(
+        st.client, st.sample_id, st.led, st.profile, st.cfg, st.adducts, log=st.log),
+           when=lambda st: st.do_pass5),
+    # post-run audits: apply the calibrated mass gate to pre-calibration commits.
+    _Stage("audit_iso", lambda st: passes.audit_isotopes(st.led, st.cfg, log=st.log), safe=False),
+    _Stage("audit", lambda st: passes.audit_mass_gate(st.led, st.cfg, log=st.log), safe=False),
+    _Stage("iso_env_post",
+           lambda st: passes.complete_isotope_envelopes(st.led, st.cfg, log=st.log)),
+    _Stage("composite", _stage_composite, safe=False, store=False),
+    _Stage("reagent_post", _stage_reagent_post,
+           when=lambda st: bool(st.reagent), safe=False, store=False),
+    # Pass 6: anchored ladder gap-fill -- AFTER the audits so their gates don't clear
+    # its pattern-evidenced completions. Then a 3rd envelope sweep for the di-bromide
+    # SOA cores that commit only in pass 6.
+    _Stage("pass6_ladder", lambda st: ladders.run_ladder_gapfill(
+        st.client, st.sample_id, st.led, st.profile, st.cfg, st.adducts, log=st.log),
+           when=lambda st: st.do_pass5),
+    _Stage("iso_env_post6",
+           lambda st: passes.complete_isotope_envelopes(st.led, st.cfg, log=st.log)),
+    _Stage("cleanup", lambda st: cleanup.run_cleanup(
+        st.client, st.sample_id, st.led, st.profile, st.cfg, log=st.log)),
+    _Stage("siloxane", lambda st: siloxane.assign_siloxane_ladder(
+        st.client, st.sample_id, st.led, st.profile, st.cfg, adducts=st.adducts, log=st.log)),
+    # honest mass-degeneracy measurement -- MUST precede tiers (the tier engine reads it).
+    _Stage("degeneracy", lambda st: _degen_summary(
+        degeneracy.apply_degeneracy(st.led, context=st.profile.label, log=st.log))),
+    # report tier, then the post-tier de-risking demotes (each gets the last word).
+    _Stage("tiers", lambda st: tiers.apply_tiers(st.led), safe=False, store=False),
+    _Stage("demote_fluorine",
+           lambda st: cleanup.demote_unconfirmed_fluorine(st.led, log=st.log),
+           safe=False, store=False),
+    _Stage("demote_carbon",
+           lambda st: cleanup.demote_implausible_carbon(st.led, log=st.log),
+           safe=False, store=False),
+    _Stage("demote_ionization",
+           lambda st: cleanup.demote_implausible_ionization(st.led, log=st.log),
+           safe=False, store=False),
+    _Stage("demote_speculative",
+           lambda st: cleanup.demote_speculative_residual(st.led, st.cfg, log=st.log),
+           safe=False, store=False),
+    _Stage("plausibility", lambda st: plausibility.demote_implausible(
+        st.led, audit=st.plaus_audit, log=st.log), safe=False),
+    # rescue-verify the still-unexplained residual against active reference peaklists.
+    _Stage("reflist_rescue", lambda st: reflists.rescue_unexplained_by_reflist(
+        st.client, st.sample_id, st.led, st.profile, st.cfg, st.reflists_active,
+        st.adducts, log=st.log), when=lambda st: bool(st.reflists_active)),
+    _Stage("timeseries", _stage_timeseries,
+           when=lambda st: st.ts_peaks is not None and len(st.ts_peaks)),
+]
 
 
 def run(sample_id: str, context: str = "ambient-air", *,
@@ -153,215 +331,21 @@ def run(sample_id: str, context: str = "ambient-air", *,
         n_reag = reagents.label_reagents(led, reagent, ppm=12.0)
         log(f"[run] pre-labeled {n_reag} reagent-cluster peaks ({reagent})")
 
-    def _checkpoint(tag):
-        if checkpoint_dir:
-            from pathlib import Path
-            Path(checkpoint_dir).mkdir(parents=True, exist_ok=True)
-            led.to_csv(Path(checkpoint_dir) / f"{sample_id}_ledger_{tag}.csv", index=False)
-
-    def _safe(tag, fn):
-        # a pass failure (e.g. server 500) must not lose prior passes' work
-        import time as _time
-        t0 = _time.time()
-        try:
-            s = fn()
-        except Exception as e:
-            log(f"[run] {tag} FAILED: {type(e).__name__}: {e}")
-            s = {"committed": 0, "locked": 0, "iso_attached": 0, "error": str(e)}
-        s["elapsed_s"] = round(_time.time() - t0, 1)
-        log(f"[run] {tag} took {s['elapsed_s']}s")
-        _checkpoint(tag)
-        return s
-
-    # Pass 0: explicit KNOWN species -- instrument contaminants (silanediol)
-    # AND small atmospheric acids/radicals (HO2/HNO3/HNO2/HNO4) that the
-    # integer-DBE / C>=1 organic grid cannot reach -- locked before pass 1
-    summaries = {"pass0": _safe("pass0", lambda: passes.run_pass0_known(
-        client, sample_id, led, profile, cfg, adducts, log=log))}
-    summaries["pass1"] = _safe("pass1", lambda: passes.run_pass1(
-        client, sample_id, led, profile, pre, cfg, adducts, log=log))
-    # self-calibrate the mass gate on the pass-1 backbone; all later commits
-    # are judged by calibrated z-score instead of a fixed ppm window. Then
-    # re-grade pass-1's pre-calibration confidence labels against the fitted
-    # center -- otherwise a uniform instrument offset (the uronium source sits
-    # at ~-2.4 ppm) leaves the whole backbone mislabeled 'Low' and capped at
-    # Candidate.
-    passes.calibrate(led, cfg, log=log)
-    passes.relabel_confidence(led, cfg, log=log)
-    if do_pass2:
-        summaries["pass2"] = _safe("pass2", lambda: passes.run_pass2(
-            client, sample_id, led, profile, cfg, adducts, log=log))
-    if do_pass3:
-        summaries["pass3"] = _safe("pass3", lambda: passes.run_pass3(
-            client, sample_id, led, profile, pre, cfg, adducts, log=log))
-    if do_pass4:
-        # claim the full isotope envelope (M+2/M+4 incl. Si/Br/Cl combos) of
-        # every committed peak BEFORE pass 4, so multi-isotope satellites (the
-        # silanediol Si4+Br M+2 at 395) are attached to their parents instead of
-        # being mis-assigned by pass 4's iso-pair stage (a Si4+Br M+4/M+2 ratio
-        # of ~0.26 otherwise reads as a phantom Cl doublet).
-        summaries["iso_env_pre4"] = _safe(
-            "iso_env_pre4",
-            lambda: passes.complete_isotope_envelopes(led, cfg, log=log))
-        # free the bright lattice peaks that pass 1 grabbed with low-carbon
-        # CHON mass-fits (O15 monsters): their 13C satellite contradicts the
-        # formula's carbon count, so clear them HERE -- pass 4's carbon-clamped
-        # iso-pair enumeration then re-claims them as di-bromide SOA clusters.
-        summaries["carbon_clamp_pre4"] = _safe(
-            "carbon_clamp_pre4",
-            lambda: {"demoted": passes.demote_carbon_inconsistent(led, cfg, log=log)})
-        summaries["pass4"] = _safe("pass4", lambda: residual.explain_residual(
-            client, sample_id, led, profile, pre, cfg, adducts,
-            reagent=reagent, log=log))
-    if do_pass5:
-        # known-neutral completion: cross-channel partners + series gaps of
-        # the assignments made by passes 1-4 (no new formula space)
-        summaries["pass5"] = _safe("pass5", lambda: passes.run_pass5_completion(
-            client, sample_id, led, profile, cfg, adducts, log=log))
-
-    # post-run audit: apply the calibrated mass gate to pre-calibration commits
-    # (pass 1 Lows) and anything that slipped through with no mass evidence
-    summaries["audit_iso"] = passes.audit_isotopes(led, cfg, log=log)
-    summaries["audit"] = passes.audit_mass_gate(led, cfg, log=log)
-    # second envelope sweep: displace any satellite that a later pass still
-    # mis-assigned, and attach satellites of the pass-4/5 commits
-    summaries["iso_env_post"] = _safe(
-        "iso_env_post",
-        lambda: passes.complete_isotope_envelopes(led, cfg, log=log))
-    # composite detection: flag M0s whose even-shift peaks (M0/M+2) are inflated
-    # beyond what their halogen-free M+1 satellite implies -> an unresolved
-    # co-eluting compound shares the m/z (the silanediol n>=3 rungs sit on a
-    # coincident BrCl/Br compound; formula + prediction are both correct).
-    # GATED ON A HALOGEN ADDUCT: the discriminator reads the co-component's
-    # identity off the EVEN-shift (M+2/M+4) residual, which is only a halogen
-    # signature when a halogen reagent is in play. In positive urea-CIMS (no
-    # halogen adduct) the even-shift residual is ordinary 13C2 / 18O / 34S
-    # isotope structure, so the test would flag every C-rich peak as composite.
-    if has_halogen_adduct:
-        summaries["composite"] = _safe(
-            "composite", lambda: passes.detect_composites(led, cfg, log=log))
-        # de-blend: owner keeps assigned_fraction; the co-eluting compound becomes
-        # a synthetic '<id>.2' sub-peak (a target for constrained naming later).
-        # split_composites appends rows, so rebind led.
-        n_before = len(led)
-        led = passes.split_composites(led, cfg, log=log)
-        summaries["composite_split"] = {"split": len(led) - n_before}
-    else:
-        summaries["composite"] = {"flagged": 0,
-                                  "skipped": "no halogen adduct"}
-        summaries["composite_split"] = {"split": 0}
-        log("[run] composite test skipped (no halogen adduct -- even-shift "
-            "residual is isotope structure, not a co-component signature)")
-    _checkpoint("audit")
-
-    # final reagent sweep: catch any cluster peaks the passes left unexplained
-    if reagent:
-        n_reag2 = reagents.label_reagents(led, reagent, ppm=12.0)
-        if n_reag2:
-            log(f"[run] post-labeled {n_reag2} more reagent-cluster peaks")
-
-    # Pass 6: anchored ladder gap-fill -- walk the homolog/oxidation diagonals
-    # out from committed anchors and fill the gaps (the C15H22O3->O4->O5 type
-    # series). Runs AFTER the audits so their mass/isotope gates don't clear its
-    # pattern-evidenced (ladder-membership) completions. Candidate tier only.
-    if do_pass5:
-        summaries["pass6_ladder"] = _safe("pass6_ladder", lambda: ladders.run_ladder_gapfill(
-            client, sample_id, led, profile, cfg, adducts, log=log))
-
-    # Isotope-envelope completion, 3rd sweep -- AFTER pass 6. The di-bromide SOA
-    # cores ([M+HBr+Br]-, 2 Br in the ion) commit in pass 6, so the pre-pass-4
-    # and post-audit sweeps never see them; their M+2/M+4 satellites (a 1:1.95:
-    # 0.95 envelope) were left in the residual. This claims them so the
-    # di-bromide families don't leak their own isotope lines into "unexplained".
-    summaries["iso_env_post6"] = _safe(
-        "iso_env_post6",
-        lambda: passes.complete_isotope_envelopes(led, cfg, log=log))
-
-    # Residual cleanup (single-file, honest reclassification of the leftover
-    # 'unexplained' residual): isotope-confirmed low-complexity recovery, bromide
-    # reagent-cluster labelling, and ringing/shoulder artifact flagging.
-    summaries["cleanup"] = _safe(
-        "cleanup",
-        lambda: cleanup.run_cleanup(client, sample_id, led, profile, cfg, log=log))
-
-    # Dedicated PDMS/siloxane-ladder assignment: the +C2H6OSi (74.019) oligomer
-    # ladder is mass-degenerate per peak (CHON O-monsters out-score the true Si
-    # formula at the calibrated offset), so the general passes miss it or commit
-    # a monster a CHON-centric audit then clears. This claims the ladder using the
-    # series spacing + the 29Si/30Si isotope envelope as decisive evidence, and
-    # LOCKS it so the audits (already run) can't undo it. Positive sources with a
-    # silicone background (uronium); inert where the context forbids Si.
-    summaries["siloxane"] = _safe(
-        "siloxane", lambda: siloxane.assign_siloxane_ladder(
-            client, sample_id, led, profile, cfg, adducts=adducts, log=log))
-
-    # NB the uronium [M+NH4]+ -> protonated-amine re-read (cleanup.prefer_amine_
-    # over_ammonium) is applied at the MERGED level (assign_batch), where the
-    # cross-channel corroboration evidence is complete -- not here per-file.
-
-    # honest mass-degeneracy measurement: stamps degeneracy_density /
-    # degeneracy_note with the cross-family competing tie set so a reader sees
-    # how identifiable each mass really is. MUST run BEFORE tiers -- the tier
-    # engine reads these columns to cap uncorroborated mass-degenerate commits at
-    # Candidate (a per-pass "unique in the window" claim is only unique inside
-    # its narrow box). Disk-cached grid, so this is ~free after the first build.
-    summaries["degeneracy"] = _safe("degeneracy", lambda: _degen_summary(
-        degeneracy.apply_degeneracy(led, context=profile.label, log=log)))
-
-    # report tier on every committed assignment: Assigned vs Candidate
-    # (mechanical rules over evidence columns; ROADMAP 2). Degeneracy-aware: a
-    # high degeneracy_density with no isotope / cross-channel / series
-    # corroboration is capped at Candidate.
-    tiers.apply_tiers(led)
-    # F-monster de-risking runs AFTER the tier engine (which would otherwise
-    # re-promote it): demote unconfirmed-fluorine M0 (¹⁹F monoisotopic, no Cl/Br/S
-    # anchor, not a PFCA) to Candidate + below_assignability. Last word on tier.
-    cleanup.demote_unconfirmed_fluorine(led, log=log)
-    # carbon-cluster de-risking (same arithmetic as the plausibility 'carbon-rich'
-    # flag): an F-free skeleton with H/C below the floor (e.g. C27H8) is a high-mass
-    # coincidence, not a molecule -> Candidate + below_assignability.
-    cleanup.demote_implausible_carbon(led, log=log)
-    # ionization-plausibility: a pure hydrocarbon can't deprotonate or anchor an
-    # anion cluster -> demote heteroatom-free M0 on [M-H]-/[M+Br]-/[M+CO3]-/... .
-    cleanup.demote_implausible_ionization(led, log=log)
-    # speculative residual-tail: residual:* commits that reached Assigned on weak
-    # evidence (off-cal z, no-iso multi-N, 0-anchor series, sole minor channel).
-    cleanup.demote_speculative_residual(led, cfg, log=log)
-    # HARDENED plausibility (shared oracle, demote-only): the oxygen-lattice
-    # monster (O/C>1.3 AND mass-saturated) and carbon-cluster (DBE/C>=1.0, F-free,
-    # radicals exempt) gates. Run AFTER tiering + degeneracy (it reads
-    # degeneracy_note) so it has the last word on tier; the touched peaks are
-    # collected for tables/plausibility_audit_<tag>.csv (written by assign_batch).
-    plaus_audit: list = []
-    summaries["plausibility"] = plausibility.demote_implausible(
-        led, audit=plaus_audit, log=log)
-    # RESCUE-VERIFY (last, post-tiering so it sets its own tier): match the still-
-    # unexplained residual by mass to active reference peaklists and SCORE those
-    # formulas with the server -- isotope-confirmed -> literature-anchored M0;
-    # too dim to confirm -> tentative low-quality Candidate (never lost back to
-    # unexplained); bright-but-uncorroborated/off-cal -> left unexplained.
-    if reflists_active:
-        summaries["reflist_rescue"] = _safe(
-            "reflist_rescue", lambda: reflists.rescue_unexplained_by_reflist(
-                client, sample_id, led, profile, cfg, reflists_active, adducts, log=log))
+    st = _RunState(
+        client=client, sample_id=sample_id, led=led, profile=profile, pre=pre,
+        cfg=cfg, adducts=adducts, reagent=reagent, has_halogen=has_halogen_adduct,
+        do_pass2=do_pass2, do_pass3=do_pass3, do_pass4=do_pass4, do_pass5=do_pass5,
+        reflists_active=reflists_active, ts_peaks=ts_peaks, log=log,
+        checkpoint_dir=checkpoint_dir)
+    for stg in _STAGES:
+        if not stg.when(st):
+            continue
+        res = _safe(st, stg.name, (lambda s=stg: s.fn(st))) if stg.safe else stg.fn(st)
+        if stg.store:
+            st.summaries[stg.name] = res
+    led, summaries, plaus_audit = st.led, st.summaries, st.plaus_audit
     tc = led.loc[led["role"] == ledger.ROLE_M0, "tier"].value_counts().to_dict()
     log(f"[run] tiers {tc}")
-
-    # OPTIONAL time-resolved disposition: when a batch time series is supplied,
-    # reagent-normalise it and stamp each M0 with its temporal behaviour
-    # (inlet-flat background vs ambient analyte), demoting flat di-bromide/CO3
-    # background commits. Runs LAST so it refines the final tiers. (TS unlock.)
-    if ts_peaks is not None and len(ts_peaks):
-        # reagent-normalise to the source's reagent ion. For a halide source the
-        # timeseries module finds the Br_n- rows in the ledger itself (default);
-        # a positive molecular reagent (urea) has no such labelled isotopologue
-        # rows, so pass the [urea_n+H]+ cluster m/z explicitly as the normaliser.
-        ts_reagent_mzs = None
-        if reagent in reagents._POSITIVE_REAGENTS:
-            ts_reagent_mzs = [m for (_l, m, _f) in reagents.build_library(reagent)]
-        summaries["timeseries"] = _safe(
-            "timeseries", lambda: timeseries.apply_timeseries(
-                led, ts_peaks, reagent_mzs=ts_reagent_mzs, log=log))
 
     problems = ledger.validate(led)
     if problems:
