@@ -286,6 +286,31 @@ check("residual demote: legit cheminfo+grid HOM acid untouched", ledr.loc[2, "ti
 check("residual demote: off-cal residual -> Candidate", ledr.loc[3, "tier"] == "Candidate")
 
 
+# ---- radical-anion relabel (hydrocarbon FG-cluster -> M-. of closed-shell neutral) ----
+ledrad = pd.DataFrame([
+    dict(role="M0", neutral_formula="C3H4",   adduct="[M+CO3]-", tier="Candidate", commentary="", below_assignability=True,  ion_formula="", dbe=2.0),  # -> C4H4O3, corroborated below
+    dict(role="M0", neutral_formula="C4H4O3", adduct="[M-H]-",   tier="Assigned",  commentary="", below_assignability=False, ion_formula="", dbe=3.0),  # corroborating neutral
+    dict(role="M0", neutral_formula="C6H6",   adduct="[M+CO3]-", tier="Candidate", commentary="", below_assignability=True,  ion_formula="", dbe=4.0),  # -> C7H6O3, NOT corroborated
+    dict(role="M0", neutral_formula="C6H12O6",adduct="[M-H]-",   tier="Assigned",  commentary="", below_assignability=False, ion_formula="", dbe=1.0),  # oxygenated, untouched
+])
+outrad = CU.relabel_radical_anions(ledrad, log=lambda *a: None)
+check("radical: 2 hydrocarbon CO3 clusters relabeled", outrad["radical_relabeled"] == 2, outrad)
+check("radical: 1 corroborated (C4H4O3 has [M-H]-)", outrad["radical_corroborated"] == 1, outrad)
+check("radical: C3H4 [M+CO3]- -> C4H4O3 [M]-. corroborated, VISIBLE (not below_assignability)",
+      ledrad.loc[0, "neutral_formula"] == "C4H4O3" and ledrad.loc[0, "adduct"] == "[M]-."
+      and not bool(ledrad.loc[0, "below_assignability"]))
+check("radical: C6H6 [M+CO3]- -> C7H6O3 [M]-. uncorroborated, Candidate+below (still SHOWN)",
+      ledrad.loc[2, "neutral_formula"] == "C7H6O3" and ledrad.loc[2, "adduct"] == "[M]-."
+      and ledrad.loc[2, "tier"] == "Candidate" and bool(ledrad.loc[2, "below_assignability"]))
+check("radical: corroborating [M-H]- row untouched",
+      ledrad.loc[1, "neutral_formula"] == "C4H4O3" and ledrad.loc[1, "adduct"] == "[M-H]-")
+check("radical: oxygenated C6H12O6 [M-H]- untouched", ledrad.loc[3, "adduct"] == "[M-H]-")
+# the relabeled radicals must now ESCAPE the hydrocarbon implausible-ionization demote
+outi_rad = CU.demote_implausible_ionization(ledrad, log=lambda *a: None)
+check("radical: relabeled radicals escape implausible-ionization demote",
+      outi_rad == {"ionization_demoted": 0}, outi_rad)
+
+
 def test_all():
     assert FAIL == 0, f"{FAIL} checks failed"
 

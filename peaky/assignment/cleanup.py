@@ -583,6 +583,93 @@ def demote_implausible_carbon(ledger: pd.DataFrame, *, hc_max: float = HC_CARBON
 # attachment [M]-. is the ONLY negative channel a heteroatom-free species can use.
 _EA_ADDUCTS = {"[M]-.", "[M]-", "[M+O2]-"}
 
+# Functional-group cluster anions whose atoms, "absorbed" into a hydrocarbon
+# neutral, yield a CLOSED-SHELL oxygenated/N neutral whose radical anion M-. has
+# the same ion mass. A pure hydrocarbon cannot bind CO3-/NO3- (no polar site --
+# demote_implausible_ionization), but the SAME even-H CxHyOz- ion IS exactly the
+# radical anion of that closed-shell neutral: e.g. "C6H6 [M+CO3]-" == "C7H6O3
+# [M]-.". The [M-H]- reading is parity-forbidden (it would need a radical neutral
+# C7H7O3), so M-. is the only sane oxygenated identity.
+_RADICAL_CLUSTER_ATOMS = {
+    "[M+CO3]-": {"C": 1, "O": 3},
+    "[M+NO3]-": {"N": 1, "O": 3},
+    "[M+^NO3]-": {"N": 1, "O": 3},
+}
+# channels that require a real functional group -> independent proof the neutral
+# exists (corroboration for the radical-anion relabel).
+_PRIMARY_ANION_CHANNELS = ("[M-H]-", "[M+Br]-", "[M+Cl]-")
+
+
+def relabel_radical_anions(ledger: pd.DataFrame, *, log=print) -> dict:
+    """Relabel pure-hydrocarbon FG-cluster anions (e.g. C6H6 [M+CO3]-) as the
+    radical anion M-. of the closed-shell oxygenated neutral that shares the ion
+    mass (C7H6O3 [M]-.). The even-H CxHyOz- ion cannot be [M-H]- (parity: that
+    needs a radical neutral) but IS exactly M-. of CxHyOz -- a sane oxygenated
+    molecule, not an impossible hydrocarbon carbonate adduct.
+
+    Corroborated when that neutral is independently assigned via a functional-group
+    channel ([M-H]-/[M+Br]-/[M+Cl]-): it stays a visible Candidate (not below-
+    assignability). Uncorroborated -> Candidate + below_assignability: a flagged
+    best-guess, still shown (users want the best guess even when it's a guess),
+    just lowest-confidence. Runs BEFORE demote_implausible_ionization so the
+    relabeled rows (now hetero-bearing neutral + [M]-. adduct) escape the
+    hydrocarbon demote. Negative-mode FG-cluster anions only."""
+    if "neutral_formula" not in ledger.columns or "adduct" not in ledger.columns:
+        return {"radical_relabeled": 0, "radical_corroborated": 0}
+    has_ba = "below_assignability" in ledger.columns
+    corrob = {str(ledger.at[j, "neutral_formula"] or "")
+              for j in ledger.index
+              if str(ledger.at[j, "adduct"]) in _PRIMARY_ANION_CHANNELS}
+    corrob.discard("");  corrob.discard("nan")
+    target = (ledger.index[ledger["role"] == L.ROLE_M0]
+              if "role" in ledger.columns else ledger.index)
+    n = nc = 0
+    for i in target:
+        atoms = _RADICAL_CLUSTER_ATOMS.get(str(ledger.at[i, "adduct"]))
+        if atoms is None:
+            continue
+        cnt = C.parse_formula(str(ledger.at[i, "neutral_formula"] or ""))
+        if cnt.get("C", 0) < 1:
+            continue
+        if sum(cnt.get(e, 0) for e in ("O", "N", "S", "P", "F", "Cl", "Br", "I", "Si")):
+            continue                                 # only pure-hydrocarbon mislabels
+        ion = dict(cnt)
+        for e, k in atoms.items():
+            ion[e] = ion.get(e, 0) + k               # closed-shell neutral == ion composition
+        if not C.dbe_ok(ion)[0] or not C.oxygen_ok(ion)[0]:
+            continue                                 # not a valid closed-shell molecule
+        new_neutral = C.format_formula(ion)
+        is_corrob = new_neutral in corrob
+        ledger.at[i, "neutral_formula"] = new_neutral
+        ledger.at[i, "adduct"] = "[M]-."
+        if "ion_formula" in ledger.columns:
+            ledger.at[i, "ion_formula"] = new_neutral + "-"
+        if "dbe" in ledger.columns:
+            ledger.at[i, "dbe"] = C.dbe(ion)
+        if str(ledger.at[i, "tier"]) == "Assigned":
+            ledger.at[i, "tier"] = "Candidate"
+        if has_ba:
+            ledger.at[i, "below_assignability"] = not is_corrob
+        if "confidence" in ledger.columns:
+            ledger.at[i, "confidence"] = ("Good (radical anion, corroborated)"
+                                          if is_corrob else "Low (radical anion)")
+        note = (f"radical anion M-. of {new_neutral}: the even-H {new_neutral}- ion "
+                "cannot be [M-H]- (would need a radical neutral) -- it is M-. of the "
+                "closed-shell neutral, not a hydrocarbon+CO3 adduct; "
+                + ("corroborated by an independent [M-H]-/[M+Br]- assignment of the same neutral"
+                   if is_corrob else "uncorroborated best-guess (no [M-H]-/[M+Br]- partner)"))
+        for col in ("commentary",):
+            if col in ledger.columns:
+                prev = str(ledger.at[i, col] or "")
+                ledger.at[i, col] = (prev + "; " + note) if prev and prev != "nan" else note
+        if "tier_reason" in ledger.columns:
+            ledger.at[i, "tier_reason"] = note
+        n += 1
+        nc += int(is_corrob)
+    log(f"[cleanup] relabeled {n} hydrocarbon FG-cluster anions as radical anions M-. "
+        f"({nc} corroborated by [M-H]-/[M+Br]-)")
+    return {"radical_relabeled": n, "radical_corroborated": nc}
+
 
 def demote_implausible_ionization(ledger: pd.DataFrame, *, log=print) -> dict:
     """Demote M0s whose ionization is chemically impossible for the assigned neutral.
