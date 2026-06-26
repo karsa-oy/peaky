@@ -838,7 +838,7 @@ def gka(ctx, pdf):
     fig_dir = ctx.get("fig_dir") or ctx["out_dir"]
     os.makedirs(fig_dir, exist_ok=True)
     png = os.path.join(fig_dir, f"gka_{ctx['tag']}.png")
-    GK.render_gka(merged, png, title=ctx.get("batch_name") or ctx["label"])
+    GK.render_gka(merged, png, title=ctx.get("batch_name") or ctx["label"], top_chains=None)
     ctx["fig"]["gka"] = png
     _image_page(pdf, png, "")           # figure carries its own title
 
