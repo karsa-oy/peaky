@@ -148,8 +148,11 @@ def render_qc(ledger: pd.DataFrame, path: str, *, title: str = "", dpi: int = 15
     cats = split_categories(ledger)
     pts = ppm_points(ledger)
 
-    fig, (axa, axb) = plt.subplots(2, 1, figsize=(8.3, 8.0))
-    fig.subplots_adjust(left=0.095, right=0.78, top=0.91, bottom=0.075, hspace=0.27)
+    fig, (axa, axb) = plt.subplots(2, 1, figsize=(8.3, 8.6))
+    # top kept low so the panel (a) title clears the suptitle + subtitle stacked
+    # above it (they collided at top=0.91); bbox_inches="tight" at save captures
+    # the right-hand legends and left y-labels.
+    fig.subplots_adjust(left=0.095, right=0.78, top=0.875, bottom=0.07, hspace=0.30)
 
     # --- panel (a): mass defect vs m/z, by tier/role category ----------------
     n_drawn = 0
@@ -207,11 +210,11 @@ def render_qc(ledger: pd.DataFrame, path: str, *, title: str = "", dpi: int = 15
         axb.legend(fontsize=7.8, loc="upper left", bbox_to_anchor=(1.02, 1.0),
                    framealpha=0.95, borderaxespad=0.0)
 
-    fig.suptitle(title or "Mass-defect & mass-error QC", x=0.095, y=0.965,
+    fig.suptitle(title or "Mass-defect & mass-error QC", x=0.095, y=0.975,
                  ha="left", fontsize=12.5, weight="bold", color=INK)
-    fig.text(0.095, 0.928,
+    fig.text(0.095, 0.945,
              "from the brightest representative sample's full ledger (all roles)",
              ha="left", fontsize=7.8, color=GREY)
-    fig.savefig(path, dpi=dpi)
+    fig.savefig(path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     return path
