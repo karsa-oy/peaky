@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 
 import pandas as pd
 
@@ -31,6 +32,10 @@ __all__ = [
     "demote_massgate_monsters",
     "audit_isotopes",
     "audit_mass_gate",
+    "REARB_WINNER_DBE_PER_C",
+    "REARB_ALT_MIN_SCORE",
+    "REARB_MAX_SCORE_DROP",
+    "rearbitrate_offcal_degenerate",
 ]
 
 
@@ -704,4 +709,162 @@ def audit_mass_gate(ledger: pd.DataFrame, cfg: PassConfig, *, log=print) -> dict
             f"{cfg.cal_z_accept}<z<={cfg.cal_z_pattern} no-evidence: "
             f"{out['cleared_z_noiso']}, no-ppm: {out['cleared_nan']})"
         )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# off-calibration degenerate-winner re-arbitration
+# ---------------------------------------------------------------------------
+# The winner-selection bug: pass 1 commits the highest-eff_score candidate per
+# peak BEFORE the mass calibration is fitted (calibrate() runs on the pass-1
+# backbone). The local in-process scorer (PEAKY_LOCAL_SCORING) can rank a
+# mass-degenerate competitor ABOVE the corroborated one, and at a sub-ppm
+# coincidence an off-calibration high-DBE / heteroatom-rich "monster" can out-
+# score the real on-trend molecule. The tier engine THEN demotes it to Candidate
+# (off-cal, mass-error-distribution test) -- but only after it has displaced the
+# better, on-cal alternative from the M0 slot entirely.
+#
+# This stage applies the SAME calibration-sigma + corroboration gate the tier
+# engine computes (tiers._calibrate / Z_TAIL_DEMOTE), but AT WINNER-SELECTION:
+# a committed winner that is (a) off-calibration beyond the tier's tail, (b)
+# uncorroborated (no isotopologue / cross-channel / series-anchor support -- the
+# exact evidence that would break a mass degeneracy), and (c) sitting in the
+# aromatic-monster corner (high DBE/C) is very likely a mass-fit artifact. If a
+# stored alternative is on-calibration, chemically plausible (plausibility
+# oracle), and STRICTLY less unsaturated (lower DBE), it is preferred. The
+# lower-DBE + plausible guards are essential: a blunt "swap to the best on-cal
+# alternative" reverses many correct calls (it would replace a reasonable off-cal
+# CHO formula with an on-cal-but-implausible high-DBE / O-monster competitor).
+REARB_WINNER_DBE_PER_C = 0.70   # winner must sit in the aromatic-monster corner
+REARB_ALT_MIN_SCORE = 0.60      # don't displace toward a noise-grade alternative
+REARB_MAX_SCORE_DROP = 0.35     # ... nor one far weaker than the (mass-fit) winner
+
+
+def _ion_formula_str(neutral: str, adduct: str) -> str:
+    """Ion element composition for a (neutral, adduct) reading, as a formula
+    string. Handles parenthesised adduct groups (e.g. the uronium
+    '[M+(CH4N2O)H]+') by stripping the brackets before tokenising."""
+    cnt = dict(C.parse_formula(str(neutral)))
+    inner = str(adduct).split("]")[0]
+    inner = inner[2:] if inner.startswith("[M") else inner
+    inner = inner.replace("(", "").replace(")", "")
+    for sign, tok in re.findall(r"([+-])\^?([A-Za-z0-9]+)", inner):
+        for el, k in C.parse_formula(tok).items():
+            cnt[el] = cnt.get(el, 0) + (k if sign == "+" else -k)
+    return C.format_formula({k: v for k, v in cnt.items() if v})
+
+
+def rearbitrate_offcal_degenerate(
+    ledger: pd.DataFrame, cfg: PassConfig, *, log=print
+) -> dict:
+    """Displace off-calibration, uncorroborated, high-DBE 'monster' M0 winners
+    with an on-calibration, plausible, less-unsaturated stored alternative.
+
+    Reuses tiers._calibrate (the isotopologue-backed CHO/CHON core) so the
+    off-cal gate is IDENTICAL to the one the report tier engine applies -- the
+    point being to apply it at winner-selection, not only at tiering. Returns
+    {'swapped': n}. Mutates the ledger in place (overwrite commits). No-op when
+    uncalibrated."""
+    from peaky.assignment import tiers as T
+    from peaky.assignment import plausibility as PL
+    from .core import confidence_label
+
+    out = {"swapped": 0}
+    m0 = ledger[ledger["role"] == L.ROLE_M0]
+    if not len(m0):
+        return out
+    kids_of = ledger.loc[ledger["role"] == L.ROLE_ISO, "parent_peak_id"].value_counts()
+    cal = T._calibrate(m0, kids_of)
+    if cal is None:
+        log("[rearbitrate] uncalibrated; off-cal winner re-arbitration skipped")
+        return out
+    mu, sigma = cal
+    chan_count = m0.groupby("neutral_formula")["adduct"].nunique()
+    reflist = cfg.reflist_formulas or frozenset()
+
+    for pid in m0["peak_id"].tolist():
+        idx = ledger.index[ledger["peak_id"] == pid]
+        if not len(idx):
+            continue
+        i = idx[0]
+        r = ledger.loc[i]
+        if bool(r.get("locked")) or str(r.get("method") or "").startswith("known:"):
+            continue
+        ppm = r.get("ppm_error")
+        if ppm is None or pd.isna(ppm):
+            continue
+        z_win = (float(ppm) - mu) / sigma
+        if abs(z_win) <= T.Z_TAIL_DEMOTE:
+            continue  # winner on-calibration -> the committed reading stands
+        # corroboration (same definition as tiers): the evidence that would break
+        # a mass degeneracy. Never displace a corroborated winner.
+        iso_ev = (kids_of.get(pid, 0) > 0) or bool(T._alts(r.get("isotopologues")))
+        cross = int(chan_count.get(r.get("neutral_formula"), 0)) >= 2
+        anchor = pd.notna(r.get("anchor_peak_id")) or pd.notna(r.get("series_unit"))
+        if iso_ev or cross or anchor:
+            continue
+        cnt_w = C.parse_formula(str(r.get("neutral_formula") or ""))
+        nc_w = cnt_w.get("C", 0)
+        dbe_w = C.dbe(cnt_w)
+        if nc_w < 1 or dbe_w / nc_w < REARB_WINNER_DBE_PER_C:
+            continue  # not an aromatic-monster winner -> leave it (tier owns it)
+        raw_w = float(r["ion_score"]) if pd.notna(r.get("ion_score")) else 0.0
+
+        best = None  # (sort_key, alt, z_alt, raw_alt)
+        for a in T._alts(r.get("alternatives")):
+            af, ad, pa = a.get("formula"), a.get("adduct"), a.get("ppm")
+            if not af or pa is None:
+                continue
+            z_alt = (float(pa) - mu) / sigma
+            if abs(z_alt) > cfg.cal_z_accept:          # alternative must be on-cal
+                continue
+            if C.dbe(C.parse_formula(str(af))) >= dbe_w:  # only toward LESS unsaturation
+                continue
+            if PL.implausible(str(af)) is not None:    # ... and only to a plausible one
+                continue
+            raw = a.get("raw_score")
+            raw = a.get("ion_score") if raw is None else raw
+            if raw is None:
+                continue
+            raw = float(raw)
+            if raw < REARB_ALT_MIN_SCORE or (raw_w - raw) > REARB_MAX_SCORE_DROP:
+                continue
+            key = (str(af) not in reflist, -raw, abs(z_alt))  # reflist, score, on-cal
+            if best is None or key < best[0]:
+                best = (key, a, z_alt, raw)
+        if best is None:
+            continue
+
+        _, alt, z_alt, raw = best
+        af, ad = str(alt["formula"]), str(alt.get("adduct"))
+        conf = confidence_label(raw, alt.get("ppm"), 0, False, cfg)
+        if conf == "Reject":
+            continue
+        # the disqualified off-cal monster is recorded in the commentary, NOT
+        # re-listed as a competitor (it failed the calibration gate). Remaining
+        # alternatives keep the density / margin honest for the tier engine.
+        rest = [x for x in T._alts(r.get("alternatives"))
+                if not (str(x.get("formula")) == af and str(x.get("adduct")) == ad)]
+        eff = alt.get("eff_score")
+        eff = raw if eff is None else float(eff)
+        rest_eff = [float(x["eff_score"]) for x in rest if x.get("eff_score") is not None]
+        margin = (eff - max(rest_eff)) if rest_eff else None
+        note = (f"re-arbitrated: displaced off-cal {r.get('neutral_formula')} "
+                f"{r.get('adduct')} (z={z_win:+.1f}σ, uncorroborated mass-fit, "
+                f"DBE {dbe_w:.0f}) with on-cal {af} {ad} (z={z_alt:+.1f}σ, plausible, "
+                f"DBE {C.dbe(C.parse_formula(af)):.0f})")
+        L.commit_assignment(
+            ledger, pid, neutral_formula=af, adduct=ad,
+            ion_formula=_ion_formula_str(af, ad), ion_score=raw, compound_score=raw,
+            eff_score=eff, eff_margin=margin, tied=False, ppm_error=alt.get("ppm"),
+            pass_no=int(r["pass_no"]) if pd.notna(r.get("pass_no")) else 0,
+            method=f"rearb<-{r.get('method')}", confidence=conf, commentary=note,
+            alternatives=rest, isotopologues=[], overwrite=True,
+        )
+        out["swapped"] += 1
+
+    if out["swapped"]:
+        log(f"[rearbitrate] displaced {out['swapped']} off-cal aromatic-monster M0 "
+            f"winners (>|{T.Z_TAIL_DEMOTE}|σ off-cal, uncorroborated) with on-cal "
+            "plausible lower-DBE alternatives")
     return out

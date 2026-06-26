@@ -30,9 +30,10 @@ from peaky import paths as PT
 from peaky.chem import profiles as P
 from peaky.batch import sampling as SS
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"  # cross-file consensus winner-selection (corroborated-formula vote)
 
 DEFAULT_TOL_PPM = 6.0
+TIER_ASSIGNED = "Assigned"
 TIER_RANK = {"Assigned": 2, "Candidate": 1}
 _M0_COLS = ["mz", "neutral_formula", "adduct", "tier", "ion_score"]
 
@@ -84,7 +85,23 @@ def align(per_file: dict, *, tol_ppm: float = DEFAULT_TOL_PPM,
     merged_rows, jitter_rows = [], []
     for cid, g in allm.groupby("cluster"):
         g = g.assign(_r=g["tier"].map(lambda t: TIER_RANK.get(str(t), 0)))
-        best = g.sort_values(["_r", "ion_score"], ascending=False).iloc[0]
+        # Cross-file consensus: prefer the formula with the broadest CORROBORATED
+        # (Assigned-tier) support across files, not the single highest per-file
+        # ion_score. Per-file mass-calibration jitter can flip a degenerate pair in
+        # one file (a competitor reads on-cal there, Assigned, with a marginally
+        # higher local score) while the other files agree on the real formula; the
+        # old "best (tier, ion_score) row" then let that single-file outlier
+        # displace a formula Assigned across many files. Rank formulas by
+        # (Assigned-file count, file count, best tier, best score), then take that
+        # formula's best per-file row. With one formula per cluster this is a no-op.
+        supp = (g.assign(_a=(g["_r"] >= TIER_RANK[TIER_ASSIGNED]).astype(int))
+                  .groupby("neutral_formula", dropna=False)
+                  .agg(n_assigned=("_a", "sum"), n_files=("src", "nunique"),
+                       best_r=("_r", "max"), best_ion=("ion_score", "max")))
+        win_formula = supp.sort_values(
+            ["n_assigned", "n_files", "best_r", "best_ion"], ascending=False).index[0]
+        gw = g[g["neutral_formula"] == win_formula] if win_formula == win_formula else g
+        best = gw.sort_values(["_r", "ion_score"], ascending=False).iloc[0]
         mz_raw = g["mz"].to_numpy(); mz_adj = g["_mz_adj"].to_numpy()
         def _spread(a):
             return float((a.max() - a.min()) / a.mean() * 1e6) if len(a) > 1 else 0.0

@@ -228,6 +228,13 @@ _STAGES = [
         st.client, st.sample_id, st.led, st.profile, st.cfg, log=st.log)),
     _Stage("siloxane", lambda st: siloxane.assign_siloxane_ladder(
         st.client, st.sample_id, st.led, st.profile, st.cfg, adducts=st.adducts, log=st.log)),
+    # re-arbitrate off-calibration, uncorroborated aromatic-monster winners against
+    # their stored on-cal plausible alternatives -- applies the tier engine's
+    # calibration-sigma + corroboration gate AT WINNER-SELECTION (before degeneracy /
+    # tiers see the committed formula), so a degenerate competitor the local scorer
+    # over-ranked can't keep the M0 slot it will only ever be tier-demoted out of.
+    _Stage("rearbitrate", lambda st: passes.rearbitrate_offcal_degenerate(
+        st.led, st.cfg, log=st.log)),
     # honest mass-degeneracy measurement -- MUST precede tiers (the tier engine reads it).
     _Stage("degeneracy", lambda st: _degen_summary(
         degeneracy.apply_degeneracy(st.led, context=st.profile.label, log=st.log))),
