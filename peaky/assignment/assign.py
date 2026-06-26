@@ -246,6 +246,12 @@ _STAGES = [
     _Stage("demote_carbon",
            lambda st: cleanup.demote_implausible_carbon(st.led, log=st.log),
            safe=False, store=False),
+    # relabel hydrocarbon FG-cluster anions (C6H6 [M+CO3]-) as radical anions M-.
+    # of the closed-shell oxygenated neutral BEFORE the hydrocarbon demote, so a
+    # real M-. (corroborated by [M-H]-/[M+Br]-) is shown as its true neutral.
+    _Stage("relabel_radicals",
+           lambda st: cleanup.relabel_radical_anions(st.led, log=st.log),
+           safe=False, store=False),
     _Stage("demote_ionization",
            lambda st: cleanup.demote_implausible_ionization(st.led, log=st.log),
            safe=False, store=False),
