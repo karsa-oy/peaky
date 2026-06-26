@@ -170,7 +170,9 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
         log(f"  c{cid}: n={len(mem)} r̄={rbar:.2f} {sh} h{ph:.1f} | {', '.join(ion_lbl(m) for m in mem[:5])}")
     posc = traces_raw[clust_cols].values if clust_cols else np.array([])
     posc = posc[np.isfinite(posc) & (posc > 0)]
-    ylimc = (max(50, np.percentile(posc, 1)), np.percentile(posc, 99.5)) if len(posc) else None
+    # top = true max (+20% log headroom), NOT a 99.5 pct cap, so the brightest
+    # traces are never clipped at the high end; bottom stays a 1-pct/50-cps floor.
+    ylimc = (max(50, np.percentile(posc, 1)), float(np.nanmax(posc)) * 1.2) if len(posc) else None
     Zc = (Lg - Lg.mean()) / Lg.std() if len(clust_cols) else Lg
     CL.render_clusters(rows, grid, Zc, traces_raw, ion_lbl, f"{FIG}/clusters_changing_{tag}",
                        remaining=None, mode="raw", ylim=ylimc,
@@ -193,7 +195,7 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
     flat_cols = goodk(list(dict.fromkeys(remainder + [k for k in ion_mz if is_si[k] and med.get(k, 0) >= FLOOR])))
     pos = traces_raw[flat_cols].values if flat_cols else np.array([])
     pos = pos[np.isfinite(pos) & (pos > 0)]
-    ylim = (max(50, np.percentile(pos, 1)), np.percentile(pos, 99.5)) if len(pos) else None
+    ylim = (max(50, np.percentile(pos, 1)), float(np.nanmax(pos)) * 1.2) if len(pos) else None
     log(f"FLAT: {len(flat_cols)} uncorrelated/contaminant ion channels (bunched)")
     CL.render_flat_panel(flat_cols, traces_raw, grid, f"{FIG}/clusters_flat_{tag}_p1.png", ion_lbl,
                          label=f"{label} · flat background (uncorrelated + flat families + Si)", ylim=ylim,
@@ -249,7 +251,7 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
     log(f"UNASSIGNED gate: {len(un_vary)} varying / {len(un_flat)} flat (bunched)")
     mzlab = lambda b: f"{bin_mz[b]:.4f}"
     posu = un_raw[un_bins].values; posu = posu[np.isfinite(posu) & (posu > 0)]
-    ylimu = (max(50, np.percentile(posu, 1)), np.percentile(posu, 99.8)) if len(posu) else None
+    ylimu = (max(50, np.percentile(posu, 1)), float(np.nanmax(posu)) * 1.2) if len(posu) else None
     Lgu, cmu = CL.correlate(un_norm, un_vary)
     labu, bigu = CL.cluster(cmu)
     rowsu, Zu = CL.cluster_rows(un_vary, labu, bigu, cmu, un_raw, ggrid,

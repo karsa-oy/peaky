@@ -154,6 +154,7 @@ commitments the previous ones justify. (Condensed; the authoritative table is in
 | siloxane     | `siloxane`        | dedicated PDMS/siloxane ladder on spacing + ²⁹Si/³⁰Si envelope (CHON monsters out-score the true Si formula otherwise) |
 | cleanup      | `cleanup`         | isotope-confirmed recovery, bromide-cluster labelling, ringing/sidelobe artifact flagging; **plausibility demotes** (carbon-cluster / implausible-ionization / speculative-residual, post-tier) + reagent-halocarbon relabel (Br runs) |
 | reflist      | `reflists`        | **reference peaklists** (context-gated; contaminants always on): near-tie selection prior + mass-match **rescue** re-scored by the server — soft, provenance-tagged, never overrides an isotope-scored Assigned |
+| rearbitrate  | `passes`          | **off-cal degenerate re-arbitration**: applies the tier engine's calibration-sigma + corroboration gate AT WINNER-SELECTION — an off-cal (>\|2.6\|σ), uncorroborated, high-DBE/C aromatic-monster winner is displaced by an on-cal, plausible, lower-DBE stored alternative (so a degenerate competitor the scorer over-ranked can't keep an M0 slot it would only be tier-demoted out of) |
 | degeneracy   | `degeneracy`      | honest cross-family mass-degeneracy density; an uncorroborated mass-degenerate commit is capped at Candidate |
 | tiers        | `tiers`           | final **Assigned / Candidate** verdict (margin, density, mass-error gate, degeneracy-aware) |
 
