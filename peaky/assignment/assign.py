@@ -252,6 +252,11 @@ _STAGES = [
     _Stage("relabel_radicals",
            lambda st: cleanup.relabel_radical_anions(st.led, log=st.log),
            safe=False, store=False),
+    # positive-mode arbitration: a pure hydrocarbon via an N-carrying reagent
+    # cluster ([M+NH4]+ / uronium) is re-read as [M+H]+ of an N-heterocycle.
+    _Stage("relabel_reagent_n",
+           lambda st: cleanup.relabel_reagent_n_adducts(st.led, log=st.log),
+           safe=False, store=False),
     _Stage("demote_ionization",
            lambda st: cleanup.demote_implausible_ionization(st.led, log=st.log),
            safe=False, store=False),
