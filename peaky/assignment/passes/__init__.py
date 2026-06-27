@@ -8,4 +8,4 @@ from .core import *  # noqa: F401,F403
 from .postprocess import *  # noqa: F401,F403
 from .directors import *  # noqa: F401,F403
 
-__version__ = "0.8.0"  # offset-tolerant gates + prior_offset + calibration-aware arbitration + carbon-clamp Si-skip
+__version__ = "0.9.0"  # + off-cal degenerate-winner re-arbitration (gate at winner-selection)

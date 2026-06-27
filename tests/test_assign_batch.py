@@ -60,6 +60,37 @@ mEF, _ = AB.align({"E": E, "F": F}, tol_ppm=6.0)
 check("formula disagreement flagged (formula_agree False)",
       len(mEF) == 1 and not bool(mEF.iloc[0]["formula_agree"]), mEF.to_dict("records"))
 
+# --- cross-file consensus: corroborated formula beats single-file outlier ----
+# The orange-uronium m/z 424.218 bug: a mass-degenerate competitor reads on-cal
+# (Assigned) with a marginally higher local score in ONE file's calibration,
+# while five files agree on the real reflist HOM. The old "best (tier, ion_score)
+# row" let the single-file outlier win; the consensus vote must pick the formula
+# Assigned across the most files.
+def _file(mz, nf, tier, ion):
+    return m0([(mz, nf, "[M+NH4]+", tier, ion)])
+
+consensus = {
+    "f1": _file(424.2177, "C18H30O10", "Assigned", 0.944),
+    "f2": _file(424.2179, "C18H30O10", "Assigned", 0.922),
+    "f3": _file(424.2177, "C18H30O10", "Assigned", 0.985),
+    "f4": _file(424.2178, "C18H30O10", "Assigned", 0.961),
+    "f5": _file(424.2177, "C18H30O10", "Assigned", 0.987),
+    "f6": m0([(424.2165, "C17H31N5O6", "[M+Na]+", "Candidate", 0.939)]),
+    "f7": m0([(424.2167, "C17H31N5O6", "[M+Na]+", "Assigned", 0.996)]),  # outlier
+}
+mc, _ = AB.align(consensus, tol_ppm=6.0)
+row = mc.iloc[(mc["mz"] - 424.2174).abs().argmin()]
+check("consensus winner is the 5-file Assigned formula, not the 1-file outlier",
+      row["neutral_formula"] == "C18H30O10", row.to_dict())
+check("consensus winner keeps Assigned tier", row["tier"] == "Assigned", row["tier"])
+check("consensus cluster spans all 7 files", row["n_files"] == 7, row["n_files"])
+
+# a single-file bright Assigned formula with no competitor is still chosen (no
+# spurious override when there is nothing to out-vote).
+solo, _ = AB.align({"a": m0([(500.0, "C20H30O8", "[M+H]+", "Assigned", 0.9)])}, tol_ppm=6.0)
+check("solo Assigned formula chosen (vote is a no-op without a competitor)",
+      len(solo) == 1 and solo.iloc[0]["neutral_formula"] == "C20H30O8")
+
 # --- empty input ------------------------------------------------------------
 me, je = AB.align({})
 check("empty -> empty merged + jitter with schema",

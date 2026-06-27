@@ -36,6 +36,42 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   n_iso`); always written (header-only when nothing was touched) so the artifact set is
   stable.
 
+### Fixed (off-calibration degenerate-winner displacement)
+- **The winner-selection / cross-file merge could pick a mass-degenerate competitor
+  that the pipeline's own tiering step then flags as off-calibration with no
+  corroboration — displacing a better, corroborated assignment entirely.** Two
+  layers were hardened so the calibration-sigma + isotope/cross-channel/series
+  corroboration gate the tier engine computes is applied AT WINNER-SELECTION, not
+  only at report time:
+  - **Per-file re-arbitration** (`passes.rearbitrate_offcal_degenerate`, new
+    `rearbitrate` stage after `siloxane`, before `degeneracy`/`tiers`). Pass 1
+    commits the highest-`eff_score` candidate *before* the mass calibration is
+    fitted, so the off-cal arbitration penalty never sees it; with the local
+    in-process scorer (`PEAKY_LOCAL_SCORING`, default in 0.5.0) a sub-ppm-coincident
+    off-cal high-DBE/heteroatom "monster" can out-score the real on-trend molecule.
+    The new stage re-uses `tiers._calibrate` (the isotopologue-backed CHO/CHON core)
+    and displaces a winner that is off-calibration (>|2.6|σ), uncorroborated, AND in
+    the aromatic-monster corner (`DBE/C ≥ 0.70`) with a stored alternative that is
+    on-calibration, chemically plausible (`plausibility.implausible`), and strictly
+    less unsaturated (lower DBE). The plausibility + lower-DBE guards are essential:
+    a blunt "swap to the best on-cal alternative" reverses many correct calls.
+    Corroborated, on-cal, locked, known-species, and series/anchor winners are never
+    touched. No-op when uncalibrated.
+  - **Cross-file consensus merge** (`assign_batch.align`). Per-file mass-calibration
+    jitter can flip a degenerate pair in a single file (a competitor reads on-cal /
+    Assigned there with a marginally higher local score) while the other files agree
+    on the real formula. The winner is now the formula with the broadest
+    **Assigned-tier cross-file support** — ranked by (Assigned-file count, file
+    count, best tier, best score) — instead of the single highest per-file
+    `ion_score`. A no-op when a cluster carries one formula.
+  - Validated on the orange-uronium Ur⁺ batch: m/z 424.218 returns to **C18H30O10
+    [M+NH4]+** (the α-pinene HOM oligomer, Assigned across 5 files, on the bundled
+    Kang reflist) and m/z 464.143 returns to **C22H23N3O7 [M+Na]+** (on-cal CHON)
+    instead of the off-cal C17H31N5O6 (5 N, no N source) and C36H17N (DBE-29
+    azabenzo-PAH) the local scorer had selected — matching what the server-scored
+    path already produced. 4 per-file swaps across the 11-file batch, every one an
+    aromatic monster (DBE 21–35) → on-cal oxygenated molecule, zero false positives.
+
 ### Deferred
 - **In-source fragment auto-detection.** A batch-level heuristic that relabelled an
   adduct-less protonated M0 as an `in-source fragment` of a heavier co-varying parent

@@ -224,7 +224,7 @@ def _panel(ax, mass: np.ndarray, fmass: dict, base: str, color: str, label: str,
                        linewidths=0.4, edgecolors="white", zorder=3)
             drawn_x.extend(ex.tolist()); drawn_y.extend(np.atleast_1d(ey).tolist())
         ladders = G.find_homolog_series(em, base, min_len=2)
-        for chain in ladders[:top_chains]:
+        for chain in (ladders if top_chains is None else ladders[:top_chains]):
             if len(chain) <= PANEL_MIN_MEMBERS:      # connect only real series (>3)
                 continue
             xs = np.array([em[m] for m in chain])
@@ -242,7 +242,8 @@ def _panel(ax, mass: np.ndarray, fmass: dict, base: str, color: str, label: str,
     # connector rule), longest first. `highlight_min_len` is unused now that the
     # >3 gate governs which series get a connector; kept in the signature for
     # back-compat with callers that still pass it.
-    for s in detect_series(fmass, units=[base], min_len=PANEL_MIN_MEMBERS + 1)[:top_chains]:
+    _drawable = detect_series(fmass, units=[base], min_len=PANEL_MIN_MEMBERS + 1)
+    for s in (_drawable if top_chains is None else _drawable[:top_chains]):
         xs = np.array(s.masses)
         ys = kmd(xs, base)
         ax.plot(xs, ys, color=color, lw=1.0, alpha=0.9, zorder=2,
@@ -253,7 +254,12 @@ def _panel(ax, mass: np.ndarray, fmass: dict, base: str, color: str, label: str,
     longest = max((s.length for s in alls), default=0)
     _zoom_to(ax, drawn_x, drawn_y)
     if alls:
-        ax.text(0.015, 0.965, f"{len(alls)} series · {npk} peaks · longest {longest}",
+        # be honest that only the top `top_chains` series get connector lines (the
+        # rest of the counted series remain as the grey/colored KMD dots) — else a
+        # "44 series" subtitle on a panel showing ~10 ladders reads as a bug.
+        shown = (f"{len(alls)} series" if (top_chains is None or len(alls) <= top_chains)
+                 else f"top {min(len(alls), top_chains)} of {len(alls)} series shown")
+        ax.text(0.015, 0.965, f"{shown} · {npk} peaks · longest {longest}",
                 transform=ax.transAxes, fontsize=7, va="top", color="#444")
     ax.tick_params(labelsize=7.5)
     ax.grid(alpha=0.22)
