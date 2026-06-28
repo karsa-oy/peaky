@@ -6,8 +6,10 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import peaky  # noqa: E402
 from peaky import passes as P  # noqa: E402
 from peaky import provenance as PV  # noqa: E402
+from peaky.assignment import assign as _A  # noqa: E402
 
 PASS = FAIL = 0
 def check(name, cond, detail=""):
@@ -30,9 +32,13 @@ m = PV.build_manifest(run_dir=_rd, batch_name="B", dataset="D",
 
 check("manifest carries the core sections",
       all(k in m for k in ("run_id", "code", "input", "config", "output")))
-check("code pins package version + a module-hash map",
-      bool(m["code"]["package_version"])
-      and isinstance(m["code"]["module_hashes"], dict)
+check("code pins the REAL package version (peaky.__version__), not assign's module version",
+      m["code"]["package_version"] == peaky.__version__,
+      f'got {m["code"]["package_version"]!r}, want {peaky.__version__!r}')
+check("assign's own module version still lives under module_versions",
+      m["code"]["module_versions"].get("assign") == _A.__version__)
+check("code carries a module-hash map",
+      isinstance(m["code"]["module_hashes"], dict)
       and len(m["code"]["module_hashes"]) > 5)
 check("code records python + dep versions",
       "python" in m["code"] and "pandas" in m["code"]["deps"])

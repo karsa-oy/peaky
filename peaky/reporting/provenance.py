@@ -84,7 +84,8 @@ def build_manifest(*, run_dir: str, batch_name: str, dataset: str | None,
     """Assemble the reproducibility manifest for a finished run. Hashes the run's
     ts parquet (input) and merged_ledger.csv (output) so the run is pinned to its
     exact data + result alongside the exact code that produced it."""
-    from peaky.assignment import assign as A   # MODULE_VERSIONS + _module_hashes + __version__
+    import peaky                                # the real package version (peaky.__version__)
+    from peaky.assignment import assign as A   # per-module versions + hashes (incl. assign's own)
 
     pkg_dir = os.path.dirname(__file__)
     cfg_d = asdict(cfg) if is_dataclass(cfg) else dict(cfg or {})
@@ -96,8 +97,8 @@ def build_manifest(*, run_dir: str, batch_name: str, dataset: str | None,
         "run_dir": run_dir,
         "created_utc": created_utc,
         "code": {
-            "package_version": A.__version__,
-            "module_versions": A.MODULE_VERSIONS,
+            "package_version": peaky.__version__,   # NOT A.__version__ (that is assign's
+            "module_versions": A.MODULE_VERSIONS,    # own module version, kept below)
             "module_hashes": A._module_hashes(),
             "git": git_info(pkg_dir),
             "python": sys.version.split()[0],
