@@ -671,6 +671,82 @@ def relabel_radical_anions(ledger: pd.DataFrame, *, log=print) -> dict:
     return {"radical_relabeled": n, "radical_corroborated": nc}
 
 
+# Positive-mode N-carrying reagent-cluster cations. A PURE HYDROCARBON has no
+# site to bind these (and would show [M+H]+ if it ionized at all), so the
+# cluster's N(/O) belongs to the ANALYTE: re-read as [M+H]+ of the N-heterocycle
+# obtained by absorbing the cluster into the neutral. {atoms added to neutral M
+# to reach the [M+H]+ neutral M'} = (cluster cation composition) - H.
+_REAGENT_N_CLUSTERS = {
+    "[M+NH4]+": {"N": 1, "H": 3},                      # ion-H = M + NH3
+    "[M+(CH4N2O)H]+": {"C": 1, "H": 4, "N": 2, "O": 1},  # ion-H = M + CH4N2O (urea)
+}
+
+
+def relabel_reagent_n_adducts(ledger: pd.DataFrame, *, log=print) -> dict:
+    """Positive-mode plausibility arbitration. A pure hydrocarbon assigned via an
+    N-carrying reagent-cluster cation ([M+NH4]+ / uronium [M+(CH4N2O)H]+) is
+    implausible: a hydrocarbon has no basic/polar site to bind the cluster, and a
+    real one would ionize as [M+H]+. The reagent N is better read as ANALYTE N ->
+    re-read as [M+H]+ of the N-heterocycle M' = M + (cluster - H) (C5H6
+    [M+(CH4N2O)H]+ -> C6H10N2O [M+H]+; C5H6 [M+NH4]+ -> C5H9N [M+H]+).
+
+    SKIPPED when the same hydrocarbon also has its own [M+H]+ row -- then it is a
+    genuine hydrocarbon (e.g. a terpene C10H16 that legitimately forms [M+NH4]+),
+    so its cluster adducts are left alone. The re-read is tiered Candidate +
+    below_assignability: the specific N-heterocycle is rarely cross-channel-
+    confirmed and the region is often reagent background, but the protonated-
+    heterocycle label is the saner best-guess and stays visible. Positive adducts
+    only (negative reagents never hit these)."""
+    if "neutral_formula" not in ledger.columns or "adduct" not in ledger.columns:
+        return {"reagent_n_relabeled": 0}
+    has_ba = "below_assignability" in ledger.columns
+    hc_with_mh = {str(ledger.at[j, "neutral_formula"] or "")
+                  for j in ledger.index if str(ledger.at[j, "adduct"]) == "[M+H]+"}
+    target = (ledger.index[ledger["role"] == L.ROLE_M0]
+              if "role" in ledger.columns else ledger.index)
+    n = 0
+    for i in target:
+        add = _REAGENT_N_CLUSTERS.get(str(ledger.at[i, "adduct"]))
+        if add is None:
+            continue
+        f_raw = str(ledger.at[i, "neutral_formula"] or "")
+        cnt = C.parse_formula(f_raw)
+        if cnt.get("C", 0) < 1:
+            continue
+        if sum(cnt.get(e, 0) for e in ("O", "N", "S", "P", "F", "Cl", "Br", "I", "Si")):
+            continue                                  # only pure-hydrocarbon mislabels
+        if f_raw in hc_with_mh:
+            continue                                  # genuine hydrocarbon (has its own [M+H]+)
+        m2 = {e: cnt.get(e, 0) + add.get(e, 0) for e in set(cnt) | set(add)}
+        if not C.dbe_ok(m2)[0] or not C.oxygen_ok(m2)[0]:
+            continue                                  # not a valid closed-shell neutral
+        new = C.format_formula(m2)
+        ledger.at[i, "neutral_formula"] = new
+        ledger.at[i, "adduct"] = "[M+H]+"
+        if "ion_formula" in ledger.columns:
+            ledger.at[i, "ion_formula"] = C.format_formula({**m2, "H": m2.get("H", 0) + 1}) + "+"
+        if "dbe" in ledger.columns:
+            ledger.at[i, "dbe"] = C.dbe(m2)
+        if str(ledger.at[i, "tier"]) == "Assigned":
+            ledger.at[i, "tier"] = "Candidate"
+        if has_ba:
+            ledger.at[i, "below_assignability"] = True
+        if "confidence" in ledger.columns:
+            ledger.at[i, "confidence"] = "Low (reagent-N re-read)"
+        note = (f"re-read as [M+H]+ of {new}: a pure hydrocarbon has no site to bind the "
+                "reagent N-cluster and would show [M+H]+ if it ionized -- the cluster N "
+                "belongs to the analyte (N-heterocycle), not [M+reagent]+ of a hydrocarbon; "
+                "tentative (this region is often reagent background)")
+        if "commentary" in ledger.columns:
+            prev = str(ledger.at[i, "commentary"] or "")
+            ledger.at[i, "commentary"] = (prev + "; " + note) if prev and prev != "nan" else note
+        if "tier_reason" in ledger.columns:
+            ledger.at[i, "tier_reason"] = note
+        n += 1
+    log(f"[cleanup] re-read {n} hydrocarbon reagent-N-cluster adducts as [M+H]+ of an N-heterocycle")
+    return {"reagent_n_relabeled": n}
+
+
 def demote_implausible_ionization(ledger: pd.DataFrame, *, log=print) -> dict:
     """Demote M0s whose ionization is chemically impossible for the assigned neutral.
     A PURE HYDROCARBON (no O/N/S/P/halogen/Si) has no acidic proton to lose and no
