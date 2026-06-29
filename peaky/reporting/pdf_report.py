@@ -19,6 +19,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import textwrap
 
 import numpy as np
 import pandas as pd
@@ -290,21 +291,42 @@ def _close(pdf, fig):
 
 
 def _text_lines(fig, lines, *, x=0.08, y0=0.90, dy=0.026, size=10):
-    """Render (style, text) lines top-down. style: 'h' head / 'b' body / 'm' mono."""
+    """Render (style, text) lines top-down. style: 'h' head / 'b' body / 'm' mono /
+    'dim' caption / 'gap'.
+
+    Long 'h'/'b'/'dim' lines WRAP to the printable page width so a sentence never
+    runs off the right margin (each wrapped continuation consumes one more `dy`,
+    and a leading '• '/indent is kept aligned). 'm' lines are pre-aligned tables
+    and are left verbatim."""
+    usable_in = max(1.0, (1.0 - x - 0.07) * A4[0])      # printable width (right margin ~0.07)
+    def _budget(fontsize):                              # ~chars that fit at this size
+        return max(24, int(usable_in / (0.54 * fontsize / 72.0)))
     y = y0
     for style, txt in lines:
         if style == "gap":
             y -= dy * (txt or 1)
             continue
         kw = dict(fontsize=size, color=INK, va="top", family="sans-serif")
+        fs = size
         if style == "h":
-            kw.update(fontsize=size + 3, weight="bold")
+            fs = size + 3
+            kw.update(fontsize=fs, weight="bold")
         elif style == "m":
             kw.update(family="monospace", fontsize=size - 0.5)
         elif style == "dim":
-            kw.update(color=GREY, fontsize=size - 1)
-        fig.text(x, y, txt, **kw)
-        y -= dy
+            fs = size - 1
+            kw.update(color=GREY, fontsize=fs)
+        if style in ("h", "b", "dim") and txt and len(str(txt)) > _budget(fs):
+            t = str(txt)
+            lead = t[:len(t) - len(t.lstrip())]                  # existing indent
+            cont = "  " if t.lstrip().startswith("•") else lead  # align under a bullet
+            segs = textwrap.wrap(t, width=_budget(fs), initial_indent=lead,
+                                 subsequent_indent=cont) or [t]
+        else:
+            segs = [txt]
+        for seg in segs:
+            fig.text(x, y, seg, **kw)
+            y -= dy
     return y
 
 

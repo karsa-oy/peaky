@@ -20,6 +20,8 @@ COMPLETE linkage is essential — average linkage chains every trace into one bl
 """
 from __future__ import annotations
 
+import textwrap
+
 import numpy as np
 import pandas as pd
 from scipy.cluster.hierarchy import fcluster, linkage
@@ -657,9 +659,14 @@ def render_flat_panel(cols, traces_raw, grid, out, item_label, *,
     PAGE_W, PAGE_H = 8.27, 11.69
     fig = plt.figure(figsize=(PAGE_W, PAGE_H))
     fig.text(0.075, 0.955, f"{title}", fontsize=12, weight="bold", color="#222")
-    fig.text(0.075, 0.935, f"n={len(cols)} — channels with no real family dynamics: uncorrelated, "
-             "or in a co-varying cluster whose mean is flat, + Si contamination; bunched so they "
-             "don't bloat the cluster count", fontsize=8.5, color="#666")
+    # wrap the caption to the page width (va='top' so it grows DOWN, toward the
+    # plot, never up into the bold title) — a long one-liner used to run off the
+    # right edge and get clipped.
+    _sub = (f"n={len(cols)} — channels with no real family dynamics: uncorrelated, or in a "
+            "co-varying cluster whose mean is flat, + Si contamination; bunched so they "
+            "don't bloat the cluster count")
+    fig.text(0.075, 0.935, textwrap.fill(_sub, width=112), fontsize=8.5, color="#666",
+             va="top")
     # taller panel when there's no member list to show below it
     ax = (fig.add_axes([0.10, 0.50, 0.86, 0.36]) if listing
           else fig.add_axes([0.10, 0.34, 0.86, 0.52]))
