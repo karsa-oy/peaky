@@ -290,43 +290,66 @@ def _close(pdf, fig):
     plt.close(fig)
 
 
-def _text_lines(fig, lines, *, x=0.08, y0=0.90, dy=0.026, size=10):
+def _text_lines(fig, lines, *, x=0.08, y0=0.90, dy=0.026, size=10, bottom=0.045):
     """Render (style, text) lines top-down. style: 'h' head / 'b' body / 'm' mono /
     'dim' caption / 'gap'.
 
     Long 'h'/'b'/'dim' lines WRAP to the printable page width so a sentence never
-    runs off the right margin (each wrapped continuation consumes one more `dy`,
-    and a leading '• '/indent is kept aligned). 'm' lines are pre-aligned tables
-    and are left verbatim."""
+    runs off the right margin (a leading '• '/indent is kept aligned); 'm' lines are
+    pre-aligned tables and are left verbatim. If the wrapped block would run past
+    `bottom`, the line spacing — and, only if that is not enough, the font size — is
+    scaled down so the block still fits the page (a long caption no longer overflows
+    the bottom margin)."""
     usable_in = max(1.0, (1.0 - x - 0.07) * A4[0])      # printable width (right margin ~0.07)
     def _budget(fontsize):                              # ~chars that fit at this size
         return max(24, int(usable_in / (0.54 * fontsize / 72.0)))
-    y = y0
+    def _fs(style):                                     # font size per style
+        return (size + 3 if style == "h" else size - 1 if style == "dim"
+                else size - 0.5 if style == "m" else size)
+
+    # Pass 1 — expand to physical pieces, honouring wrapping: ('gap', units) | (style, text)
+    pieces = []
     for style, txt in lines:
         if style == "gap":
-            y -= dy * (txt or 1)
+            pieces.append(("gap", (txt or 1)))
             continue
-        kw = dict(fontsize=size, color=INK, va="top", family="sans-serif")
-        fs = size
-        if style == "h":
-            fs = size + 3
-            kw.update(fontsize=fs, weight="bold")
-        elif style == "m":
-            kw.update(family="monospace", fontsize=size - 0.5)
-        elif style == "dim":
-            fs = size - 1
-            kw.update(color=GREY, fontsize=fs)
+        fs = _fs(style)
         if style in ("h", "b", "dim") and txt and len(str(txt)) > _budget(fs):
             t = str(txt)
             lead = t[:len(t) - len(t.lstrip())]                  # existing indent
             cont = "  " if t.lstrip().startswith("•") else lead  # align under a bullet
-            segs = textwrap.wrap(t, width=_budget(fs), initial_indent=lead,
-                                 subsequent_indent=cont) or [t]
+            for seg in (textwrap.wrap(t, width=_budget(fs), initial_indent=lead,
+                                      subsequent_indent=cont) or [t]):
+                pieces.append((style, seg))
         else:
-            segs = [txt]
-        for seg in segs:
-            fig.text(x, y, seg, **kw)
-            y -= dy
+            pieces.append((style, txt))
+
+    # Pass 2 — fit vertically: scale spacing (then font, only if forced) to stay above `bottom`
+    n_lines = sum(1 for k, _ in pieces if k != "gap")
+    gap_units = sum(v for k, v in pieces if k == "gap")
+    extent = (n_lines + gap_units) * dy
+    avail = y0 - bottom
+    sdy, fscale = dy, 1.0
+    if extent > avail > 0:
+        sdy = dy * avail / extent
+        line_h = 1.16 * size / 72.0 / A4[1]             # ~line height (figure fraction)
+        if sdy < line_h:                                # spacing alone not enough -> shrink font
+            fscale = sdy / line_h
+
+    y = y0
+    for kind, val in pieces:
+        if kind == "gap":
+            y -= sdy * val
+            continue
+        kw = dict(fontsize=_fs(kind) * fscale, color=INK, va="top", family="sans-serif")
+        if kind == "h":
+            kw.update(weight="bold")
+        elif kind == "m":
+            kw.update(family="monospace")
+        elif kind == "dim":
+            kw.update(color=GREY)
+        fig.text(x, y, val, **kw)
+        y -= sdy
     return y
 
 
@@ -689,7 +712,7 @@ def coverage(ctx, pdf):
                   ("dim", "amine (a parsimony prior, not a measurement). Peak roles -> Methods page.")]
     else:
         lines += [("dim", "Peak roles are defined on the Methods page.")]
-    _text_lines(fig, lines, y0=0.36, dy=0.029)
+    _text_lines(fig, lines, y0=0.40, dy=0.029, bottom=0.05)
     _close(pdf, fig)
 
 
