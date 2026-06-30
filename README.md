@@ -185,7 +185,7 @@ If you use **peaky** in your research, please cite the software using the
 metadata in [`CITATION.cff`](CITATION.cff) (GitHub's "Cite this repository"
 button) or the archived Zenodo release:
 
-[![DOI](https://zenodo.org/badge/1277283931.svg)](https://doi.org/10.5281/zenodo.21058928)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21058928.svg)](https://doi.org/10.5281/zenodo.21058928)
 
 **Mascope** has its own DOI:
 
