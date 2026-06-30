@@ -178,3 +178,15 @@ CI runs the suite on Python 3.12–3.13 with no credentials.
 Peaky is released under the **[Apache License 2.0](LICENSE)** — see [`LICENSE`](LICENSE)
 for the full text and [`NOTICE`](NOTICE) for attribution. `mascope-sdk` and the Mascope /
 Karsa platform are separately licensed and owned by their respective owners.
+
+## Citation
+
+If you use **peaky** in your research, please cite the software using the
+metadata in [`CITATION.cff`](CITATION.cff) (GitHub's "Cite this repository"
+button) or the archived Zenodo release:
+
+[![DOI](https://zenodo.org/badge/1277283931.svg)](https://doi.org/10.5281/zenodo.21058928)
+
+**Mascope** has its own DOI:
+
+> Mascope at Zenodo: https://zenodo.org/records/21037635

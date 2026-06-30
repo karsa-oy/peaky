@@ -1,0 +1,32 @@
+# Citation metadata for peaky. Powers GitHub's "Cite this repository" widget
+# and seeds the Zenodo record created from a GitHub Release.
+
+cff-version: 1.2.0
+title: peaky
+message: >-
+  If you use peaky in your research, please cite it using the metadata in this
+  file.
+type: software
+abstract: >-
+  AI-native analysis toolbox for Mascope. Describe what you want in plain language
+  and get reproducible peak assignments, figures, and reports from high-resolution
+  CIMS mass-spec data without writing notebook code.
+authors:
+  - given-names: Aleksei
+    family-names: Shcherbinin
+    email: aleksei.shcherbinin@karsa.fi
+    affiliation: Karsa Oy
+    orcid: "https://orcid.org/0009-0002-5128-5627"
+repository-code: "https://github.com/karsa-oy/peaky"
+url: "https://github.com/karsa-oy/peaky"
+license: Apache-2.0
+version: 0.5.0
+date-released: "2026-06-30"
+# Bumped per release: `version` + `doi` (the version DOI) identify this exact
+# release for reproducible citation; the concept DOI under `identifiers` always
+# resolves to the latest version (and is what the README badge links to).
+doi: "10.5281/zenodo.21058929"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.21058928"
+    description: Concept DOI - always resolves to the latest peaky release.
