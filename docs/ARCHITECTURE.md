@@ -4,8 +4,10 @@ This document explains **how Peaky works** for someone reading or extending the
 code. Companion docs: [`README.md`](../README.md) (install + dev loop),
 [`QUICKSTART.md`](../QUICKSTART.md) (5-minute run), [`SKILL.md`](../SKILL.md)
 (Claude-Code operating instructions), [`ASSIGNMENT.md`](ASSIGNMENT.md) (what
-assignment produces, for a scientist), [`OUTPUTS.md`](OUTPUTS.md) (every artifact,
-where + what), and [`ROADMAP.md`](ROADMAP.md) (development history).
+assignment produces, for a scientist), [`CLUSTERING.md`](CLUSTERING.md) (how the
+time series becomes co-varying families — the first of the per-module
+"how the numbers are transformed" deep-dives), [`OUTPUTS.md`](OUTPUTS.md) (every
+artifact, where + what), and [`ROADMAP.md`](ROADMAP.md) (development history).
 
 **Per-module "how the numbers are transformed" deep-dives** — one doc per pipeline
 module (inputs → stages with exact constants → outputs → gotchas), indexed in

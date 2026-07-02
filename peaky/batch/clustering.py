@@ -33,11 +33,27 @@ from peaky.batch import timeseries as TS
 
 __version__ = "0.1.0"
 
-FLOOR_DEFAULT = 200.0   # min median cps for a channel to enter clustering
+FLOOR_DEFAULT = 200.0   # min median cps for a channel to enter clustering (legacy gate)
+
+
+def _longest_detected_run(tr) -> int:
+    """Longest run of consecutive DETECTED (nonzero) bins in a raw trace.
+    NaN / 0 = not detected. Distinguishes a real multi-bin episode (rise+decay)
+    from a sporadic single-bin spike at the detection limit. Intensity-agnostic:
+    unlike a median-cps floor it does not penalise sharp transients whose signal
+    is zero most of the run (e.g. prompt accretion dimers)."""
+    y = np.nan_to_num(np.asarray(tr, dtype=float), nan=0.0)
+    best = cur = 0
+    for v in y:
+        cur = cur + 1 if v > 0 else 0
+        if cur > best:
+            best = cur
+    return best
 
 
 def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
                   floor: float = FLOOR_DEFAULT, bin_minutes: int | None = None,
+                  gate: str = "median", min_run: int = 3,
                   log=print) -> dict:
     """Build the cluster/flat/unassigned figure sets for one batch.
 
@@ -115,6 +131,18 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
            for k in ion_mz}
     cv = cv_of(traces_raw, list(ion_mz))
 
+    def _enter(k):
+        """Entry gate to clustering.
+        gate='median'  : legacy median-cps floor (>=FLOOR) — blind to transients.
+        gate='episode' : detected (nonzero) in >=min_run consecutive bins — rescues
+                         sharp low-abundance episodes (e.g. accretion dimers) the
+                         median floor drops, while still rejecting sporadic spikes."""
+        if k not in traces_raw:
+            return False
+        if gate == "episode":
+            return _longest_detected_run(traces_raw[k].values) >= min_run
+        return med.get(k, 0) >= FLOOR
+
     # per-ion legend (formula+adduct + match-score) + per-cluster workbook metadata
     keylab = {r.key: f"{V.ion_label(r.neutral_formula, r.adduct)} ({float(r.ion_score):.2f})"
               for r in chan.itertuples()}
@@ -138,8 +166,9 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
     # Cluster ALL bright organic ion channels on SHAPE (RAW corr) — NO per-trace cv
     # gate (it can't see coherence). Then MERGE near-identical-shape clusters. The
     # non-clustering remainder + Si contamination is the genuinely-flat bucket.
-    clust_cols = goodk([k for k in ion_mz if med.get(k, 0) >= FLOOR and not is_si[k]])
-    log(f"CLUSTERING {len(clust_cols)} bright organic ion-channels on RAW shape (no cv gate)")
+    clust_cols = goodk([k for k in ion_mz if _enter(k) and not is_si[k]])
+    log(f"CLUSTERING {len(clust_cols)} organic ion-channels on RAW shape (entry gate='{gate}'"
+        f"{f', min_run={min_run}' if gate=='episode' else f', floor={FLOOR:.0f}cps'}; no cv gate)")
     Lg, cm = CL.correlate(traces_raw, clust_cols)
     lab, big = CL.cluster(cm) if len(clust_cols) >= CL.MIN_MEMBERS else (pd.Series(dtype=int), [])
     log(f"  raw: {len(big)} clusters>=3")
@@ -192,7 +221,7 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
                   "median_cps": [round(med[c], 0) for c in clustered]}).to_csv(f"{TAB}/clusters_changing_{tag}.csv", index=False)
 
     # FLAT = the uncorrelated remainder + Si contamination -> bunched overview panel
-    flat_cols = goodk(list(dict.fromkeys(remainder + [k for k in ion_mz if is_si[k] and med.get(k, 0) >= FLOOR])))
+    flat_cols = goodk(list(dict.fromkeys(remainder + [k for k in ion_mz if is_si[k] and _enter(k)])))
     pos = traces_raw[flat_cols].values if flat_cols else np.array([])
     pos = pos[np.isfinite(pos) & (pos > 0)]
     ylim = (max(50, np.percentile(pos, 1)), float(np.nanmax(pos)) * 1.2) if len(pos) else None
@@ -283,7 +312,9 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
         "gates": {
             "match_tol_ppm": 8.0,                       # is_assigned() tolerance
             "unassigned_median_cps_floor": 50.0,        # un_bins brightness floor
-            "assigned_clustering_floor_cps": FLOOR,     # assigned-channel floor
+            "assigned_clustering_floor_cps": FLOOR,     # assigned-channel floor (median gate)
+            "entry_gate": gate,                         # 'median' | 'episode'
+            "min_consecutive_bins": min_run,            # episode-gate run length
             "min_trace_points": CL.MIN_POINTS,          # persistence gate
             "varying_cv_min": CL.FLAT_CV,               # sustained-change half
             "varying_burst_range": CL.PEAK_RANGE,       # transient-burst half
