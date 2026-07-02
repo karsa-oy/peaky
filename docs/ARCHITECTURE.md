@@ -19,6 +19,16 @@ pipeline order by [`PIPELINE.md`](PIPELINE.md):
 [`VANKREVELEN.md`](VANKREVELEN.md) · [`GKA.md`](GKA.md) ·
 [`QC_AND_REPORT.md`](QC_AND_REPORT.md).
 
+**Per-module "how the numbers are transformed" deep-dives** — one doc per pipeline
+module (inputs → stages with exact constants → outputs → gotchas), indexed in
+pipeline order by [`PIPELINE.md`](PIPELINE.md):
+[`DATA_IO.md`](DATA_IO.md) · [`SCORING.md`](SCORING.md) ·
+[`CHEMISTRY.md`](CHEMISTRY.md) · [`ISOTOPES.md`](ISOTOPES.md) ·
+[`REAGENTS.md`](REAGENTS.md) · [`SAMPLING.md`](SAMPLING.md) · [`MERGE.md`](MERGE.md) ·
+[`TIMESERIES.md`](TIMESERIES.md) · [`CLUSTERING.md`](CLUSTERING.md) ·
+[`VANKREVELEN.md`](VANKREVELEN.md) · [`GKA.md`](GKA.md) ·
+[`QC_AND_REPORT.md`](QC_AND_REPORT.md).
+
 ---
 
 ## 1. Where Peaky sits
