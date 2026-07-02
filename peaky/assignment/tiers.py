@@ -87,6 +87,17 @@ CAL_SIGMA_FLOOR = 0.15   # ppm; a lucky-tight core must not reject everything
 # assignment is independently corroborated.
 BACKGROUND_CHANNELS = ("[M+CO3]-", "[M+HBr+CO3]-", "[M+O2]-", "[M]-.")
 
+# Positive-mode reagent adducts that DONATE nitrogen to the ion. An assignment on
+# one of these is EXACTLY isobaric with the protonated form of an N-heavier neutral
+# (the adduct's donated N read as analyte N) -- e.g. C8H18O5·[M+NH4]+ and
+# C8H21NO5·[M+H]+ are one and the same ion. Isotopes cannot separate them (same
+# ion => same ¹³C), and seeing the neutral on a SECOND N-donating channel adds no
+# discrimination (each donor is individually spoofable). Only an N-FREE sibling
+# channel ([M+H]+ / [M+Na]+ / [M+K]+) -- or the jointly-unfakeable NH4+urea pair
+# (no single CHON neutral can present as both) -- fixes the nitrogen count, and
+# hence the DBE / Van Krevelen class. See _reagent_n_isobar.
+N_DONOR_ADDUCTS = ("[M+NH4]+", "[M+(CH4N2O)H]+")
+
 # Honest cross-family mass degeneracy (degeneracy.measure_degeneracy, stamped as
 # degeneracy_density / degeneracy_note). The per-pass candidate_density only
 # counts competitors inside the ONE narrow element box that peak's pass
@@ -202,6 +213,31 @@ def _drop_decomposition_aliases(row, alts: list[dict]) -> tuple[list[dict], int]
     return kept, len(alts) - len(kept)
 
 
+def _reagent_n_isobar(row, alts_all: list[dict]) -> bool:
+    """True when the winner sits on a positive-mode N-DONATING reagent adduct AND a
+    same-ion alternative reads that donated nitrogen as ANALYTE nitrogen (a strictly
+    N-richer neutral). That pair is the reagent-N ambiguity: spectrally identical
+    (same ion, same isotopes), so the reported nitrogen count / DBE is a chemistry
+    guess unless an N-FREE sibling channel (or the joint NH4+urea pair) resolves it.
+    _drop_decomposition_aliases silently removes the alternative as a 'same-ion
+    decomposition alias' -- correct for a covalent-vs-cluster split, but WRONG here:
+    these are genuinely different neutrals, so the row must not then advertise a
+    'unique formula in the calibrated window'. Returns False in negative mode (no
+    N-donor adduct fires) and on unparseable rows -- the rule is then inert."""
+    w_add = str(row.get("adduct") or "")
+    if w_add not in N_DONOR_ADDUCTS:
+        return False
+    ion0 = _ion_counts(row.get("neutral_formula"), w_add)
+    if ion0 is None:
+        return False
+    w_n = C.parse_formula(str(row.get("neutral_formula") or "")).get("N", 0)
+    for a in alts_all:
+        if _ion_counts(a.get("formula"), a.get("adduct")) == ion0 \
+                and C.parse_formula(str(a.get("formula") or "")).get("N", 0) > w_n:
+            return True
+    return False
+
+
 def _margin_density_tie(row, alts: list[dict], n_aliased: int,
                         n_stored: int) -> tuple[float | None, int, bool, bool]:
     """(margin to best real alternative, candidate density, capped?, tied?).
@@ -297,6 +333,11 @@ def compute_tiers(ledger: pd.DataFrame) -> pd.DataFrame:
     # corroboration sources
     kids_of = ledger.loc[ledger["role"] == L.ROLE_ISO, "parent_peak_id"].value_counts()
     chan_count = m0.groupby("neutral_formula")["adduct"].nunique()
+    # the set of adducts each neutral is assigned under -- lets the reagent-N gate
+    # ask whether a neutral has an N-FREE sibling channel (real discrimination) or
+    # only N-donating channels (hollow diversity). See N_DONOR_ADDUCTS.
+    adducts_of = m0.groupby("neutral_formula")["adduct"].agg(
+        lambda s: set(s.dropna().astype(str)))
     cal = _calibrate(m0, kids_of)   # (mu, sigma) ppm, or None when uncalibrated
     # primary detected channels = adducts carrying the High pass-1 backbone
     # (the unambiguous real reagent ions). A background channel that shows up
@@ -325,6 +366,18 @@ def compute_tiers(ledger: pd.DataFrame) -> pd.DataFrame:
         iso_ev = (kids_of.get(r["peak_id"], 0) > 0) or bool(_alts(r.get("isotopologues")))
         cross_channel = int(chan_count.get(formula, 0)) >= 2
         has_anchor = pd.notna(r.get("anchor_peak_id")) or pd.notna(r.get("series_unit"))
+        # reagent-N isobar (positive mode): the winner and a same-ion alias disagree
+        # only on the nitrogen count, which isotopes and N-donating channels cannot
+        # settle. Downgrade the corroboration to what actually discriminates: an
+        # N-free sibling channel, the joint NH4+urea pair, or a series anchor.
+        reagent_n = _reagent_n_isobar(r, alts_all)
+        nfree_sib = nh4_urea = False
+        if reagent_n:
+            adset = adducts_of.get(formula, set())
+            nfree_sib = any(a not in N_DONOR_ADDUCTS for a in adset)
+            nh4_urea = {"[M+NH4]+", "[M+(CH4N2O)H]+"}.issubset(adset)
+            iso_ev = False                        # same ion => isotopes tell nothing
+            cross_channel = nfree_sib or nh4_urea  # hollow N-only diversity doesn't count
         corroborated = iso_ev or cross_channel or has_anchor
         degen_density, mass_degenerate = _degeneracy(r)
 
@@ -347,6 +400,16 @@ def compute_tiers(ledger: pd.DataFrame) -> pd.DataFrame:
             tier = TIER_CANDIDATE
             reason = ("mixed Br/Cl halogenation: the isotope envelope pins the "
                       "halogen count but the backbone candidates stay ambiguous")
+        elif reagent_n and not corroborated:
+            # positive-mode reagent-N isobar with nothing to fix the nitrogen
+            # count: the ion reads equally as an N-free neutral on an N-donating
+            # reagent adduct or as the protonated N-heavier neutral, and there is
+            # no N-free sibling channel, no joint NH4+urea pair, and no anchor.
+            tier = TIER_CANDIDATE
+            reason = (f"reagent-N isobar unresolved: {formula} {r.get('adduct')} "
+                      "is the same ion as a protonated N-heavier neutral, and no "
+                      "N-free channel / joint NH4+urea / series anchor fixes the "
+                      "nitrogen count (isotopes cannot — identical ion)")
         elif tied and not (cross_channel or has_anchor):
             # a spectral eff-score tie cannot be broken by isotopes (they are
             # already in the score) -- only extra-spectral corroboration
@@ -396,6 +459,14 @@ def compute_tiers(ledger: pd.DataFrame) -> pd.DataFrame:
                           "isotope / cross-channel / series corroboration to "
                           "break the tie — not identifiable from accurate mass "
                           "alone")
+        elif reagent_n:
+            # resolved reagent-N isobar: nitrogen count IS pinned -- say how, and
+            # do NOT claim 'unique in the window' (the same-ion N-heavier reading
+            # exists; it is simply ruled out by the discriminating channel).
+            how = ("an N-free sibling channel" if nfree_sib
+                   else "the joint [M+NH4]+/[M+urea·H]+ pair (unfakeable by one "
+                        "neutral)" if nh4_urea else "series-anchor support")
+            reason = f"reagent-N isobar: nitrogen count fixed by {how}"
         else:
             parts = []
             if density == 1:
@@ -417,6 +488,40 @@ def compute_tiers(ledger: pd.DataFrame) -> pd.DataFrame:
                      "candidate_density": density, "density_capped": capped})
     return pd.DataFrame(rows, columns=["peak_id", "tier", "tier_reason",
                                        "candidate_density", "density_capped"])
+
+
+def stamp_calibrated_ppm(ledger: pd.DataFrame) -> tuple[float, float] | None:
+    """Q1: write `ppm_error_cal` = ppm_error − mu (OFFSET ONLY), where mu is the
+    robust per-file mass offset the tier engine already fits from the corroborated
+    CHO/CHON core (_calibrate; median + scaled MAD). The reported ppm_error is the
+    RAW theoretical error and carries a large, statistically-overwhelming per-run
+    instrument offset (Ur ≈ +0.10 ppm, Br ≈ −0.13 ppm) that the engine uses
+    internally for its z-gate but never propagates to the displayed value. This
+    centres the reported/displayed mass accuracy without any new fitting; the raw
+    column is kept as the provenance of record. Falls back to the Assigned-M0
+    median when the core is too small to calibrate. No tier decision reads this
+    column (tiering is already calibration-aware), so counts are unchanged.
+    Returns (mu, sigma) and stashes them in ledger.attrs, or None if uncalibrable."""
+    if "ppm_error" not in ledger.columns:
+        return None
+    m0 = ledger[ledger["role"] == L.ROLE_M0]
+    kids_of = ledger.loc[ledger["role"] == L.ROLE_ISO,
+                         "parent_peak_id"].value_counts()
+    cal = _calibrate(m0, kids_of)
+    if cal is not None:
+        mu, sigma = cal
+    else:
+        assigned = pd.to_numeric(
+            m0.loc[m0.get("tier") == TIER_ASSIGNED, "ppm_error"],
+            errors="coerce").dropna()
+        if not len(assigned):
+            return None
+        mu, sigma = float(assigned.median()), float("nan")
+    ledger["ppm_error_cal"] = pd.to_numeric(ledger["ppm_error"],
+                                            errors="coerce") - mu
+    ledger.attrs["cal_mu"] = mu
+    ledger.attrs["cal_sigma"] = sigma
+    return mu, sigma
 
 
 def apply_tiers(ledger: pd.DataFrame) -> pd.DataFrame:
@@ -441,6 +546,7 @@ def apply_tiers(ledger: pd.DataFrame) -> pd.DataFrame:
         ledger.at[i, "candidate_density"] = density_text(
             int(by_pid.at[pid, "candidate_density"]),
             bool(by_pid.at[pid, "density_capped"]))
+    stamp_calibrated_ppm(ledger)
     flag_below_assignability(ledger)
     return ledger
 
