@@ -193,7 +193,13 @@ def _ion_counts(neutral, adduct) -> dict | None:
     if not s.startswith("[M"):
         return None
     cnt = dict(C.parse_formula(str(neutral)))
-    for sign, tok in _ADDUCT_TOKENS.findall(s.split("]")[0][2:]):
+    # flatten parenthesised adduct groups, e.g. '[M+(CH4N2O)H]+' -> '+CH4N2OH',
+    # so the urea/uronium reagent cluster is counted (element counts are additive;
+    # parse_formula merges the repeated H). Without this the parens swallow the
+    # whole token and the reagent's N is silently dropped -- which hid the
+    # urea-channel reagent-N isobars from both the alias-dedup and the tier gate.
+    inner = s.split("]")[0][2:].replace("(", "").replace(")", "")
+    for sign, tok in _ADDUCT_TOKENS.findall(inner):
         for el, n in C.parse_formula(tok).items():
             cnt[el] = cnt.get(el, 0) + (n if sign == "+" else -n)
     return {k: v for k, v in cnt.items() if v}
