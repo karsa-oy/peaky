@@ -63,7 +63,8 @@ justify:
 | **4** | **Residual explainer**: resolves ~1.998-Da isotope doublets, deep 2-step series, ppm-disciplined acceptance. |
 | **5** | **Known-neutral completion**: fills cross-channel partners + series gaps of passes 1–4 (no new formula space). |
 | **6** | **Anchored ladder gap-fill**: walks +O/+CH₂/+CO₂/−H₂O diagonals out from Assigned anchors, satellite-guarded (Candidate tier). |
-| **cleanup** | Isotope-confirmed recovery of molecules the score gate dropped, bromide-cluster relabelling, ringing-artifact flagging, and (positive mode) re-reading uncorroborated `[M+NH4]+` as the `[M+H]+` amine. Post-tier **plausibility demotes** (carbon-cluster, heteroatom-free-hydrocarbon-via-an-anion-channel, speculative-residual) and a Br-run reagent-halocarbon relabel drop over-eager commits one tier — never deleting a peak. |
+| **cleanup** | Isotope-confirmed recovery of molecules the score gate dropped, bromide-cluster relabelling, ringing-artifact flagging, and (positive mode) re-reading uncorroborated `[M+NH4]+` as the `[M+H]+` amine. A further (positive mode) **reagent-N re-read** re-reads a *pure hydrocarbon* that was assigned via an N-carrying reagent cluster (`[M+NH4]+` / urea `[M+(CH4N2O)H]+`) — chemically implausible, since a hydrocarbon has no site to bind it — as the `[M+H]+` of the corresponding N-heterocycle (skipped when the hydrocarbon has its own genuine `[M+H]+` row). Post-tier **plausibility demotes** (carbon-cluster, heteroatom-free-hydrocarbon-via-an-anion-channel, speculative-residual) and a Br-run reagent-halocarbon relabel drop over-eager commits one tier — never deleting a peak. |
+| **rearbitrate** | (calibrated runs only, before degeneracy + tiers) **Off-calibration re-arbitration**: an over-ranked off-cal degenerate M0 winner is displaced at *selection* — not just tier-demoted later — so an "aromatic-monster" answer can't hold the M0 slot it would only ever be tiered out of. |
 | **reflist** | Context-gated **reference peaklists** (literature HOM + common MS contaminants) corroborate near-ties (selection prior) and **rescue** mass-matched unexplained peaks — each rescue re-scored by the server before commit, provenance-tagged, never overriding an isotope-scored Assigned. |
 | **tiers** | The final verdict (below). Degeneracy density is measured first so a mass-degenerate commit can't claim Assigned. |
 
@@ -157,9 +158,26 @@ columns** (no judgment calls at report time):
 - **Candidate** — a plausible formula, honestly ambiguous: a low/suspect base
   confidence, an effective-score near-tie, undiscriminated close alternatives in
   the window, or a high cross-family mass-degeneracy density.
+- **Reagent-N isobar demotion (positive mode).** A CHO neutral seen through an
+  N-carrying reagent adduct (`[M+NH4]+` or urea `[M+(CH4N2O)H]+`) forms the *exact
+  same ion* as a protonated CHON neutral — same formula, so neither mass nor
+  isotopes can separate them. Such a commit is demoted to **Candidate** unless an
+  extra-spectral discriminator resolves it: the same neutral in an N-free channel
+  (`[M+H]+`/`[M+Na]+`/`[M+K]+`), the jointly-unfakeable NH4+urea pair, or a series
+  anchor. The tier_reason says so honestly rather than claiming the old false
+  "unique in the calibrated window." Validated: Ur moved −124 Assigned→Candidate
+  (all in the reagent-N family); Br is unaffected (halide, negative-only). See
+  [ASSIGNMENT_DETAIL](ASSIGNMENT_DETAIL.md) for the mechanics.
 - **Below assignability** — the **unexplained** residual, characterized
   peak-by-peak (isotope-partner / has-constraints / isolated). Presented as a
   *constrained mass*, not a confident formula.
+
+Reported mass errors carry a **calibrated `ppm_error_cal`** column alongside the
+raw `ppm_error`: an offset-only correction that subtracts the robust median mass
+error of the corroborated pure-organic core, so QC reads and provenance sit on a
+zero-centred window. It is display/provenance only — tiering was already
+calibration-aware (the z-gate centres on that robust median), so no tier changes
+from this. See [ASSIGNMENT_DETAIL](ASSIGNMENT_DETAIL.md).
 
 > **The honesty principle:** `% signal explained` is a **coverage** metric, not a
 > **quality** metric. A peak is only "Assigned" when the *evidence* — not just

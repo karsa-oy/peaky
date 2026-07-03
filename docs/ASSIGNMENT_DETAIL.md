@@ -14,7 +14,7 @@ Once peaks are fetched, the pipeline is offline (no further network I/O is neede
 - Deduplicates by `peak_id` (keeps highest intensity), so every row is a unique physical peak.
 - Initializes all assignment columns to defaults: `role=ROLE_UNEXPLAINED`, `locked=False`, `neutral_formula=NA`, etc.
 
-A ledger row carries (among others): `peak_id`, `mz`, `height`, `area`, `role`, `locked`, `neutral_formula`, `adduct`, `ion_formula`, `ion_score`, `compound_score`, `ppm_error`, `confidence`, `tier`, `tier_reason`, `candidate_density`, `pass_no`, `method`, `commentary`, `alternatives` (JSON), `isotopologues` (JSON), `parent_peak_id`, `iso_label`, `iso_match_score`, `synthetic`, `host_peak_id`, `assigned_fraction`, `below_assignability`, plus time-series stamps (`ts_cv_norm`, `ts_r_mono`, `ts_r_formic`, `ts_disposition`).
+A ledger row carries (among others): `peak_id`, `mz`, `height`, `area`, `role`, `locked`, `neutral_formula`, `adduct`, `ion_formula`, `ion_score`, `compound_score`, `ppm_error`, `ppm_error_cal` (offset-only calibrated ppm, stamped at tiering — §3 Self-Calibration), `confidence`, `tier`, `tier_reason`, `candidate_density`, `pass_no`, `method`, `commentary`, `alternatives` (JSON), `isotopologues` (JSON), `parent_peak_id`, `iso_label`, `iso_match_score`, `synthetic`, `host_peak_id`, `assigned_fraction`, `below_assignability`, plus time-series stamps (`ts_cv_norm`, `ts_r_mono`, `ts_r_formic`, `ts_disposition`).
 
 ### 1.3 Roles (mutually exclusive, enforced by invariants)
 
@@ -197,6 +197,8 @@ Pre-calibration (`cal_mu=None`) the center is 0 ppm. The method suffix (e.g. `se
 
 `relabel_confidence(ledger, cfg)` (passes.py:201–237) then re-grades **unlocked** pass-1 M0s against `cal_mu` (vs 0 pre-calibration), preserving the method suffix. At a large offset the whole backbone reads Low pre-calibration; this recovers true High/Good. Locked commits (pass-0 known, siloxane, pass-1 High) are immune. `z_of(ppm, cfg) = |ppm − cal_mu|/cal_sigma` (passes.py:185–192).
 
+**Persisted calibrated ppm (Q1)**: `tiers.stamp_calibrated_ppm(ledger)` (tiers.py:499–530, called from `apply_tiers` at tiers.py:555) writes a new ledger column **`ppm_error_cal = ppm_error − mu` (OFFSET ONLY)** on every row, where `mu` is the robust per-file mass offset the tier engine already fits from the corroborated CHO/CHON core (`tiers._calibrate` — median + scaled MAD; `CAL_MIN_N=20`, `CAL_SIGMA_FLOOR=0.15` ppm). The raw `ppm_error` stays as the theoretical error of record; `ppm_error_cal` re-centres the *displayed* accuracy without any new fitting (Ur ≈ +0.10 ppm, Br ≈ −0.13 ppm offsets removed). A per-file LINEAR (slope) term was tested and rejected. It falls back to the Assigned-M0 `ppm_error` median when the core is too small to calibrate, and stashes `(mu, sigma)` in `ledger.attrs`. **No tier decision reads this column** — tiering was already calibration-aware (`_calibrate` centres the z-gate on the robust median, not 0) — so it is display/provenance-only and tier counts are unchanged. The QC panel plots `ppm_error_cal` when present, raw otherwise.
+
 ### Pre-Pass-4 Demotions and First Iso-Envelope
 
 - `complete_isotope_envelopes` (1st run, see §3.5) — claim full patterns, displace weak M0s.
@@ -275,6 +277,21 @@ Isotope pairs + series chains, DBE-only plausibility (no `match_compounds`, just
 - `split_composites` (passes.py:1237–1281): de-blends — owner keeps `assigned_fraction` of measured height; a synthetic sub-peak `<id>.2` (same m/z, `synthetic=True`, `host_peak_id`) carries the co-component share + halogen guess. Signal conserved.
 - **Pass 6 (ladder)**: gapfill homolog/oxidation diagonals; then the 3rd `complete_isotope_envelopes`.
 
+### 3.6 Off-cal re-arbitration (`rearbitrate_offcal_degenerate`, pipeline stage `rearbitrate`, assign.py:236)
+
+Runs after cleanup + siloxane but **BEFORE degeneracy and tiers** (`passes.rearbitrate_offcal_degenerate`, passes/postprocess.py:757–865). It re-arbitrates OFF-CALIBRATION degenerate winners **at selection**, not just at tiering: an over-ranked off-cal "aromatic-monster" M0 winner is displaced so it cannot keep the M0 slot it would only ever be tier-demoted out of (degeneracy/tiers then see the corrected formula). It reuses `tiers._calibrate` (the same isotopologue-backed CHO/CHON core) so the off-cal gate is **identical** to the one the report tier engine applies. Per unlocked, non-`known:` M0 with finite `ppm_error`:
+1. `z_win = (ppm − mu)/sigma`; skip if `|z_win| ≤ Z_TAIL_DEMOTE (2.6)` — an on-cal winner stands.
+2. Skip if corroborated (iso_child/isotopologues, `≥2` channels for the neutral, or a series/`anchor_peak_id`) — never displace a corroborated winner.
+3. Skip unless the winner is in the aromatic-monster corner: `dbe/nC ≥ REARB_WINNER_DBE_PER_C (0.70)`.
+4. Among stored `alternatives`, pick the best that is **on-cal** (`|z_alt| ≤ cal_z_accept`), **less unsaturated** (`dbe(alt) < dbe(winner)`), **plausible** (`plausibility.implausible is None`), and score-viable (`raw ≥ REARB_ALT_MIN_SCORE`, `raw_win − raw ≤ REARB_MAX_SCORE_DROP`); sort key prefers reflist membership, then higher score, then closer-to-cal.
+5. If its `confidence_label ≠ Reject`, `commit_assignment(..., overwrite=True, method="rearb<-{old}")`; the disqualified off-cal monster is recorded in commentary (not re-listed as a competitor), and the remaining alternatives keep density/margin honest for the tier engine.
+
+**No-op when uncalibrated** (uncalibrated runs skip it). In the Ur/Br re-runs it produced no additional merged tier changes.
+
+### 3.7 Positive-mode reagent-N re-read (`relabel_reagent_n_adducts`, pipeline stage `relabel_reagent_n`, assign.py:257)
+
+Runs among the **post-tier** stages (after `relabel_radicals`, before `demote_ionization`; `cleanup.relabel_reagent_n_adducts`, cleanup.py:685–747). A **pure hydrocarbon** (parses to C/H only — no O/N/S/P/halogen/Si) assigned via an N-carrying reagent cluster is implausible: a hydrocarbon has no basic/polar site to bind the cluster and a real one would ionize as `[M+H]+`. It is re-read as `[M+H]+` of the N-heterocycle **M′ = M + (cluster − H)**, where the cluster mass comes from `_REAGENT_N_CLUSTERS = {"[M+NH4]+": {N:1, H:3}, "[M+(CH4N2O)H]+": {C:1, H:4, N:2, O:1}}` (cleanup.py:679–682) — e.g. `C5H6 [M+(CH4N2O)H]+ → C6H10N2O [M+H]+`; `C5H6 [M+NH4]+ → C5H9N [M+H]+`. Guards: M′ must pass `dbe_ok`/`oxygen_ok`; **SKIPPED** when the same hydrocarbon also has its own genuine `[M+H]+` row (a real terpene that legitimately forms `[M+NH4]+`). The re-read row is tiered **Candidate + `below_assignability`**, `confidence="Low (reagent-N re-read)"` (the specific N-heterocycle is rarely cross-channel-confirmed and the region is often reagent background, but the protonated-heterocycle label is the saner best-guess and stays visible). Positive adducts only (negative reagents never hit these).
+
 ---
 
 ## 4. Arbitration & Tiering Rules
@@ -295,10 +312,15 @@ Per peak: `eff_score = raw_score − complexity/iso penalty − minor-channel pe
 | `O_MAX_IDENTIFIED` | 11 (O≥12 = lattice-monster → Candidate / below-assignability) | tiers.py:65–67 |
 | `Z_TAIL_DEMOTE` | 2.6 σ (uncorroborated M0 with `|z|>2.6` → Candidate) | tiers.py:77 |
 | `DEGEN_DEMOTE_DENSITY` | 2 (degenerate if `>2` distinct cross-family plausible ions, i.e. ≥3, OR MASS-SATURATED) | tiers.py:105 |
+| `TIE_MARGIN` | 0.05 (arbitrate's own near-tie window; a stored/recomputed tie within this eff_score → Candidate unless cross-channel/anchor rescues) | tiers.py:63 |
+
+**Same-ion decomposition-alias dedup** (`_drop_decomposition_aliases`, tiers.py:208–219, run per row at the top of the density computation). Before margin/density are counted, alternatives that are the **SAME ION** as the winner under a different neutral/adduct split (covalent-vs-cluster decomposition, e.g. a covalent di-bromo neutral vs `[M+HBr+Br]-` of the base neutral) are dropped — no spectral evidence can ever distinguish those readings, the adduct reading is preferred by policy, so they are not competing candidates and must not inflate ties or `candidate_density`. Ion element counts come from `_ion_counts(neutral, adduct)` (tiers.py:187–205), which parses the neutral then applies each signed adduct token. **Urea-parenthesis fix** (bceb7f3): `_ion_counts` now **flattens parentheses** (`replace("(", "").replace(")", "")`) before tokenising, so the urea cluster `[M+(CH4N2O)H]+` contributes its full `C1H4N2O1` — previously the parens swallowed the whole token and the reagent's 2 N were silently dropped, hiding every urea-channel isobar (674 assignments) from both this dedup and the reagent-N gate below. `n_aliased` (count removed) is tracked so a stored tie flag naming a now-removed alias is recomputed rather than trusted.
+
+**Reagent-N isobar demotion (D1)** (`_reagent_n_isobar`, tiers.py:222–244; applied in `compute_tiers` at tiers.py:379–386, gate at 409–418). In **positive mode** a CHO neutral seen via an N-donating reagent adduct — `N_DONOR_ADDUCTS = ("[M+NH4]+", "[M+(CH4N2O)H]+")` (tiers.py:99) — is **exactly isobaric** with the protonated form of an N-heavier neutral: e.g. `C12H14O4 [M+NH4]+` and `C12H17NO4 [M+H]+` are both the ion `C12H18NO4+`. The rule fires when a same-ion stored alternative reads the donated N as **analyte** N (strictly N-richer neutral). Because it is the *same ion*, **mass cannot separate them and isotopes cannot either** (identical ion → identical ¹³C pattern), so the reported nitrogen count / DBE / Van Krevelen class is a chemistry guess. The demotion sets `iso_ev=False` and downgrades `cross_channel` to the only discriminators that actually pin the nitrogen: an **N-free sibling channel** (the same neutral seen as `[M+H]+`/`[M+Na]+`/`[M+K]+`), the **jointly-unfakeable NH4+urea pair** (`{[M+NH4]+, [M+(CH4N2O)H]+}` both present — one neutral cannot forge both), or a **series anchor**. With none of these, the winner is **demoted to Candidate** with an honest `tier_reason` ("reagent-N isobar unresolved … isotopes cannot — identical ion") instead of the old false "unique in the calibrated window"; when resolved, the reason names *how* the nitrogen was fixed and never claims window-uniqueness. Returns False in negative mode (no N-donor adduct fires), so Br-CIMS is unaffected.
 
 **Assigned** (default) when: known/locked species; OR unique in the calibrated window (density=1) with isotope/cross-channel/series support or no close alternatives; OR `O ≤ 11`, mass on-trend (`|z| ≤ 2.6` or corroborated), not mass-degenerate or corroborated.
 
-**Candidate** when any of: base confidence Low/Suspect; `O ≥ 12`; mixed Br/Cl backbone ambiguity; tied without cross-channel/series corroboration; close alternatives (density>1) uncorroborated; background air-ion channel without primary status or corroboration; `|z| > 2.6` uncorroborated; mass-degenerate uncorroborated.
+**Candidate** when any of: base confidence Low/Suspect; `O ≥ 12`; mixed Br/Cl backbone ambiguity; **positive-mode reagent-N isobar with no N-free sibling / NH4+urea pair / anchor** (D1, above); tied without cross-channel/series corroboration; close alternatives (density>1) uncorroborated; background air-ion channel without primary status or corroboration; `|z| > 2.6` uncorroborated; mass-degenerate uncorroborated.
 
 **Below assignability** (flag): `O ≥ 11` AND mass-saturated.
 
@@ -512,7 +534,7 @@ A reference list is used in **three** places, all soft and provenance-tagged (a 
 | `plausibility.py` | Candidate-tier scrutiny flags (heteroatom coincidence, carbon-rich, wrong-mode halogen) |
 | `tiers.py` | Tier classification (Assigned / Candidate / below-assignability), independent re-calibration, degeneracy demotion |
 | `degeneracy.py` | Cross-family ion-density audit and heteroatom-type counting |
-| `cleanup.py` | Pass-7 residual reclassification: ringing artifacts, bromide clusters, reagent-halocarbon relabel, isotope-gated recovery, satellite/envelope reclaim, fluorine demotion, carbon-cluster demotion, amine re-read |
+| `cleanup.py` | Pass-7 residual reclassification: ringing artifacts, bromide clusters, reagent-halocarbon relabel, isotope-gated recovery, satellite/envelope reclaim, fluorine demotion, carbon-cluster demotion, reagent-N re-read (HC via N-cluster → protonated N-heterocycle), amine re-read |
 | `isotopes.py` | Per-atom isotope-distribution convolution → predicted envelope `(dmass, rel, label)` |
 | `assign_batch.py` | Per-file assignment + offset-aware m/z merge into the merged ledger; jitter report |
 | `sampling.py` | Sample selection: time-grid (5 + max-TIC) and brightest-coverage |
@@ -564,7 +586,12 @@ PASS 6  ladder gapfill → ISO-ENVELOPE #3
 CLEANUP (pass 7): recover_isotope_gated → bromide clusters → ringing artifacts
         → reclaim_satellites → reclaim_envelope_tails(no-op) → SILOXANE(locked)
   ▼
-DEGENERACY → TIERS (apply_tiers) → demote_unconfirmed_fluorine (post-tier)
+REARBITRATE off-cal degenerate winners (displace aromatic-monster M0s; skip if uncal)
+  ▼
+DEGENERACY → TIERS (apply_tiers; stamp ppm_error_cal) → post-tier demotes:
+        demote_fluorine → demote_carbon → relabel_radicals →
+        relabel_reagent_n (HC via N-cluster → [M+H]+ of N-heterocycle) →
+        demote_ionization → demote_speculative → plausibility
   ▼
 [opt] TIME-SERIES annotate/demote
   ▼
