@@ -16,6 +16,7 @@ from peaky.chem import contexts
 from peaky.assignment import degeneracy
 from peaky.io import io_mascope
 from peaky.chem import isotopes
+from peaky.assignment import labeled
 from peaky.assignment import ladders
 from peaky.assignment import ledger
 from peaky.assignment import passes
@@ -98,6 +99,8 @@ class _RunState:
     do_pass5: bool
     reflists_active: object
     ts_peaks: object
+    label_isotope: object
+    label_max: int
     log: object
     checkpoint_dir: object
     summaries: dict = field(default_factory=dict)
@@ -228,6 +231,13 @@ _STAGES = [
         st.client, st.sample_id, st.led, st.profile, st.cfg, log=st.log)),
     _Stage("siloxane", lambda st: siloxane.assign_siloxane_ladder(
         st.client, st.sample_id, st.led, st.profile, st.cfg, adducts=st.adducts, log=st.log)),
+    # labelled-reagent covalent heavy-isotope rescue (e.g. 15N-organonitrate
+    # products) -- runs BEFORE degeneracy/tiers so the filled/re-read peaks are
+    # tiered normally. No-op unless the profile declares a label_isotope.
+    _Stage("labeled_15n", lambda st: labeled.rescue_labeled(
+        st.client, st.sample_id, st.led, st.profile, st.cfg, adducts=st.adducts,
+        label_isotope=st.label_isotope, label_max=st.label_max, log=st.log),
+        when=lambda st: bool(st.label_isotope)),
     # re-arbitrate off-calibration, uncorroborated aromatic-monster winners against
     # their stored on-cal plausible alternatives -- applies the tier engine's
     # calibration-sigma + corroboration gate AT WINNER-SELECTION (before degeneracy /
@@ -278,6 +288,7 @@ def run(sample_id: str, context: str = "ambient-air", *,
         cfg: passes.PassConfig | None = None, use_cache: bool = True,
         do_pass2: bool = True, do_pass3: bool = True, do_pass4: bool = True,
         do_pass5: bool = True, ts_peaks=None, adducts=None, reflists_active=None,
+        label_isotope=None, label_max=2,
         log=print, checkpoint_dir=None) -> dict:
     cfg = cfg or passes.PassConfig()
     # reference-list selection prior: a candidate neutral on an active reference
@@ -353,7 +364,8 @@ def run(sample_id: str, context: str = "ambient-air", *,
         client=client, sample_id=sample_id, led=led, profile=profile, pre=pre,
         cfg=cfg, adducts=adducts, reagent=reagent, has_halogen=has_halogen_adduct,
         do_pass2=do_pass2, do_pass3=do_pass3, do_pass4=do_pass4, do_pass5=do_pass5,
-        reflists_active=reflists_active, ts_peaks=ts_peaks, log=log,
+        reflists_active=reflists_active, ts_peaks=ts_peaks,
+        label_isotope=label_isotope, label_max=label_max, log=log,
         checkpoint_dir=checkpoint_dir)
     for stg in _STAGES:
         if not stg.when(st):

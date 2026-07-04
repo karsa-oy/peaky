@@ -63,6 +63,22 @@ def _category(score: float) -> str:
     return "unlikely"
 
 
+def _caret_ion_formula(neutral: str, im) -> str:
+    """Ion-formula string (charge sign stripped) for a caret heavy-isotope
+    neutral under mechanism `im`, e.g. ('C5H8^NO6', -H-) -> 'C5H7^NO6'. Adds or
+    subtracts the mechanism's own composition (which may itself carry '^N', as
+    the 15N-nitrate adduct does) so the total heavy-isotope count is exact."""
+    from peaky.chem import chemistry as C
+
+    cnt = dict(C.parse_formula(neutral))
+    add = C.parse_formula(getattr(im, "formula", "") or "")
+    sign = 1 if getattr(im, "addition", True) else -1
+    for el, n in add.items():
+        cnt[el] = cnt.get(el, 0) + sign * n
+    cnt = {k: v for k, v in cnt.items() if v > 0}
+    return C.format_formula(cnt)
+
+
 def score_candidates_local(
     peaks: pd.DataFrame,
     formulas: list[str],
@@ -111,12 +127,18 @@ def score_candidates_local(
     for neutral in formulas:
         for adduct, im in mechs.items():
             try:
-                ion = utils.combine_formula_and_ionization(
-                    neutral, im
-                )  # e.g. 'C6H12BrO6-'
+                if "^" in neutral:
+                    # caret heavy-isotope neutral ('^N' = 15N): pyteomics (used by
+                    # combine_formula_and_ionization) cannot parse the bare caret,
+                    # so build the ion element counts ourselves. predict_isotopes
+                    # DOES accept the caret ion string directly.
+                    ion_body = _caret_ion_formula(neutral, im)
+                else:
+                    ion_body = utils.combine_formula_and_ionization(neutral, im)[:-1]
                 pred_mz, pred_int, labels = predict_isotopes(
-                    ion[:-1], im.charge, purity
+                    ion_body, im.charge, purity
                 )
+                ion = ion_body + ("-" if im.charge < 0 else "+")
             except Exception:
                 continue
             if len(pred_mz) == 0:
