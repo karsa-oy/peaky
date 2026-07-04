@@ -39,8 +39,23 @@ PEAK_RANGE = 1.7         # smoothed max/median at/above which a trace has a cohe
 FLAT_CLUSTER_RANGE = 1.4  # a cluster whose MEMBER-MEAN smoothed max/median is below this
                           # is a flat family (members co-vary but the family doesn't move)
                           # -> demoted to the flat-background overview
+SETTLE_FRAC = 0.18       # skip this leading fraction of the run when re-checking family
+                         # flatness: instrument/reagent EQUILIBRATION is a slow early drift
+                         # common to unrelated channels (a huge 82-670 Da "family"), which
+                         # inflates the full-trace range above FLAT_CLUSTER_RANGE and keeps
+                         # a genuinely-flat background family in the co-varying set. A family
+                         # flat AFTER the settling window is background -> also demoted, BUT
+                         # ONLY when it STARTS HIGH (see SETTLING_START_MIN) so a real early
+                         # EVENT (rise from a low pre-event baseline, e.g. orange-peel) is
+                         # never mistaken for settling and demoted.
+SETTLING_START_MIN = 0.8  # a settling family sits at >= this fraction of its own peak in the
+                          # first bins (it starts at the max and DECAYS). A rise-event starts
+                          # low (first/max ~ 0.05-0.4), so it fails this and is kept.
 BIG_CHANGE_FOLD = 3.0    # a single channel whose smoothed max/median is >= this is a "big
                          # standalone change" (~>=5-10x raw) — surfaced even with no family
+BIG_CHANGE_FOLD_BRIGHT = 2.0    # a BRIGHT channel (median >= BIG_CHANGE_BRIGHT_CPS) surfaces
+BIG_CHANGE_BRIGHT_CPS = 1000.0  # at this lower fold: a 2-3x move of a ~10k-cps ion is a real,
+                         # visible excursion that must not hide in the flat-background bunch
 DIST_T = 0.40            # 1-r cut: r > 0.6 merges
 MIN_POINTS = 8           # finite trace points needed to correlate
 MIN_MEMBERS = 3          # smallest reported cluster
@@ -138,32 +153,72 @@ def trace_dynamic_range(traces: pd.DataFrame, col, *, smooth_w=SMOOTH_W) -> floa
     return _smoothed_range(pd.to_numeric(traces[col], errors="coerce").to_numpy(), smooth_w)
 
 
-def cluster_flatness(members, traces: pd.DataFrame, *, smooth_w=SMOOTH_W) -> float:
-    """Smoothed max/median of a cluster's MEMBER-MEAN raw trace — how much the FAMILY
-    as a whole moves. ~1 means the members co-vary but the family is flat (correlated
-    background: it passed the correlation cut yet has no real dynamics)."""
+def _family_mean(members, traces: pd.DataFrame) -> np.ndarray | None:
+    """Smoothed member-mean raw trace of a cluster, or None if it has no columns."""
     import warnings
     cols = [m for m in members if m in traces.columns]
     if not cols:
-        return 0.0
+        return None
     M = np.vstack([np.where(traces[m].to_numpy(float) > 0, traces[m].to_numpy(float), np.nan)
                    for m in cols])
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)   # all-NaN time bins are fine
-        mean = np.nanmean(M, axis=0)
+        return np.nanmean(M, axis=0)
+
+
+def cluster_flatness(members, traces: pd.DataFrame, *, smooth_w=SMOOTH_W,
+                     settle_frac: float = 0.0) -> float:
+    """Smoothed max/median of a cluster's MEMBER-MEAN raw trace — how much the FAMILY
+    as a whole moves. ~1 means the members co-vary but the family is flat (correlated
+    background: it passed the correlation cut yet has no real dynamics). With
+    settle_frac > 0 the leading fraction of the run is dropped first, so a slow early
+    equilibration drift does not count as family dynamics."""
+    mean = _family_mean(members, traces)
+    if mean is None:
+        return 0.0
+    if settle_frac > 0:
+        k = int(len(mean) * settle_frac)
+        if len(mean) - k >= MIN_POINTS:
+            mean = mean[k:]
     return _smoothed_range(mean, smooth_w)
 
 
+def _starts_high(mean: np.ndarray, smooth_w=SMOOTH_W) -> float:
+    """Fraction of its own PEAK a family sits at in the first few bins. ~1 => starts
+    at the max and decays (equilibration settling); low => rises from a low pre-event
+    baseline (a real early EVENT). Distinguishes the two so the settle-trim demote
+    never touches an early-event family."""
+    ys = smooth(np.asarray(mean, float), smooth_w)
+    pos = ys[np.isfinite(ys) & (ys > 0)]
+    if len(pos) < MIN_POINTS:
+        return 0.0
+    head = ys[:max(1, len(ys) // 20)]
+    head = head[np.isfinite(head)]
+    peak = float(np.max(pos))
+    return float(np.nanmean(head) / peak) if (len(head) and peak > 0) else 0.0
+
+
 def split_flat_clusters(rows, traces: pd.DataFrame, *, range_min=FLAT_CLUSTER_RANGE,
-                        smooth_w=SMOOTH_W):
+                        smooth_w=SMOOTH_W, settle_frac=SETTLE_FRAC,
+                        settling_start_min=SETTLING_START_MIN):
     """Partition cluster `rows` (cluster_rows output) into (dynamic, flat). A cluster
-    is FLAT if its member-mean trace has no real excursion (cluster_flatness <
-    range_min) — its members correlate but the family itself doesn't move, so it
-    belongs in the flat-background overview, not shown as a 'co-varying family'."""
+    is FLAT if its member-mean trace has no real excursion. Two ways to be flat:
+      (1) flat over the FULL run (original rule), or
+      (2) flat once the leading `settle_frac` EQUILIBRATION window is dropped AND the
+          family STARTS HIGH (>= settling_start_min of its peak in the first bins) —
+          i.e. it decays from t0, the instrument/reagent-settling signature.
+    Case (2) is demote-only and event-SAFE: a real early event rises from a low
+    baseline (starts_high << 1) so it fails the start-high guard and is kept."""
     dyn, flat = [], []
     for row in rows:
-        (dyn if cluster_flatness(row[1], traces, smooth_w=smooth_w) >= range_min
-         else flat).append(row)
+        full = cluster_flatness(row[1], traces, smooth_w=smooth_w)
+        if full < range_min:
+            flat.append(row); continue
+        settled = cluster_flatness(row[1], traces, smooth_w=smooth_w, settle_frac=settle_frac)
+        mean = _family_mean(row[1], traces)
+        starts_high = _starts_high(mean, smooth_w) if mean is not None else 0.0
+        is_settling_bg = settled < range_min and starts_high >= settling_start_min
+        (flat if is_settling_bg else dyn).append(row)
     return dyn, flat
 
 
@@ -557,13 +612,18 @@ def _make_xlsx_deterministic(path, *, when=None) -> None:
     os.replace(tmp, path)
 
 
-def big_changers(traces: pd.DataFrame, cols, grid, *, fold_min=BIG_CHANGE_FOLD, smooth_w=2):
+def big_changers(traces: pd.DataFrame, cols, grid, *, fold_min=BIG_CHANGE_FOLD, smooth_w=2,
+                 median_cps=None, fold_bright=BIG_CHANGE_FOLD_BRIGHT,
+                 bright_cps=BIG_CHANGE_BRIGHT_CPS):
     """Channels that change A LOT on their own — peak / baseline (smoothed max over
-    the 10th-percentile) >= fold_min — regardless of whether they co-vary with
-    anything. Using the low-percentile baseline (not the median) means a monotonic
-    decay/rise counts as much as a spike: any 'huge change then long tail' is caught,
-    not just a peak above a flat median. These have no family so they'd otherwise sit
-    unnoticed in the flat panel. Returns [(col, fold, peak_hour), ...], largest first."""
+    the 10th-percentile) — regardless of whether they co-vary with anything. Using
+    the low-percentile baseline (not the median) means a monotonic decay/rise counts
+    as much as a spike. A channel qualifies at `fold_min` (any brightness) OR at the
+    lower `fold_bright` when it is BRIGHT (median >= `bright_cps`): a 2-3x move of a
+    ~10k-cps ion is a real, visible excursion that should not hide in the flat panel,
+    whereas the same fold on a near-noise channel is just noise. These have no family
+    so they'd otherwise sit unnoticed there. Returns [(col, fold, peak_hour), ...]."""
+    med = median_cps or {}
     out = []
     for c in cols:
         if c not in traces.columns:
@@ -574,7 +634,8 @@ def big_changers(traces: pd.DataFrame, cols, grid, *, fold_min=BIG_CHANGE_FOLD, 
             continue
         base = np.percentile(pos, 10)         # robust low baseline (not the median)
         fold = float(np.max(pos) / base) if base > 0 else 0.0
-        if fold >= fold_min:
+        thr = fold_bright if float(med.get(c, 0.0)) >= bright_cps else fold_min
+        if fold >= thr:
             ph = float(grid[int(np.nanargmax(np.where(np.isfinite(ys), ys, -np.inf)))])
             out.append((c, fold, ph))
     out.sort(key=lambda t: -t[1])
