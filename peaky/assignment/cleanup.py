@@ -259,6 +259,12 @@ def recover_isotope_gated(client, sample_id, ledger, profile, cfg, *,
         return {"recovered": 0}
     fr = score_fn(client, sample_id, sorted(allf), allow_partial=True,
                   mechanism_ids=getattr(cfg, "mechanism_ids", None))
+    # a no-match response can be a bare empty frame with NO columns (seen on the
+    # FZJ server probing negative halogen adducts against a positive run) -- it
+    # must not crash run_cleanup, which would skip every later cleanup step
+    if fr is None or not len(fr) or "sample_peak_id" not in fr.columns:
+        log("[cleanup] recovery: oracle returned no scoreable matches")
+        return {"recovered": 0}
     fr = fr[fr["sample_peak_id"].notna() & (fr["sample_peak_intensity"] > 0)]
 
     recovered = 0
