@@ -134,18 +134,35 @@ def rescue_labeled(client, sample_id, ledger, context_profile, cfg, *,
     corrob = (fr[~fr["is_base"] & fr["sample_peak_id"].notna()]
               .groupby(["compound_formula", "mechanism_id"]).size())
 
+    # A real 15N product sits at the instrument's OWN mass accuracy (the calibrated
+    # 14N core: cal_mu +- cal_sigma). Accept a 15N reading only INSIDE that window
+    # -- exactly the tier engine's z-tail gate (Z_TAIL). A blind +-2 ppm window let
+    # in off-calibration coincidences (15N mass fits landing ~2 ppm from an
+    # unrelated peak) that the tier engine then demoted anyway. Gate here so the
+    # rescue never proposes a fill it cannot defend.
+    cal_mu = getattr(cfg, "cal_mu", None)
+    cal_sigma = getattr(cfg, "cal_sigma", None) or 0.5
+    Z_TAIL = 2.6
+    def _on_cal(ppm):
+        if ppm is None or pd.isna(ppm):
+            return False
+        if cal_mu is None:
+            return abs(float(ppm)) <= 1.0
+        return abs((float(ppm) - cal_mu) / cal_sigma) <= Z_TAIL
+
     n_res = n_re = 0
-    ACCEPT_PPM = 2.0        # tighter than the enumeration tolerance
     for i, info in per.items():
         mz = info["mz"]
-        sub = fr[(fr["sample_peak_mz"] - mz).abs() < mz * ACCEPT_PPM * 1e-6]
+        sub = fr[(fr["sample_peak_mz"] - mz).abs() < mz * 2.0 * 1e-6]
         sub = sub[sub["compound_formula"].isin(info["cands"]) & (sub["ion_score"] >= tau)]
         if sub.empty:
             continue
-        # discipline: organonitrate plausibility + isotope corroboration + not
-        # mass-degenerate. Filter the candidate set BEFORE picking the winner.
+        # discipline: on-calibration mass + organonitrate plausibility + isotope
+        # corroboration + not mass-degenerate. Filter candidates BEFORE the winner.
         keep_idx = []
         for j, cr in sub[sub["is_base"]].iterrows():
+            if not _on_cal(cr.get("ppm_error")):        # off instrument accuracy -> coincidence
+                continue
             v = C.parse_formula(str(cr["compound_formula"]))
             n15 = v.get(label, 0)
             if v.get("O", 0) < 3 * n15:                 # each covalent nitrate carries >=3 O
