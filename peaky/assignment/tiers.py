@@ -55,7 +55,7 @@ import pandas as pd
 from peaky.chem import chemistry as C
 from peaky.assignment import ledger as L
 
-__version__ = "0.5.0"  # offset-tolerant calibration (large systematic ppm offsets)
+__version__ = "0.6.0"  # + fluorine F/H-coherence cap (partial-F mass fits -> Candidate)
 
 TIER_ASSIGNED = "Assigned"
 TIER_CANDIDATE = "Candidate"
@@ -65,6 +65,14 @@ CLOSE_MARGIN = 0.10      # alternative within this eff-score of winner = "close"
 O_MAX_IDENTIFIED = 11    # validated chemistry tops out at O7 (monoterpene
                          # rungs); O8-11 is plausible HOM-type oxidation; O>=12
                          # only ever appeared as lattice-monster mass fits
+F_H_COHERENCE = 2        # an F-bearing formula with H>1 needs F >= this x H to
+                         # read as a real (per/poly)fluoro class. F is
+                         # monoisotopic -- NO isotope twin can ever confirm it --
+                         # and partially-fluorinated CHO(N)F readings are the
+                         # classic absorber of mass shifts the grid cannot
+                         # express (e.g. 15N-organonitrate products in a
+                         # [15N]-nitrate run). PFCA/TFA (H=1) and true
+                         # polyfluoro (F>=2H) pass untouched.
 
 # Mass-error-distribution test (Gao et al. 2024, Anal. Chem. 96:10210): the
 # instrument's true mass error is a tight Gaussian (self-calibrated from the
@@ -406,6 +414,17 @@ def compute_tiers(ledger: pd.DataFrame) -> pd.DataFrame:
             tier = TIER_CANDIDATE
             reason = ("mixed Br/Cl halogenation: the isotope envelope pins the "
                       "halogen count but the backbone candidates stay ambiguous")
+        elif (counts.get("F", 0) >= 1 and counts.get("H", 0) > 1
+              and counts["F"] < F_H_COHERENCE * counts["H"] and not iso_ev):
+            # F is monoisotopic: no isotope evidence can confirm a fluorine
+            # count, and a partially-fluorinated reading (H-rich, sub-PFAS F)
+            # is the classic mass-fit absorber. A 13C child is the one real
+            # discriminator (it pins the carbon count), so it rescues.
+            tier = TIER_CANDIDATE
+            reason = (f"partially-fluorinated reading (F{counts['F']}/H{counts['H']}) "
+                      "below PFAS-like F/H coherence; F has no minor isotope, so "
+                      "the fluorine count is a mass-only claim with no possible "
+                      "isotope confirmation")
         elif reagent_n and not corroborated:
             # positive-mode reagent-N isobar with nothing to fix the nitrogen
             # count: the ion reads equally as an N-free neutral on an N-donating

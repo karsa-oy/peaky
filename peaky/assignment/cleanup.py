@@ -552,13 +552,16 @@ HC_CARBON_MAX = 0.35   # H/C below this (F-free) -> implausibly carbon-rich skel
 
 def demote_implausible_carbon(ledger: pd.DataFrame, *, hc_max: float = HC_CARBON_MAX,
                               log=print) -> dict:
-    """Demote M0 assignments resting on an implausibly carbon-rich skeleton: H/C
-    below `hc_max` with NO fluorine (fluorine-rich low H/C is the F-monster case,
-    handled by demote_unconfirmed_fluorine). A bare carbon cluster such as C27H8 /
-    C36H6O is a high-mass mass-coincidence, not a real organic-aerosol molecule
-    (real SOA sits at H/C ~1-2). Demote Assigned->Candidate and flag
-    below_assignability. F-free, C>=2 only. Same arithmetic as the plausibility
-    'carbon-rich' flag, applied to the tier so the demotion is consistent."""
+    """Demote M0 assignments resting on an implausibly carbon-rich skeleton:
+    (H+F)/C below `hc_max`. F counts as an H-equivalent rather than exempting
+    the formula: true perfluoro classes have high (H+F)/C (PFCA ~2, C6F6 =1)
+    and are spared, while an F-decorated bare-carbon fit (C16HF3O, (H+F)/C
+    0.25) no longer slips through on an F-free clause. F>=4 fluorine-monsters
+    are additionally handled by demote_unconfirmed_fluorine. A bare carbon
+    cluster such as C27H8 / C36H6O is a high-mass mass-coincidence, not a real
+    organic-aerosol molecule (real SOA sits at H/C ~1-2). Demote
+    Assigned->Candidate and flag below_assignability. C>=2 only. Same
+    arithmetic as the plausibility 'carbon-rich' flag."""
     n = 0
     has_ba = "below_assignability" in ledger.columns
     target = (ledger.index[ledger["role"] == L.ROLE_M0]
@@ -566,9 +569,9 @@ def demote_implausible_carbon(ledger: pd.DataFrame, *, hc_max: float = HC_CARBON
     for i in target:
         cnt = C.parse_formula(str(ledger.at[i, "neutral_formula"] or ""))
         nc = cnt.get("C", 0)
-        if nc < 2 or cnt.get("F", 0) > 0:
+        if nc < 2:
             continue
-        hc = cnt.get("H", 0) / nc
+        hc = (cnt.get("H", 0) + cnt.get("F", 0)) / nc   # F counts as H-equivalent
         if hc >= hc_max:
             continue
         if str(ledger.at[i, "tier"]) == "Assigned":
@@ -576,11 +579,11 @@ def demote_implausible_carbon(ledger: pd.DataFrame, *, hc_max: float = HC_CARBON
         if has_ba:
             ledger.at[i, "below_assignability"] = True
         if "commentary" in ledger.columns:
-            note = f"implausibly carbon-rich (H/C {hc:.2f}, F-free) -- likely mass coincidence"
+            note = f"implausibly carbon-rich ((H+F)/C {hc:.2f}) -- likely mass coincidence"
             prev = str(ledger.at[i, "commentary"] or "")
             ledger.at[i, "commentary"] = (prev + "; " + note) if prev and prev != "nan" else note
         n += 1
-    log(f"[cleanup] demoted {n} implausibly-carbon-rich M0 (H/C<{hc_max}, F-free)")
+    log(f"[cleanup] demoted {n} implausibly-carbon-rich M0 ((H+F)/C<{hc_max})")
     return {"c_demoted": n}
 
 
