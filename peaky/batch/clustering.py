@@ -180,11 +180,13 @@ def cluster_batch(out_dir, ts, profile, *, merged=None, tag=None, label=None,
     flat_cluster_members = [m for r in flat_rows for m in r[1]]
     remainder = [k for k in clust_cols if int(lab.get(k, -1)) not in dyn_ids]   # not in a DYNAMIC family
     # BIG STANDALONE CHANGERS: single channels that change a lot on their own.
-    changers = CL.big_changers(traces_raw, remainder, grid, fold_min=CL.BIG_CHANGE_FOLD)
+    changers = CL.big_changers(traces_raw, remainder, grid, fold_min=CL.BIG_CHANGE_FOLD,
+                               median_cps=med)
     changer_set = {c for c, _, _ in changers}
     remainder = [k for k in remainder if k not in changer_set]
     CL.render_changers(changers, traces_raw, grid, f"{FIG}/clusters_changers_{tag}", ion_lbl,
-                       title=f"{label} · Large standalone changes (≥{CL.BIG_CHANGE_FOLD:g}× fold, no family) — {len(changers)} channels")
+                       title=f"{label} · Large standalone changes (≥{CL.BIG_CHANGE_FOLD:g}× fold, "
+                             f"or ≥{CL.BIG_CHANGE_FOLD_BRIGHT:g}× if bright) — {len(changers)} channels")
     pd.DataFrame({"ion": [ion_lbl(c) for c, _, _ in changers],
                   "neutral_formula": [c.split("|")[0] for c, _, _ in changers],
                   "channel": [meta[c]["channel"] for c, _, _ in changers],
