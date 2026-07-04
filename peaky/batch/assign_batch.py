@@ -294,6 +294,11 @@ def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
     # a per-sample match gap can't flip polarity / mis-assign a file. Caller can
     # still override via assign_kw['adducts'].
     assign_kw.setdefault("adducts", list(prof.adducts))
+    # labelled-reagent covalent-product rescue (e.g. 15N-organonitrates); no-op
+    # for every unlabelled reagent profile.
+    if getattr(prof, "label_isotope", None):
+        assign_kw.setdefault("label_isotope", prof.label_isotope)
+        assign_kw.setdefault("label_max", prof.label_max)
     # context-unlock the reference peaklists (contaminants always; chemistry-
     # specific lists when the batch metadata matches) -> selection prior + rescue.
     from peaky.assignment import reflists as RL

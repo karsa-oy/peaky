@@ -55,6 +55,7 @@ _MODULES = {
     "ledger": "assignment.ledger", "passes": "assignment.passes",
     "series_gka": "assignment.series_gka", "series_detect": "assignment.series_detect",
     "ladders": "assignment.ladders", "residual": "assignment.residual",
+    "labeled": "assignment.labeled",
     "siloxane": "assignment.siloxane", "cleanup": "assignment.cleanup",
     "degeneracy": "assignment.degeneracy", "tiers": "assignment.tiers",
     "plausibility": "assignment.plausibility", "reflists": "assignment.reflists",

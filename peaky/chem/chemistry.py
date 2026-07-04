@@ -44,6 +44,14 @@ M: dict[str, float] = {
     "Cl": 34.96885268,
     "Br": 78.9183371,
     "I": 126.9044719,
+    # caret-labelled heavy isotope for labelled-reagent chemistry: '^N' = 15N.
+    # A covalent 15N enters a product only via labelled-reagent chemistry (e.g. a
+    # 15NO3 radical adding to a VOC -> organonitrate); the reagent cluster's 15N
+    # is separate (handled by the [M+^NO3]- adduct). Same '^N' notation the
+    # mascope scoring stack uses (predict_isotopes), so an '^N' ion formula scores
+    # directly and even yields a '14N' isotopologue (the ~2% 14N reagent impurity)
+    # as a real confirmation channel.
+    "^N": 15.0001088984,
 }
 M_E = 0.0005485799  # electron mass (Da)
 # Heavy stable isotopes used when a REAGENT is isotopically labelled (the analyte
@@ -56,7 +64,7 @@ _M_15N = 15.0001088989
 # (zero DBE contribution); Si tetravalent like C; P trivalent like N for the
 # standard organic DBE formula.
 _DBE_PLUS = ("C", "Si")            # contribute +1 each (valence 4)
-_DBE_HALF_PLUS = ("N", "P")        # contribute +1/2 each (valence 3)
+_DBE_HALF_PLUS = ("N", "P", "^N")  # contribute +1/2 each (valence 3; ^N = 15N)
 _DBE_HALF_MINUS = ("H", "F", "Cl", "Br", "I")  # contribute -1/2 each (valence 1)
 
 # Element set we model. Output uses Hill notation (C, H, then alphabetical),
@@ -122,16 +130,39 @@ ADDUCT_SHIFTS: dict[str, float] = {
 # ---------------------------------------------------------------------------
 # Formula parsing / formatting
 # ---------------------------------------------------------------------------
-_TOKEN = re.compile(r"([A-Z][a-z]?)(\d*)")
+# optional caret prefix = a labelled heavy isotope (e.g. '^N' = 15N). Matched as
+# part of the element token so 'C5H7^NO6' parses ^N as its own species, not 14N.
+_TOKEN = re.compile(r"(\^?[A-Z][a-z]?)(\d*)")
 
 
 def parse_formula(formula: str) -> dict[str, int]:
-    """'C10H16O4' -> {'C':10,'H':16,'O':4}. Robust to empty / None."""
+    """'C10H16O4' -> {'C':10,'H':16,'O':4}. Robust to empty / None. A caret
+    element ('^N' = 15N) is kept as a distinct key so its mass/isotope pattern is
+    correct; fold_isotopes() merges it back to the base element for classification."""
     out: dict[str, int] = {}
-    for el, n in _TOKEN.findall(formula or ""):
+    if not isinstance(formula, str):        # tolerate NaN / None from arrow columns
+        return out
+    for el, n in _TOKEN.findall(formula):
         if not el:
             continue
         out[el] = out.get(el, 0) + (int(n) if n else 1)
+    return out
+
+
+# base element each caret isotope collapses to for VALENCE / CLASSIFICATION
+# (mass keeps them distinct; chemistry-class semantics do not).
+_ISOTOPE_BASE = {"^N": "N"}
+
+
+def fold_isotopes(counts: dict[str, int]) -> dict[str, int]:
+    """Merge caret heavy-isotope counts into their base element ('^N' -> 'N').
+    Use where only the element TOTAL matters (CHON classification, N-count gates,
+    Van Krevelen); never for mass (isotopes differ) or isotope-pattern scoring."""
+    if not any(k in _ISOTOPE_BASE for k in counts):
+        return dict(counts)
+    out: dict[str, int] = {}
+    for k, v in counts.items():
+        out[_ISOTOPE_BASE.get(k, k)] = out.get(_ISOTOPE_BASE.get(k, k), 0) + v
     return out
 
 
@@ -144,7 +175,10 @@ def format_formula(counts: dict[str, int]) -> str:
         s += "C" + (str(counts["C"]) if counts["C"] > 1 else "")
     if counts.get("H", 0) > 0:
         s += "H" + (str(counts["H"]) if counts["H"] > 1 else "")
-    for el in sorted(k for k in counts if k not in ("C", "H")):
+    # sort ignoring a leading caret so '^N' files next to 'N' rather than last;
+    # the caret is preserved in the emitted symbol so parse_formula round-trips.
+    for el in sorted((k for k in counts if k not in ("C", "H")),
+                     key=lambda e: e.lstrip("^")):
         k = counts[el]
         if k > 0:
             s += el + (str(k) if k > 1 else "")
@@ -183,7 +217,8 @@ def dbe(formula: str | dict[str, int]) -> float:
 
 def seniors_cap(cnt: dict[str, int]) -> float:
     """Maximum DBE permitted by Senior's rule for these element counts."""
-    return cnt.get("C", 0) + cnt.get("Si", 0) + cnt.get("N", 0) / 2.0 + 1.0
+    return (cnt.get("C", 0) + cnt.get("Si", 0)
+            + (cnt.get("N", 0) + cnt.get("^N", 0)) / 2.0 + 1.0)
 
 
 def oxygen_ok(formula: str | dict[str, int]) -> tuple[bool, str | None]:
@@ -196,8 +231,8 @@ def oxygen_ok(formula: str | dict[str, int]) -> tuple[bool, str | None]:
     of formula space can hit ANY mass within tolerance (e.g. C3H5ClO17).
     Real HOMs (C10H18O7, O/C 0.7) and inorganic acids (H2SO4, HNO3) pass."""
     cnt = formula if isinstance(formula, dict) else parse_formula(formula)
-    skeleton = (cnt.get("C", 0) + cnt.get("N", 0) + cnt.get("S", 0)
-                + cnt.get("P", 0))
+    skeleton = (cnt.get("C", 0) + cnt.get("N", 0) + cnt.get("^N", 0)
+                + cnt.get("S", 0) + cnt.get("P", 0))
     cap = 2 * skeleton + 4
     O = cnt.get("O", 0)
     if O > cap:
@@ -224,10 +259,11 @@ def dbe_ok(formula: str | dict[str, int], tol: float = 1e-9) -> tuple[bool, str 
 # Theoretical neutral-formula grid
 # ---------------------------------------------------------------------------
 def parse_ranges(s: str) -> dict[str, tuple[int, int]]:
-    """'C0-30 H0-60 O0-15 N0-5 Br0-2' -> {'C':(0,30), ...}."""
+    """'C0-30 H0-60 O0-15 N0-5 Br0-2' -> {'C':(0,30), ...}. A caret element
+    ('^N0-2') is accepted for labelled-reagent grids."""
     out: dict[str, tuple[int, int]] = {}
     for tok in s.split():
-        m = re.match(r"([A-Z][a-z]?)(\d+)-(\d+)", tok)
+        m = re.match(r"(\^?[A-Z][a-z]?)(\d+)-(\d+)", tok)
         if m:
             out[m.group(1)] = (int(m.group(2)), int(m.group(3)))
     return out
