@@ -330,6 +330,43 @@ check("reagent-N: terpene C10H16 [M+NH4]+ KEPT (it has its own [M+H]+)",
 check("reagent-N: oxygenated C6H10O2 [M+NH4]+ untouched", ledrn.loc[4, "neutral_formula"] == "C6H10O2")
 
 
+# ---- ¹⁵N-nitrate isobar re-read (covalent organonitrate [M-H]- -> chamber ¹⁴NO₃ cluster) ----
+lednc = pd.DataFrame([
+    # C10H15NO6 [M-H]- : parent X = C10H14O3, present in BOTH channels below -> re-read as cluster
+    dict(role="M0", neutral_formula="C10H15NO6", adduct="[M-H]-",    tier="Assigned",  commentary="", ion_formula="C10H14NO6-", dbe=4.0, confidence="Good"),
+    dict(role="M0", neutral_formula="C10H14O3",  adduct="[M-H]-",    tier="Assigned",  commentary="", ion_formula="C10H13O3-",  dbe=4.0, confidence="Good"),   # parent via [M-H]-
+    dict(role="M0", neutral_formula="C10H14O3",  adduct="[M+^NO3]-", tier="Assigned",  commentary="", ion_formula="C10H14NO6-",dbe=4.0, confidence="Good"),   # parent via ¹⁵N cluster
+    # C5H9NO7 [M-H]- : parent X = C5H8O4, present ONLY via [M-H]- (lenient bar -> still re-read)
+    dict(role="M0", neutral_formula="C5H9NO7",   adduct="[M-H]-",    tier="Candidate", commentary="", ion_formula="C5H8NO7-",   dbe=2.0, confidence="Low"),
+    dict(role="M0", neutral_formula="C5H8O4",    adduct="[M-H]-",    tier="Assigned",  commentary="", ion_formula="C5H7O4-",    dbe=2.0, confidence="Good"),   # parent via [M-H]-
+    # C6H9NO7 [M-H]- : parent X = C6H8O4 NOT present anywhere -> keep covalent organonitrate
+    dict(role="M0", neutral_formula="C6H9NO7",   adduct="[M-H]-",    tier="Assigned",  commentary="", ion_formula="C6H8NO7-",   dbe=3.0, confidence="Good"),
+    # a genuine ¹⁵N covalent product (^N present) -> never touched
+    dict(role="M0", neutral_formula="C10H15^NO6",adduct="[M-H]-",    tier="Assigned",  commentary="", ion_formula="C10H14^NO6-",dbe=4.0, confidence="Good"),
+])
+outnc = CU.relabel_nitrate_clusters(lednc, log=lambda *a: None)
+check("nitrate: 2 organonitrates re-read as ¹⁴NO₃ clusters", outnc == {"nitrate_cluster_relabeled": 2}, outnc)
+check("nitrate: C10H15NO6 [M-H]- -> C10H14O3 [M+NO3]- (both-channel parent), tier preserved",
+      lednc.loc[0, "neutral_formula"] == "C10H14O3" and lednc.loc[0, "adduct"] == "[M+NO3]-"
+      and lednc.loc[0, "ion_formula"] == "C10H14NO6-" and lednc.loc[0, "tier"] == "Assigned")
+check("nitrate: C5H9NO7 [M-H]- -> C5H8O4 [M+NO3]- ([M-H]--only parent, lenient), tier preserved",
+      lednc.loc[3, "neutral_formula"] == "C5H8O4" and lednc.loc[3, "adduct"] == "[M+NO3]-"
+      and lednc.loc[3, "tier"] == "Candidate")
+check("nitrate: uncorroborated C6H9NO7 kept as covalent organonitrate",
+      lednc.loc[5, "neutral_formula"] == "C6H9NO7" and lednc.loc[5, "adduct"] == "[M-H]-")
+check("nitrate: real ¹⁵N covalent product (^N) untouched",
+      lednc.loc[6, "neutral_formula"] == "C10H15^NO6" and lednc.loc[6, "adduct"] == "[M-H]-")
+check("nitrate: parent rows themselves untouched",
+      lednc.loc[1, "adduct"] == "[M-H]-" and lednc.loc[2, "adduct"] == "[M+^NO3]-"
+      and lednc.loc[4, "adduct"] == "[M-H]-")
+# no-op when no parents present
+lednc2 = pd.DataFrame([
+    dict(role="M0", neutral_formula="C6H9NO7", adduct="[M-H]-", tier="Assigned", commentary="", ion_formula="C6H8NO7-", dbe=3.0),
+])
+check("nitrate: no corroborating parents -> no-op",
+      CU.relabel_nitrate_clusters(lednc2, log=lambda *a: None) == {"nitrate_cluster_relabeled": 0})
+
+
 def test_all():
     assert FAIL == 0, f"{FAIL} checks failed"
 
