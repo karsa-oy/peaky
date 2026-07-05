@@ -267,6 +267,13 @@ _STAGES = [
     _Stage("relabel_reagent_n",
            lambda st: cleanup.relabel_reagent_n_adducts(st.led, log=st.log),
            safe=False, store=False),
+    # ¹⁵N-nitrate isobar arbitration: a covalent organonitrate [Y−H]- whose cluster
+    # parent X = Y−HNO₃ is independently detected is really the chamber-¹⁴NO₃ cluster
+    # [X+NO₃]- (exact isobar; ¹⁴NO₃ is off the labelled scoring grid). Tier preserved.
+    # No-op unless the run is the labelled-nitrate profile (label_isotope '^N').
+    _Stage("relabel_nitrate_clusters",
+           lambda st: cleanup.relabel_nitrate_clusters(st.led, log=st.log),
+           when=lambda st: st.label_isotope == "^N", safe=False, store=False),
     _Stage("demote_ionization",
            lambda st: cleanup.demote_implausible_ionization(st.led, log=st.log),
            safe=False, store=False),
