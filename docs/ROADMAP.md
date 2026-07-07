@@ -116,7 +116,7 @@ pip CLI + a portable Claude skill; **mascope-sdk is on PUBLIC PyPI (MIT) → now
 MCP** (built-in Bash, or the CLI in a terminal, is the host-exec path; the cowork `mcp__shell__run_command`
 is an author-sandbox artifact); NO3⁻ reagent to be added before ship → reagent profiles must become
 config-expandable; Orange Ur+Br shareable as the offline demo. Data path LIVE-VERIFIED via host Python
-(`mascope-assign list datasets` → 35; "Aleksei's workspace" → "<dataset>" → <sample-id>,
+(`mascope-assign list datasets` → 35; "<workspace>" → "<dataset>" → <sample-id>,
 961 peaks).
 - **Phase 0 DONE — installable.** `pyproject.toml` (PEP 621 / hatchling; deps pinned, mascope-sdk core,
   `[dev]`=pytest), `requirements.txt` lock, public LAZY `__init__.py` v0.3.0 (run / run_batch / run_pipeline
