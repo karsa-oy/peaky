@@ -1180,6 +1180,39 @@ s_de2 = P.run_pass0_known(None, "SID", led_de2, PROF_URO, ACFG,
                           log=lambda *a: None)
 check("pass0 still refuses a single-channel thiophosphate with no 34S envelope",
       s_de2["committed"] == 0, s_de2)
+# GENERALIZED: single channel + a 37Cl envelope (not 34S) also corroborates
+_mzCP = CH.ion_mz("C9H11Cl3NO3PS", "[M+H]+")   # chlorpyrifos (in the OTP list)
+def fake_cp_cl37(client, sid, formulas, *, mechanism_ids=None, **kw):
+    if "C9H11Cl3NO3PS" not in formulas:
+        return pd.DataFrame([])
+    base = _mal_row("C9H12Cl3NO3PS+", _mzCP, "cpH", "mH")
+    base["compound_formula"] = "C9H11Cl3NO3PS"
+    cl37 = dict(base); cl37.update(iso_label="37Cl", is_base=False,
+                                   theo_mz=_mzCP + 1.99705, sample_peak_id="cpCl37",
+                                   sample_peak_mz=_mzCP + 1.99705, iso_score=0.9)
+    return pd.DataFrame([base, cl37])
+led_cp = mk_ledger([("cpH", _mzCP, 9000.0), ("cpCl37", _mzCP + 1.99705, 3000.0)])
+s_cp = P.run_pass0_known(None, "SID", led_cp, PROF_URO, ACFG,
+                         ["[M+H]+", "[M+(CH4N2O)H]+"], score_fn=fake_cp_cl37,
+                         log=lambda *a: None)
+check("pass0 commits a single-channel thiophosphate via a 37Cl envelope (generalized)",
+      L.role_of(led_cp, "cpH") == L.ROLE_M0, s_cp)
+# 13C GUARD: a 13C line is NOT a diagnostic heteroatom isotope -> must NOT license off-grid P
+def fake_de_13c_only(client, sid, formulas, *, mechanism_ids=None, **kw):
+    if "C8H13O5PS2" not in formulas:
+        return pd.DataFrame([])
+    base = _mal_row("C8H14O5PS2+", _mzDE, "deH", "mH")
+    base["compound_formula"] = "C8H13O5PS2"
+    c13 = dict(base); c13.update(iso_label="13C", is_base=False,
+                                 theo_mz=_mzDE + 1.00336, sample_peak_id="deC13",
+                                 sample_peak_mz=_mzDE + 1.00336, iso_score=0.9)
+    return pd.DataFrame([base, c13])
+led_13c = mk_ledger([("deH", _mzDE, 9000.0), ("deC13", _mzDE + 1.00336, 800.0)])
+s_13c = P.run_pass0_known(None, "SID", led_13c, PROF_URO, ACFG,
+                          ["[M+H]+", "[M+(CH4N2O)H]+"], score_fn=fake_de_13c_only,
+                          log=lambda *a: None)
+check("pass0 refuses a single-channel thiophosphate corroborated only by 13C (13C guard)",
+      s_13c["committed"] == 0, s_13c)
 
 # ---------- selection prior: a reference-list neutral wins a near-tie ----------
 sp = pd.DataFrame([

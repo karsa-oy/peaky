@@ -169,6 +169,16 @@ peaks  ──► resolve('auto', peaks)              name/alias ──► resolv
 - **normaliser** — `reagent` divides traces by a reagent-ion signal; `tic` divides
   by total ion current (used when the reagent ions sit below the acquisition
   window, e.g. ¹⁵N-nitrate / uronium).
+  - **UR normalises on TIC** because a positive urea-CIMS spectrum starts at ~m/z 122
+    and therefore *excludes* the 61/121 uronium reagent ions — there is no in-window
+    reagent signal to divide by.
+  - **The uronium reagent is essentially flat over the diurnal cycle** (measured on a
+    one ambient urea-CIMS batch, 2026-07-07: m/z 61 monomer ~5% amplitude, m/z 121 dimer ~2%,
+    and the dimer even weakly *anti*-correlates with the flat-panel common-mode
+    ~15:00 afternoon wave). Consequence: even if the reagent were in-window,
+    reagent-normalisation would **not** remove that afternoon common-mode wave — a flat
+    divisor can't cancel a varying signal. That wave is therefore **real ambient/
+    environmental signal**, not a reagent-flow or detection-sensitivity artifact.
 
 ---
 

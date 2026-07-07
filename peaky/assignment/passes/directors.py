@@ -233,13 +233,16 @@ def run_pass0_known(
         & scored["sample_peak_id"].notna()
         & (pd.to_numeric(scored["iso_score"], errors="coerce").fillna(0) > 0.4)
     ]
-    # organothiophosphates carry S -> a matched ³⁴S satellite is INDEPENDENT
-    # isotope corroboration that the pure phosphate esters (monoisotopic in every
-    # atom) lack. It substitutes for the >=2-channel requirement below, so a
-    # single-channel dithioate with a confirmed ³⁴S envelope (e.g. des-ethyl
-    # malathion, seen only as [M+H]+) can still commit.
-    s34_confirmed = set(
-        kids[kids["iso_label"].astype(str).str.contains("34S", na=False)][
+    # A matched DIAGNOSTIC heavy-isotope satellite (³⁴S / ³⁷Cl / ⁸¹Br) is
+    # INDEPENDENT corroboration that a pure phosphate ester (monoisotopic in every
+    # atom) lacks: the envelope both confirms the heteroatom count and refutes a
+    # single-channel mass coincidence, so it substitutes for the >=2-channel
+    # requirement below (e.g. des-ethyl malathion, seen only as [M+H]+, is ³⁴S-
+    # confirmed). ¹³C is DELIBERATELY EXCLUDED -- every carbon-bearing formula has
+    # a ¹³C line, so it refutes nothing and must never license an off-grid P.
+    _DIAG_ISO = ("34S", "37Cl", "81Br")
+    iso_confirmed = set(
+        kids[kids["iso_label"].astype(str).str.contains("|".join(_DIAG_ISO), na=False)][
             "compound_formula"
         ].unique()
     )
@@ -278,22 +281,22 @@ def run_pass0_known(
             fam, lbl = label_of[r["compound_formula"]]
             # organophosphates are monoisotopic in P -> require >=2 ion channels
             # (e.g. [M+H]+ AND [M+(urea)H]+) before locking, since there is no
-            # isotope twin to confirm a single-channel mass coincidence. EXCEPT
-            # organothiophosphates, whose matched ³⁴S envelope is an independent
-            # corroboration that stands in for the 2nd channel.
-            _s34_ok = (
-                fam == "organothiophosphate"
-                and r["compound_formula"] in s34_confirmed
-            )
+            # isotope twin to confirm a single-channel mass coincidence. The one
+            # accepted substitute for the 2nd channel is a confirmed DIAGNOSTIC
+            # heavy-isotope envelope (³⁴S / ³⁷Cl / ⁸¹Br) -- independent evidence a
+            # phosphate ester cannot forge. Generic across families (a chlorinated
+            # thiophosphate qualifies via ³⁷Cl, not just malathion via ³⁴S); ¹³C is
+            # excluded upstream in `iso_confirmed`.
+            _iso_ok = r["compound_formula"] in iso_confirmed
             if (
                 fam in ("organophosphate", "organothiophosphate")
                 and ope_channels.get(r["compound_formula"], 0) < 2
-                and not _s34_ok
+                and not _iso_ok
             ):
                 log(
                     f"[pass0] skip {r['compound_formula']} @{float(r['sample_peak_mz']):.4f}: "
-                    f"single ion channel, no ³⁴S envelope (P needs >=2 channels "
-                    f"or a confirmed ³⁴S twin to corroborate)"
+                    f"single ion channel, no diagnostic-isotope (³⁴S/³⁷Cl/⁸¹Br) "
+                    f"envelope (P needs >=2 channels or an isotope twin to corroborate)"
                 )
                 continue
             tag = (
@@ -387,7 +390,8 @@ def run_pass0_known(
                         + (
                             f"{ope_channels.get(r['compound_formula'], 0)} ion channels"
                             if ope_channels.get(r["compound_formula"], 0) >= 2
-                            else "a confirmed ³⁴S isotope envelope (single channel)"
+                            else "a confirmed diagnostic-isotope (³⁴S/³⁷Cl/⁸¹Br) "
+                            "envelope (single channel)"
                         )
                         if fam == "organothiophosphate"
                         else "; perfluorocarboxylic acid (F off the grid); "
