@@ -1112,6 +1112,75 @@ s_ope1 = P.run_pass0_known(None, "SID", led_ope1, PROF_URO, ACFG,
 check("pass0 refuses a single-channel organophosphate (no cross-channel support)",
       s_ope1["committed"] == 0, s_ope1)
 
+# ---------- positive polarity: organothiophosphate pesticide family (malathion) ----
+check("_known_species(positive) carries the organothiophosphate family with malathion",
+      "organothiophosphate" in P._known_species("positive")
+      and "C10H19O6PS2" in P._known_species("positive")["organothiophosphate"])
+# malathion (C10H19O6PS2) seen in BOTH [M+H]+ and [M+(urea)H]+ -> committed
+_mzMH = CH.ion_mz("C10H19O6PS2", "[M+H]+")
+_mzMU = CH.ion_mz("C10H19O6PS2", "[M+(CH4N2O)H]+")
+def _mal_row(ion, mz, pid, mech):
+    return dict(compound_formula="C10H19O6PS2", compound_score=0.9, ion_formula=ion,
+                ion_score=0.9, iso_label="M0", is_base=True, theo_mz=mz,
+                rel_abundance=1.0, iso_score=0.9, sample_peak_id=pid,
+                sample_peak_mz=mz, sample_peak_intensity=5000.0, ppm_error=0.0,
+                abundance_error=0.0, mechanism_id=mech)
+def fake_mal2(client, sid, formulas, *, mechanism_ids=None, **kw):
+    if "C10H19O6PS2" not in formulas:
+        return pd.DataFrame([])
+    return pd.DataFrame([_mal_row("C10H20O6PS2+", _mzMH, "malH", "mH"),
+                         _mal_row("C11H24N2O7PS2+", _mzMU, "malU", "mU")])
+led_mal = mk_ledger([("malH", _mzMH, 5000.0), ("malU", _mzMU, 4000.0)])
+s_mal = P.run_pass0_known(None, "SID", led_mal, PROF_URO, ACFG,
+                          ["[M+H]+", "[M+(CH4N2O)H]+"], score_fn=fake_mal2,
+                          log=lambda *a: None)
+check("pass0 commits malathion across both ion channels (organothiophosphate)",
+      s_mal["committed"] == 2
+      and led_mal.loc[led_mal.peak_id == "malH", "neutral_formula"].iloc[0] == "C10H19O6PS2"
+      and led_mal.loc[led_mal.peak_id == "malH", "method"].iloc[0] == "known:organothiophosphate", s_mal)
+# single-channel malathion -> NOT committed (P needs >=2 channels)
+def fake_mal1(client, sid, formulas, *, mechanism_ids=None, **kw):
+    if "C10H19O6PS2" not in formulas:
+        return pd.DataFrame([])
+    return pd.DataFrame([_mal_row("C10H20O6PS2+", _mzMH, "malH", "mH")])
+led_mal1 = mk_ledger([("malH", _mzMH, 5000.0)])
+s_mal1 = P.run_pass0_known(None, "SID", led_mal1, PROF_URO, ACFG,
+                           ["[M+H]+", "[M+(CH4N2O)H]+"], score_fn=fake_mal1,
+                           log=lambda *a: None)
+check("pass0 refuses a single-channel organothiophosphate (no cross-channel support)",
+      s_mal1["committed"] == 0, s_mal1)
+# single channel BUT a matched 34S envelope -> commits (isotope stands in for 2nd channel)
+_mzDE = CH.ion_mz("C8H13O5PS2", "[M+H]+")
+def fake_de_s34(client, sid, formulas, *, mechanism_ids=None, **kw):
+    if "C8H13O5PS2" not in formulas:
+        return pd.DataFrame([])
+    base = _mal_row("C8H14O5PS2+", _mzDE, "deH", "mH")
+    base["compound_formula"] = "C8H13O5PS2"
+    s34 = dict(base); s34.update(iso_label="34S", is_base=False,
+                                 theo_mz=_mzDE + 1.99579, sample_peak_id="deS34",
+                                 sample_peak_mz=_mzDE + 1.99579, iso_score=0.9)
+    return pd.DataFrame([base, s34])
+led_de = mk_ledger([("deH", _mzDE, 9000.0), ("deS34", _mzDE + 1.99579, 800.0)])
+s_de = P.run_pass0_known(None, "SID", led_de, PROF_URO, ACFG,
+                         ["[M+H]+", "[M+(CH4N2O)H]+"], score_fn=fake_de_s34,
+                         log=lambda *a: None)
+check("pass0 commits a single-channel organothiophosphate with a confirmed 34S envelope",
+      L.role_of(led_de, "deH") == L.ROLE_M0
+      and led_de.loc[led_de.peak_id == "deH", "neutral_formula"].iloc[0] == "C8H13O5PS2", s_de)
+# same single channel but NO 34S match -> still refused (guards the phosphate esters)
+def fake_de_nos34(client, sid, formulas, *, mechanism_ids=None, **kw):
+    if "C8H13O5PS2" not in formulas:
+        return pd.DataFrame([])
+    base = _mal_row("C8H14O5PS2+", _mzDE, "deH", "mH")
+    base["compound_formula"] = "C8H13O5PS2"
+    return pd.DataFrame([base])
+led_de2 = mk_ledger([("deH", _mzDE, 9000.0)])
+s_de2 = P.run_pass0_known(None, "SID", led_de2, PROF_URO, ACFG,
+                          ["[M+H]+", "[M+(CH4N2O)H]+"], score_fn=fake_de_nos34,
+                          log=lambda *a: None)
+check("pass0 still refuses a single-channel thiophosphate with no 34S envelope",
+      s_de2["committed"] == 0, s_de2)
+
 # ---------- selection prior: a reference-list neutral wins a near-tie ----------
 sp = pd.DataFrame([
     iso_row(sample_peak_id="Z", compound_formula="C8H12O4", compound_score=0.88,
