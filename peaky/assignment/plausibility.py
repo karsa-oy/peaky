@@ -26,7 +26,7 @@ import pandas as pd
 from peaky.chem import chemistry as C
 from peaky.assignment import ledger as L
 
-__version__ = "0.2.0"   # + Stage 3 demote hardening (O-monster, carbon-cluster)
+__version__ = "0.3.0"   # carbon-cluster rule: F no longer exempts (F counts as H)
 
 # thresholds (loose on purpose — flag the clear coincidences only)
 N_HIGH_OC = 3       # N>=3 combined with...
@@ -52,7 +52,7 @@ F_HIGH = 4          # F>=this -> heavily fluorinated; F is monoisotopic, so the 
 #     from the degeneracy audit; the plain reason-string oracle reports the ratio.)
 #
 #   * CARBON-CLUSTER: DBE/C >= DBE_PER_C_MONSTER (equivalently H <= N+2) on an
-#     F-free C>=2 skeleton is a bare-carbon mass coincidence (e.g. C5H2, C24H2 --
+#     C>=2 skeleton is a bare-carbon mass coincidence (e.g. C5H2, C24H2, C12HF --
 #     DBE/C >= 1). H-poor-but-DBE/C<1 skeletons like C27H8 (0.89) are NOT this gate;
 #     they are the separate H/C<0.35 carbon-rich demote in cleanup.py.
 #     A HALF-INTEGER DBE is EXEMPT: radicals carry half-integer DBE, whereas the
@@ -61,7 +61,7 @@ F_HIGH = 4          # F>=this -> heavily fluorinated; F is monoisotopic, so the 
 #     umbelliferone (0.78), furfural (0.80) and phthalic anhydride (0.88) are real
 #     aromatics that sit below 1.0 and MUST be spared.
 OC_MONSTER = 1.3            # O/C strictly above this -> oxygen-lattice monster
-DBE_PER_C_MONSTER = 1.0     # DBE/C at or above this (F-free, C>=2) -> carbon cluster
+DBE_PER_C_MONSTER = 1.0     # DBE/C at or above this (C>=2) -> carbon cluster
 
 
 def _oc(cnt: dict) -> float:
@@ -77,11 +77,17 @@ def is_oxygen_monster(cnt: dict) -> bool:
 
 
 def is_carbon_cluster(cnt: dict) -> bool:
-    """F-free C>=2 skeleton whose DBE/C >= DBE_PER_C_MONSTER, EXCLUDING radicals
-    (half-integer DBE are exempt). H <= N+2 is the equivalent integer test, but we
-    compute the real DBE so the half-integer radical exemption is exact."""
+    """C>=2 skeleton whose DBE/C >= DBE_PER_C_MONSTER, EXCLUDING radicals
+    (half-integer DBE are exempt). H+halogen <= N+2 is the equivalent integer
+    test (C.dbe already counts F/Cl/Br like H), but we compute the real DBE so
+    the half-integer radical exemption is exact. F-bearing skeletons are NOT
+    exempt: dbe() counting F as an H-equivalent means real perfluoro classes
+    (PFCA DBE/C~0.2) can never trip this gate, while C12HF / C25H3F3 style
+    bare-carbon fits (DBE/C~1) previously slipped through on an F-free clause
+    (2026-07-04 [15N]-nitrate run: 15 such F-decorated clusters tier-Assigned).
+    """
     nc = cnt.get("C", 0)
-    if nc < 2 or cnt.get("F", 0) > 0:
+    if nc < 2:
         return False
     d = C.dbe(cnt)
     if abs(d - round(d)) > 1e-9:       # half-integer DBE -> radical, EXEMPT
@@ -244,7 +250,7 @@ def demote_oxygen_monsters(ledger: pd.DataFrame, *, audit=None, log=print) -> di
 
 def demote_carbon_clusters(ledger: pd.DataFrame, *, audit=None, log=print) -> dict:
     """Demote M0 assignments resting on a bare-carbon skeleton: DBE/C >=
-    DBE_PER_C_MONSTER (H<=N+2), F-free, C>=2, with the HALF-INTEGER-DBE radical
+    DBE_PER_C_MONSTER (H+halogen<=N+2), C>=2, with the HALF-INTEGER-DBE radical
     EXEMPTION (radicals carry half-integer DBE; carbon-cluster monsters are
     integer-DBE). This is distinct from the H/C<0.35 carbon-rich demote in
     cleanup.py (kept unchanged): the two together cover the carbon-coincidence
@@ -258,14 +264,14 @@ def demote_carbon_clusters(ledger: pd.DataFrame, *, audit=None, log=print) -> di
         nc = cnt.get("C", 0)
         dpc = C.dbe(cnt) / nc
         ni = _iso_count(ledger.at[i, "isotopologues"]) if "isotopologues" in ledger.columns else 0
-        reason = (f"carbon cluster (DBE/C {dpc:.2f} >= {DBE_PER_C_MONSTER}, H<=N+2, "
-                  "F-free) -- bare-carbon mass coincidence, not a molecule")
+        reason = (f"carbon cluster (DBE/C {dpc:.2f} >= {DBE_PER_C_MONSTER}, "
+                  "H+halogen<=N+2) -- bare-carbon mass coincidence, not a molecule")
         note = ledger.at[i, "degeneracy_note"] if "degeneracy_note" in ledger.columns else None
         _demote_row(ledger, i, reason=reason, audit=audit,
                     evidence=f"DBE/C={dpc:.2f}", degeneracy_note=note, n_iso=ni)
         n += 1
     log(f"[plausibility] demoted {n} carbon clusters (DBE/C>={DBE_PER_C_MONSTER}, "
-        "F-free, integer-DBE)")
+        "integer-DBE)")
     return {"c_cluster_demoted": n}
 
 

@@ -114,20 +114,30 @@ def split_categories(ledger: pd.DataFrame) -> dict[str, pd.DataFrame]:
 
 
 def ppm_points(ledger: pd.DataFrame) -> pd.DataFrame:
-    """The panel-(b) points: Assigned + Candidate M0 rows that carry a finite
-    ppm_error. Columns [mz, ppm_error, tier] (tier normalised). Empty when the
-    ledger has no calibrated M0 rows."""
+    """The panel-(b) points: Assigned + Candidate M0 rows that carry a finite mass
+    error. Columns [mz, ppm_error, tier] (tier normalised). Prefers the CALIBRATED
+    error `ppm_error_cal` (per-file offset removed; tiers.stamp_calibrated_ppm) when
+    present, falling back to the raw `ppm_error`; the chosen basis is flagged in
+    ``.attrs['calibrated']``. Empty when the ledger has no calibrated M0 rows."""
     cols = ["mz", "ppm_error", "tier"]
     if not all(c in ledger.columns for c in ("mz", "ppm_error", "role")):
         return pd.DataFrame(columns=cols)
+    val = "ppm_error"
+    if "ppm_error_cal" in ledger.columns \
+            and pd.to_numeric(ledger["ppm_error_cal"], errors="coerce").notna().any():
+        val = "ppm_error_cal"
     m0 = ledger[ledger["role"] == L.ROLE_M0].copy()
     m0["tier"] = m0.get("tier", pd.Series(index=m0.index)).map(_norm_tier)
     m0 = m0[m0["tier"].isin((TIER_ASSIGNED, TIER_CANDIDATE))]
-    m0 = m0[pd.to_numeric(m0["ppm_error"], errors="coerce").notna()]
+    m0 = m0[pd.to_numeric(m0[val], errors="coerce").notna()]
     if not len(m0):
-        return pd.DataFrame(columns=cols)
-    m0["ppm_error"] = pd.to_numeric(m0["ppm_error"], errors="coerce")
-    return m0[cols].reset_index(drop=True)
+        out = pd.DataFrame(columns=cols)
+        out.attrs["calibrated"] = (val == "ppm_error_cal")
+        return out
+    m0["ppm_error"] = pd.to_numeric(m0[val], errors="coerce")
+    out = m0[cols].reset_index(drop=True)
+    out.attrs["calibrated"] = (val == "ppm_error_cal")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -197,9 +207,16 @@ def render_qc(ledger: pd.DataFrame, path: str, *, title: str = "", dpi: int = 15
                      zorder=4, label="linear trend")
             trend_txt = (f"trend: {slope * 1000:+.2f} mppm/Th · "
                          f"intercept {intercept:+.2f} ppm · median {np.median(y):+.2f}")
+    calibrated = bool(pts.attrs.get("calibrated"))
+    cal_mu = ledger.attrs.get("cal_mu")
+    if calibrated and cal_mu is not None and trend_txt is not None:
+        trend_txt += f" · offset removed {cal_mu:+.2f} ppm (raw median)"
     axb.set_xlabel("m/z", fontsize=9)
-    axb.set_ylabel("mass error (ppm)", fontsize=9)
-    axb.set_title("(b) ppm mass error vs m/z — Assigned + Candidate (calibration drift)",
+    axb.set_ylabel("mass error (ppm)" + (" — calibrated" if calibrated else ""),
+                   fontsize=9)
+    axb.set_title("(b) ppm mass error vs m/z — Assigned + Candidate "
+                  + ("(per-file offset removed)" if calibrated
+                     else "(calibration drift)"),
                   loc="left", fontsize=10.5, color=INK)
     axb.grid(alpha=0.22)
     axb.tick_params(labelsize=8)

@@ -73,14 +73,23 @@ brightest full per-sample ledger        run artifacts (merged_ledger.csv,
    spelling.
 
 3. **ppm points** (`ppm_points`). Assigned + Candidate M0 rows carrying a finite
-   `ppm_error` → panel (b).
+   mass error → panel (b). The panel plots **`ppm_error_cal`** (the *calibrated*
+   ppm) when that column is present, falling back to raw `ppm_error` otherwise.
+   `ppm_error_cal = ppm_error − cal_mu`, where `cal_mu` is the robust **offset**
+   (median) of the corroborated CHO/CHON core from `tiers._calibrate` — so the
+   cloud is centred on the run's own drift rather than on 0. Raw `ppm_error` is
+   kept alongside for provenance.
 
 4. **Render + trend** (`render_qc`). Panel (a) draws the categories in `CATEGORIES`
    order (grey cloud underneath, `zorder` 1; coloured assignments on top). Panel
-   (b) plots ppm vs m/z with a 0-line and, when ≥ 2 points span m/z, a
-   `np.polyfit` degree-1 **linear trend** — the annotation reports
-   `slope·1000` **mppm/Th**, the intercept (ppm), and the median. A sloped/offset
-   trend is the calibration-drift read the tier engine self-calibrates from.
+   (b) plots the calibrated ppm vs m/z with a 0-line and, when ≥ 2 points span m/z,
+   a `np.polyfit` degree-1 **linear trend** — the annotation reports
+   `slope·1000` **mppm/Th**, the intercept (ppm), and the median. Because the
+   points are already offset-corrected, a well-calibrated run sits on the 0-line:
+   e.g. the brightest Ur file's Assigned ppm median moves +0.125 → +0.011 (mean
+   +0.121 → +0.007) and |ppm| > 0.5 outliers drop 133 → 118; Br's median moves
+   −0.13 → ~+0.02. A residual slope/offset is the calibration-drift read the tier
+   engine self-calibrates from.
 
 ### B. The PDF report (`pdf_report.py`)
 
@@ -123,6 +132,9 @@ brightest full per-sample ledger        run artifacts (merged_ledger.csv,
 | `CATEGORIES` | 5 tier/role tuples | panel-(a) sets, colours, markers, draw order (grey cloud `zorder` 1) |
 | `PPM_TIER_COLORS` | Assigned / Candidate | panel-(b) colours |
 | `mass_defect` range | [−0.5, 0.5) | `mz − round(mz)` |
+| `cal_mu` | per-run (ppm) | robust offset of the corroborated CHO/CHON core (`tiers._calibrate`); `ppm_error_cal = ppm_error − cal_mu` |
+| `CAL_SIGMA_FLOOR` | 0.15 | floor on the core's `1.4826·MAD` sigma (`tiers._calibrate`) |
+| `CAL_MIN_N` | 20 | min core peaks required before an offset is fit |
 | `A4` | (8.27, 11.69) in | portrait page size |
 | `SECTIONS` | 13 functions | the ordered report spine (cover…assignments_table) |
 | `_image_page` `dpi` / `src_dpi` | 200 / 170 | fit-to-A4 raster dpi / native page-size dpi |
@@ -137,9 +149,11 @@ brightest full per-sample ledger        run artifacts (merged_ledger.csv,
 
 - **mass defect** — `mz − round(mz)`; the y-axis of panel (a). Assigned points
   trace the CH/CHO band; the grey cloud shows where unexplained signal sits.
-- **ppm trend** — degree-1 `polyfit` of `ppm_error` vs `mz`: `slope` (reported as
-  mppm/Th), `intercept` (ppm at m/z 0), and the `median` ppm; the calibration-drift
-  diagnostic.
+- **ppm trend** — degree-1 `polyfit` of the plotted ppm (`ppm_error_cal` when
+  present, else `ppm_error`) vs `mz`: `slope` (reported as mppm/Th), `intercept`
+  (ppm at m/z 0), and the `median` ppm; the calibration-drift diagnostic.
+- **`ppm_error_cal`** — `ppm_error − cal_mu`, the offset-calibrated mass error
+  panel (b) prefers; raw `ppm_error` is retained for provenance.
 - **`role_signal_frac`** — signal share split analyte / reagent / unexplained; the
   honest coverage number behind the headline.
 - **`composition`** — neutral counts by CHO/CHON/CHOS backbone (Si/F/halogen folded
@@ -181,6 +195,16 @@ brightest full per-sample ledger        run artifacts (merged_ledger.csv,
   [`ARCHITECTURE.md §7`](ARCHITECTURE.md#7-reproducibility--provenance)).
 - **Compression is best-effort** — no optional deps, or an under-`min_mb` input, is
   a silent no-op that never touches the full report.
+- **Calibration is offset-only, and display/provenance only.** `cal_mu` is a single
+  robust *median* offset — a per-file **linear (slope)** term was tested and
+  rejected (the slope is tiny; on Br it merely widens the window). The calibrated
+  ppm changes only what panel (b) plots and the `ppm_error_cal` column; it drives
+  **no tier changes** (tiering was already calibration-aware, centring its z-gate
+  on the same robust median rather than 0).
+- **The QC figure is one file, not the whole run.** It is always sourced from the
+  single **brightest** representative ledger (`ctx["bright_ledger"]`,
+  `pdf_report.py:111`), so `cal_mu` and every panel-(b) number are that one file's
+  drift — not a run-wide average.
 
 ---
 

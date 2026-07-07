@@ -27,6 +27,11 @@ class ReagentProfile:
     # isotopic purity of a labelled reagent (0.98 = 98% 15N); threaded to local
     # scoring's predict_isotopes for '^X' adducts
     purity: float | None = None
+    # labelled-reagent covalent-product rescue (labeled.py): the caret heavy
+    # isotope a product can carry ('^N' = 15N organonitrate) and the max count.
+    # None => no rescue (every unlabelled profile).
+    label_isotope: str | None = None
+    label_max: int = 2
     aliases: tuple = field(default_factory=tuple)
 
 
@@ -90,6 +95,8 @@ NO3_15N = ReagentProfile(
     detect_adduct="[M+^NO3]-",
     context="ambient-air",
     purity=0.98,  # ~98% 15N reagent
+    label_isotope="^N",   # covalent 15N products (organonitrates) rescued by labeled.py
+    label_max=2,          # up to di-organonitrate
     aliases=(
         "no3-15n",
         "15no3",

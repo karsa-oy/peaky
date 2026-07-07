@@ -387,8 +387,11 @@ _DIFF_TO_ADDUCT = {
 def _mech_to_adduct(row) -> str:
     """Adduct label from the exact ion-vs-compound element difference."""
     ion = str(row.get("ion_formula") or "")
-    ci = C.parse_formula(ion)
-    cc = C.parse_formula(str(row.get("compound_formula") or ""))
+    # fold heavy isotopes ('^N' -> 'N') before the element diff so a 15N reagent
+    # cluster reads the same (N+1, O+3) diff as 14N; the '^N' marker in the raw
+    # ion string then upgrades the label to the heavy adduct just below.
+    ci = C.fold_isotopes(C.parse_formula(ion))
+    cc = C.fold_isotopes(C.parse_formula(str(row.get("compound_formula") or "")))
     diff = tuple(
         sorted(
             (el, ci.get(el, 0) - cc.get(el, 0))

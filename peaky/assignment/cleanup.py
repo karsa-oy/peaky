@@ -259,6 +259,12 @@ def recover_isotope_gated(client, sample_id, ledger, profile, cfg, *,
         return {"recovered": 0}
     fr = score_fn(client, sample_id, sorted(allf), allow_partial=True,
                   mechanism_ids=getattr(cfg, "mechanism_ids", None))
+    # a no-match response can be a bare empty frame with NO columns (seen when
+    # probing negative halogen adducts against a positive run) -- it
+    # must not crash run_cleanup, which would skip every later cleanup step
+    if fr is None or not len(fr) or "sample_peak_id" not in fr.columns:
+        log("[cleanup] recovery: oracle returned no scoreable matches")
+        return {"recovered": 0}
     fr = fr[fr["sample_peak_id"].notna() & (fr["sample_peak_intensity"] > 0)]
 
     recovered = 0
@@ -546,13 +552,16 @@ HC_CARBON_MAX = 0.35   # H/C below this (F-free) -> implausibly carbon-rich skel
 
 def demote_implausible_carbon(ledger: pd.DataFrame, *, hc_max: float = HC_CARBON_MAX,
                               log=print) -> dict:
-    """Demote M0 assignments resting on an implausibly carbon-rich skeleton: H/C
-    below `hc_max` with NO fluorine (fluorine-rich low H/C is the F-monster case,
-    handled by demote_unconfirmed_fluorine). A bare carbon cluster such as C27H8 /
-    C36H6O is a high-mass mass-coincidence, not a real organic-aerosol molecule
-    (real SOA sits at H/C ~1-2). Demote Assigned->Candidate and flag
-    below_assignability. F-free, C>=2 only. Same arithmetic as the plausibility
-    'carbon-rich' flag, applied to the tier so the demotion is consistent."""
+    """Demote M0 assignments resting on an implausibly carbon-rich skeleton:
+    (H+F)/C below `hc_max`. F counts as an H-equivalent rather than exempting
+    the formula: true perfluoro classes have high (H+F)/C (PFCA ~2, C6F6 =1)
+    and are spared, while an F-decorated bare-carbon fit (C16HF3O, (H+F)/C
+    0.25) no longer slips through on an F-free clause. F>=4 fluorine-monsters
+    are additionally handled by demote_unconfirmed_fluorine. A bare carbon
+    cluster such as C27H8 / C36H6O is a high-mass mass-coincidence, not a real
+    organic-aerosol molecule (real SOA sits at H/C ~1-2). Demote
+    Assigned->Candidate and flag below_assignability. C>=2 only. Same
+    arithmetic as the plausibility 'carbon-rich' flag."""
     n = 0
     has_ba = "below_assignability" in ledger.columns
     target = (ledger.index[ledger["role"] == L.ROLE_M0]
@@ -560,9 +569,9 @@ def demote_implausible_carbon(ledger: pd.DataFrame, *, hc_max: float = HC_CARBON
     for i in target:
         cnt = C.parse_formula(str(ledger.at[i, "neutral_formula"] or ""))
         nc = cnt.get("C", 0)
-        if nc < 2 or cnt.get("F", 0) > 0:
+        if nc < 2:
             continue
-        hc = cnt.get("H", 0) / nc
+        hc = (cnt.get("H", 0) + cnt.get("F", 0)) / nc   # F counts as H-equivalent
         if hc >= hc_max:
             continue
         if str(ledger.at[i, "tier"]) == "Assigned":
@@ -570,11 +579,11 @@ def demote_implausible_carbon(ledger: pd.DataFrame, *, hc_max: float = HC_CARBON
         if has_ba:
             ledger.at[i, "below_assignability"] = True
         if "commentary" in ledger.columns:
-            note = f"implausibly carbon-rich (H/C {hc:.2f}, F-free) -- likely mass coincidence"
+            note = f"implausibly carbon-rich ((H+F)/C {hc:.2f}) -- likely mass coincidence"
             prev = str(ledger.at[i, "commentary"] or "")
             ledger.at[i, "commentary"] = (prev + "; " + note) if prev and prev != "nan" else note
         n += 1
-    log(f"[cleanup] demoted {n} implausibly-carbon-rich M0 (H/C<{hc_max}, F-free)")
+    log(f"[cleanup] demoted {n} implausibly-carbon-rich M0 ((H+F)/C<{hc_max})")
     return {"c_demoted": n}
 
 
@@ -745,6 +754,110 @@ def relabel_reagent_n_adducts(ledger: pd.DataFrame, *, log=print) -> dict:
         n += 1
     log(f"[cleanup] re-read {n} hydrocarbon reagent-N-cluster adducts as [M+H]+ of an N-heterocycle")
     return {"reagent_n_relabeled": n}
+
+
+def _norm_formula(f) -> str:
+    """Canonicalise a neutral formula string (re-parse + re-format) so parent
+    lookups compare like-for-like regardless of element ordering."""
+    try:
+        return C.format_formula(C.parse_formula(str(f)))
+    except Exception:
+        return ""
+
+
+def relabel_nitrate_clusters(ledger: pd.DataFrame, *, log=print) -> dict:
+    """¹⁵N-nitrate isobar arbitration. In a ¹⁵N-NO₃⁻ CIMS run of a NOx-oxidation
+    experiment the chamber holds abundant *unlabelled* ¹⁴NO₃⁻; a highly-oxygenated
+    analyte X clusters with it to give [X+¹⁴NO₃]⁻ -- which is the EXACT same ion
+    (same composition, same mass) as the deprotonated covalent organonitrate [Y−H]⁻
+    with Y = X + HNO₃ (e.g. [C10H14O3+¹⁴NO₃]⁻ == C10H15NO6 [M−H]⁻). The formula
+    grid enumerates only the covalent reading (¹⁴NO₃ is deliberately NOT a scoring
+    channel for the labelled profile, to avoid an uncontrolled exact-isobar
+    competitor), so every ¹⁴NO₃ cluster is mislabeled as a covalent organonitrate.
+    Mass alone cannot separate the two.
+
+    Re-read [Y−H]⁻ (Y a covalent ¹⁴N-organonitrate: N≥1, O≥3, no ¹⁵N) as the cluster
+    [X+NO₃]⁻ when the parent X = Y − HNO₃ is INDEPENDENTLY present -- assigned
+    elsewhere as its own deprotonated [X−H]⁻ and/or as the ¹⁵N reagent cluster
+    [X+¹⁵NO₃]⁻. Either channel is accepted (the lenient corroboration bar: [X−H]⁻
+    proves X exists, [X+¹⁵NO₃]⁻ proves X clusters with nitrate; in a NOx run with a
+    ~98% ¹⁵N reagent the chamber ¹⁴NO₃⁻ cluster then vastly outweighs the ¹⁵N one).
+    Peaks whose parent is not independently seen keep the covalent organonitrate
+    label -- this IS a NOx run and genuine organonitrates are real products.
+
+    Tier is PRESERVED: the cluster reading rests on the SAME ion, mass and score as
+    the covalent one (exact isobar) plus the extra parent corroboration, so whatever
+    tier the covalent fit earned is exactly what the cluster reading deserves.
+
+    Gated by the caller on the labelled-nitrate profile (label_isotope '^N'); it is
+    only meaningful when ¹⁴NO₃ is off the scoring grid."""
+    if "neutral_formula" not in ledger.columns or "adduct" not in ledger.columns:
+        return {"nitrate_cluster_relabeled": 0}
+    # parents independently present, by channel (normalised neutral strings).
+    def _present(adduct):
+        rows = ledger.index[ledger["adduct"].astype(str) == adduct]
+        out = set()
+        for j in rows:
+            nf = _norm_formula(ledger.at[j, "neutral_formula"])
+            if nf and C.parse_formula(nf).get("C", 0) >= 1:
+                out.add(nf)
+        return out
+    parent_mh = _present("[M-H]-")
+    parent_clu15 = _present("[M+^NO3]-")
+    corroborated = parent_mh | parent_clu15
+    if not corroborated:
+        return {"nitrate_cluster_relabeled": 0}
+
+    has_conf = "confidence" in ledger.columns
+    target = (ledger.index[ledger["role"] == L.ROLE_M0]
+              if "role" in ledger.columns else ledger.index)
+    n = 0
+    for i in target:
+        if str(ledger.at[i, "adduct"]) != "[M-H]-":
+            continue
+        cnt = C.parse_formula(str(ledger.at[i, "neutral_formula"] or ""))
+        if cnt.get("^N", 0):                          # a real ¹⁵N covalent product, not a ¹⁴NO₃ cluster
+            continue
+        if cnt.get("C", 0) < 1 or cnt.get("N", 0) < 1 or cnt.get("O", 0) < 3:
+            continue                                   # not an organonitrate-ester reading
+        # parent X = Y − HNO₃ (drop one covalent nitrate ester: -H, -N, -3 O).
+        x = {e: cnt.get(e, 0) for e in set(cnt)}
+        x["H"] = x.get("H", 0) - 1
+        x["N"] = x.get("N", 0) - 1
+        x["O"] = x.get("O", 0) - 3
+        if any(x.get(e, 0) < 0 for e in ("H", "N", "O")):
+            continue
+        x = {e: v for e, v in x.items() if v > 0}
+        if not C.dbe_ok(x)[0] or not C.oxygen_ok(x)[0]:
+            continue                                   # X not a valid closed-shell neutral
+        xf = C.format_formula(x)
+        if xf not in corroborated:
+            continue                                   # parent not independently detected
+        via = ("[M-H]- + [M+^NO3]-" if (xf in parent_mh and xf in parent_clu15)
+               else "[M-H]-" if xf in parent_mh else "[M+^NO3]-")
+        ion = C.format_formula({**x, "N": x.get("N", 0) + 1, "O": x.get("O", 0) + 3}) + "-"
+        ledger.at[i, "neutral_formula"] = xf
+        ledger.at[i, "adduct"] = "[M+NO3]-"
+        if "ion_formula" in ledger.columns:
+            ledger.at[i, "ion_formula"] = ion
+        if "dbe" in ledger.columns:
+            ledger.at[i, "dbe"] = C.dbe(x)
+        if has_conf:
+            ledger.at[i, "confidence"] = "Good (¹⁴NO₃ cluster re-read)"
+        note = (f"re-read as [{xf}+NO₃]⁻ chamber-¹⁴NO₃ cluster: exact isobar of the "
+                f"covalent organonitrate [M−H]⁻, and the cluster parent {xf} is "
+                f"independently detected (via {via}); in a ¹⁵N-nitrate NOx run the "
+                "free chamber ¹⁴NO₃⁻ cluster dominates, so this is the ¹⁴NO₃ adduct, "
+                "not a covalent organonitrate (mass cannot distinguish them)")
+        if "commentary" in ledger.columns:
+            prev = str(ledger.at[i, "commentary"] or "")
+            ledger.at[i, "commentary"] = (prev + "; " + note) if prev and prev != "nan" else note
+        if "tier_reason" in ledger.columns:
+            ledger.at[i, "tier_reason"] = note
+        n += 1
+    log(f"[cleanup] re-read {n} covalent-organonitrate [M-H]- as chamber-¹⁴NO₃ clusters "
+        f"(corroborated parent)")
+    return {"nitrate_cluster_relabeled": n}
 
 
 def demote_implausible_ionization(ledger: pd.DataFrame, *, log=print) -> dict:

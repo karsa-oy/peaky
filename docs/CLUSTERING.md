@@ -68,13 +68,26 @@ All thresholds are the named constants from `cluster.py` (see §4).
 1. **Persistence filter** (`goodk`). A channel must have **≥ `MIN_POINTS` (8)**
    finite points to be correlatable at all.
 
-2. **Entry gate** — who is allowed into clustering:
-   `med ≥ FLOOR (200 cps)` **and** the channel is not a Si-contaminant.
-   There is **no cv gate** at entry — the assigned set is clustered on *shape*,
-   and cv is only reported, not used to admit/reject.
-   *(Optional: `cluster_batch(gate="episode", min_run=3)` swaps the median floor
-   for "detected in ≥ `min_run` consecutive bins". Default is `gate="median"`,
-   which reproduces historical output exactly.)*
+2. **Entry gate** — who is allowed into clustering. A channel must clear the
+   `gate` **and** not be a Si-contaminant. There is **no cv gate** at entry — the
+   assigned set is clustered on *shape*, and cv is only reported, not used to
+   admit/reject. Two gates are selectable via `cluster_batch(gate=…)`:
+
+   - **`median`** (default, `gate="median"`) — the intensity gate: enter iff
+     `nanmedian` of the channel ≥ `FLOOR_DEFAULT (200 cps)`. Reproduces historical
+     output exactly, but is blind to transients — because it keys on the *median*
+     of detected points it drops a sharp low-abundance burst (bright in only a few
+     bins, so its median stays below floor) while admitting a steady dim channel.
+
+   - **`episode`** (`gate="episode", min_run=3`) — the temporal gate: enter iff
+     the channel is **detected (nonzero) in ≥ `min_run` consecutive time bins**,
+     computed by `_longest_detected_run` (`clustering.py:39-51`, longest run of
+     consecutive detected bins). This is **intensity-agnostic**: it rescues sharp
+     low-abundance *episodes* (prompt accretion dimers, NPF bursts) that the median
+     floor would discard, while still rejecting sporadic single-bin spikes (a run
+     of length 1 never reaches `min_run`). It records nothing about brightness — a
+     channel that is faint but temporally coherent enters; a bright-but-flickery
+     one-bin blip does not.
 
 3. **Correlate** (`cluster.correlate`). Clip each trace to the smallest positive
    value, take `log10`, then a **Pearson correlation matrix** (`min_periods=8`)
@@ -96,11 +109,19 @@ All thresholds are the named constants from `cluster.py` (see §4).
 
 6. **Flat-family demotion** (`split_flat_clusters`). For each surviving family
    compute `cluster_flatness` = smoothed (window `SMOOTH_W` = 3)
-   **max ÷ median of the member-mean** trace. If **< `FLAT_CLUSTER_RANGE` (1.4)**
-   the family is demoted to flat background ("members correlate but the family as
-   a whole doesn't move"). Otherwise it is a **dynamic co-varying family**.
-   ⚠ This is a pure **magnitude** test — it measures *how much* the family moves,
-   **not when** (see §8).
+   **max ÷ median of the member-mean** trace. A family is demoted to flat
+   background when **either**: (a) `cluster_flatness < FLAT_CLUSTER_RANGE (1.4)`
+   over the whole run ("members correlate but the family as a whole doesn't
+   move"); **or** (b) it is flat once the leading **`SETTLE_FRAC` (0.18)**
+   equilibration window is dropped **AND** it **starts high**
+   (`_starts_high ≥ SETTLING_START_MIN`, 0.8 — i.e. it sits near its own peak in
+   the first bins and decays from t0). Case (b) is the instrument/reagent
+   **equilibration-settling signature**: a slow early drift that would otherwise
+   masquerade as family dynamics. The `_starts_high` guard is what keeps a **real
+   early event** (which rises from a low pre-event baseline) from being mistaken
+   for settling and demoted. Everything else is a **dynamic co-varying family**.
+   ⚠ The base test is a pure **magnitude** test — it measures *how much* the family
+   moves, **not when** (see §8).
 
 7. **Shape label** (`shape_of`). On the z-scored family mean, compare
    `mean(first 6)` vs `mean(last 6)` with gap 0.5 → `rise` / `fall` / `peak`,
@@ -108,7 +129,10 @@ All thresholds are the named constants from `cluster.py` (see §4).
 
 8. **Big standalone changers** (`big_changers`). Channels in the *remainder*
    (didn't join a family) whose smoothed max/median is **≥ `BIG_CHANGE_FOLD`
-   (3.0)** are surfaced individually — a large lone change with no co-movers.
+   (3.0)** are surfaced individually — a large lone change with no co-movers. A
+   **bright** channel (`median ≥ BIG_CHANGE_BRIGHT_CPS`, 1000 cps) surfaces at the
+   lower **`BIG_CHANGE_FOLD_BRIGHT` (2.0)** fold: a 2–3× move of a ~10k-cps ion is
+   a real, meaningful change that the flat 3.0 fold would otherwise bury.
 
 9. **Flat background.** Everything left — the uncorrelated remainder, the demoted
    flat families, and bright Si contaminants — is bunched into the flat overview.
@@ -122,12 +146,17 @@ All in `peaky/batch/cluster.py` (entry floor in `clustering.py`).
 | constant | value | role |
 | --- | --- | --- |
 | `MIN_POINTS` | 8 | finite trace points required to correlate (persistence) |
-| `FLOOR_DEFAULT` | 200 cps | entry brightness floor — `nanmedian` of the channel |
+| `FLOOR_DEFAULT` | 200 cps | `median`-gate entry brightness floor — `nanmedian` of the channel |
+| `min_run` | 3 | `episode`-gate entry: min consecutive detected bins (`cluster_batch` param, not a `cluster.py` constant) |
 | `DIST_T` | 0.40 | clustering cut: `1 − r`, so members share **r > 0.60** |
 | `MIN_MEMBERS` | 3 | smallest reported family |
 | `MERGE_R` | 0.85 | centroid correlation to merge duplicate-shape families |
 | `FLAT_CLUSTER_RANGE` | 1.4 | family-mean max/median below this → demote to flat |
+| `SETTLE_FRAC` | 0.18 | leading fraction dropped when re-checking flatness (equilibration window) |
+| `SETTLING_START_MIN` | 0.8 | a settling family sits ≥ this fraction of its own peak in the first bins (`_starts_high`) → demote |
 | `BIG_CHANGE_FOLD` | 3.0 | lone-channel smoothed max/median to be a "big changer" |
+| `BIG_CHANGE_FOLD_BRIGHT` | 2.0 | lower fold for a **bright** channel (≥ `BIG_CHANGE_BRIGHT_CPS`) |
+| `BIG_CHANGE_BRIGHT_CPS` | 1000 cps | median-brightness above which the bright fold applies |
 | `SMOOTH_W` | 3 | smoothing window for max/median (rejects 1-bin spikes) |
 | `CHANGING` / `FLAT_CV` | 0.30 | cv "varying" threshold (used only on the unassigned path) |
 | `PEAK_RANGE` | 1.7 | transient-burst max/median (used only on the unassigned path) |
@@ -160,7 +189,7 @@ All in `peaky/batch/cluster.py` (entry floor in `clustering.py`).
 | `figures/clusters_changing_<tag>_p*.png` | family panels (raw cps, log y) |
 | `tables/clusters_changers_<tag>.csv` | big standalone movers (`fold`, `peak_hour`) |
 | `tables/clusters_flat_<tag>.csv` | bunched flat background (`cluster=0`) |
-| `clusters_summary.json` | the gate values + funnel counts the PDF report documents |
+| `clusters_summary.json` | the gate values + funnel counts the PDF report documents, incl. `entry_gate` (`"median"` \| `"episode"`) and `min_consecutive_bins` (the `min_run` used when `entry_gate="episode"`) in the gates metadata |
 
 ---
 
@@ -181,6 +210,11 @@ spike barely moves cv, so the burst term catches it); and correlation is on
   blind to detection *sparsity*: a channel detected in only 1–2 bright bins can
   pass `med ≥ 200`. The `episode` gate option exists to key on temporal coherence
   instead.
+- **The `episode` gate is NOT exposed on the `peaky batch` CLI.** It is only
+  reachable via the `cluster_batch(gate="episode", …)` parameter, so **default
+  report runs still use the `median` floor** — a low-abundance episode rescued by
+  `episode` will not appear in a stock PDF report until the gate is wired through
+  the CLI.
 - **Dynamic-vs-flat is magnitude-only, not timing.** A family that drifts gently
   at the *end* of a run (not at any event) can still clear
   `FLAT_CLUSTER_RANGE` and be labelled "rise". This is intentional — the stage is

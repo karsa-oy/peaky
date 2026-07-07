@@ -2,7 +2,7 @@
 degenerate-winner swap that applies the tier engine's calibration-sigma +
 corroboration gate AT WINNER-SELECTION. Run: python3 tests/test_rearbitrate.py
 
-Reproduces the orange-uronium case the fix targets: m/z 464.143 committed the
+Reproduces the Ur+ case the fix targets: m/z 464.143 committed the
 mass-degenerate C36H17N [M+H]+ (DBE 29 azabenzo-PAH, ~-4.8 sigma off the
 calibrated mass center, no isotope/cross-channel corroboration) over the on-cal
 C22H23N3O7 [M+Na]+ that sat in its alternatives list. The winner-selection bug:
