@@ -74,9 +74,22 @@ peaks  ──► resolve('auto', peaks)              name/alias ──► resolv
    TS/correlation layer), `reagent_ion_re` (regex on `ion_formula` picking reagent
    ions), `detect_adduct`, `context` (the assign-time mode + VK priors + caps), and
    `purity` (a labelled reagent's isotopic purity, threaded to
-   `predict_isotopes`). Built-ins: **`BR`** (Br⁻, neg, normalise on reagent),
-   **`UR`** (urea/uronium, pos, normalise on TIC), **`NO3`** (nitrate, neg,
-   reagent), **`NO3_15N`** (¹⁵N nitrate, neg, TIC, `purity 0.98`).
+   `predict_isotopes`), and — for labelled reagents — `label_isotope` /
+   `label_max` (the caret heavy isotope a *covalent product* can carry and its max
+   count; drives the heavy-isotope rescue in `labeled.py`). Built-ins: **`BR`**
+   (Br⁻, neg, normalise on reagent), **`UR`** (urea/uronium, pos, normalise on
+   TIC), **`NO3`** (nitrate, neg, reagent), **`NO3_15N`** (¹⁵N nitrate, neg, TIC,
+   `purity 0.98`, `label_isotope='^N'`, `label_max=2`).
+
+   > **¹⁵N-nitrate ¹⁴NO₃-cluster hazard.** In a NOx-oxidation run the chamber holds
+   > abundant *unlabelled* ¹⁴NO₃⁻, so a highly-oxygenated analyte X forms
+   > `[X+¹⁴NO₃]⁻` — the **exact isobar** of the deprotonated covalent organonitrate
+   > `[Y−H]⁻` (Y = X + HNO₃). `[M+NO3]-` (¹⁴N) is therefore **deliberately kept OFF
+   > `NO3_15N.adducts`** (adding it would let the scorer arbitrate the isobar
+   > arbitrarily); instead the post-tier `relabel_nitrate_clusters` pass re-reads a
+   > covalent organonitrate as the cluster only when the parent X is independently
+   > corroborated (ASSIGNMENT_DETAIL §3.9). The ¹⁵N cluster channel is the ordinary
+   > `[M+^NO3]-`.
 
 3. **Pick the cluster-library key** (`reagent_for_adducts`). From the analyte
    adducts: `CH4N2O` → `"urea"`; `Br` → `"Br"`; `I` → `"I"`; `Cl` → `"Cl"`. This

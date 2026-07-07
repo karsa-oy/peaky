@@ -109,11 +109,19 @@ All thresholds are the named constants from `cluster.py` (see §4).
 
 6. **Flat-family demotion** (`split_flat_clusters`). For each surviving family
    compute `cluster_flatness` = smoothed (window `SMOOTH_W` = 3)
-   **max ÷ median of the member-mean** trace. If **< `FLAT_CLUSTER_RANGE` (1.4)**
-   the family is demoted to flat background ("members correlate but the family as
-   a whole doesn't move"). Otherwise it is a **dynamic co-varying family**.
-   ⚠ This is a pure **magnitude** test — it measures *how much* the family moves,
-   **not when** (see §8).
+   **max ÷ median of the member-mean** trace. A family is demoted to flat
+   background when **either**: (a) `cluster_flatness < FLAT_CLUSTER_RANGE (1.4)`
+   over the whole run ("members correlate but the family as a whole doesn't
+   move"); **or** (b) it is flat once the leading **`SETTLE_FRAC` (0.18)**
+   equilibration window is dropped **AND** it **starts high**
+   (`_starts_high ≥ SETTLING_START_MIN`, 0.8 — i.e. it sits near its own peak in
+   the first bins and decays from t0). Case (b) is the instrument/reagent
+   **equilibration-settling signature**: a slow early drift that would otherwise
+   masquerade as family dynamics. The `_starts_high` guard is what keeps a **real
+   early event** (which rises from a low pre-event baseline) from being mistaken
+   for settling and demoted. Everything else is a **dynamic co-varying family**.
+   ⚠ The base test is a pure **magnitude** test — it measures *how much* the family
+   moves, **not when** (see §8).
 
 7. **Shape label** (`shape_of`). On the z-scored family mean, compare
    `mean(first 6)` vs `mean(last 6)` with gap 0.5 → `rise` / `fall` / `peak`,
@@ -121,7 +129,10 @@ All thresholds are the named constants from `cluster.py` (see §4).
 
 8. **Big standalone changers** (`big_changers`). Channels in the *remainder*
    (didn't join a family) whose smoothed max/median is **≥ `BIG_CHANGE_FOLD`
-   (3.0)** are surfaced individually — a large lone change with no co-movers.
+   (3.0)** are surfaced individually — a large lone change with no co-movers. A
+   **bright** channel (`median ≥ BIG_CHANGE_BRIGHT_CPS`, 1000 cps) surfaces at the
+   lower **`BIG_CHANGE_FOLD_BRIGHT` (2.0)** fold: a 2–3× move of a ~10k-cps ion is
+   a real, meaningful change that the flat 3.0 fold would otherwise bury.
 
 9. **Flat background.** Everything left — the uncorrelated remainder, the demoted
    flat families, and bright Si contaminants — is bunched into the flat overview.
@@ -141,7 +152,11 @@ All in `peaky/batch/cluster.py` (entry floor in `clustering.py`).
 | `MIN_MEMBERS` | 3 | smallest reported family |
 | `MERGE_R` | 0.85 | centroid correlation to merge duplicate-shape families |
 | `FLAT_CLUSTER_RANGE` | 1.4 | family-mean max/median below this → demote to flat |
+| `SETTLE_FRAC` | 0.18 | leading fraction dropped when re-checking flatness (equilibration window) |
+| `SETTLING_START_MIN` | 0.8 | a settling family sits ≥ this fraction of its own peak in the first bins (`_starts_high`) → demote |
 | `BIG_CHANGE_FOLD` | 3.0 | lone-channel smoothed max/median to be a "big changer" |
+| `BIG_CHANGE_FOLD_BRIGHT` | 2.0 | lower fold for a **bright** channel (≥ `BIG_CHANGE_BRIGHT_CPS`) |
+| `BIG_CHANGE_BRIGHT_CPS` | 1000 cps | median-brightness above which the bright fold applies |
 | `SMOOTH_W` | 3 | smoothing window for max/median (rejects 1-bin spikes) |
 | `CHANGING` / `FLAT_CV` | 0.30 | cv "varying" threshold (used only on the unassigned path) |
 | `PEAK_RANGE` | 1.7 | transient-burst max/median (used only on the unassigned path) |
