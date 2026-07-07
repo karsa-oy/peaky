@@ -114,7 +114,7 @@ The positive pass-0 `organothiophosphate` family (~19 named OP-thioate/-dithioat
 whitelist**: it only finds species someone thought to list, and P/high-S stay off the generic grid. It closed the
 bright unexplained nocturnal cluster in an ambient urea-CIMS batch, but the principled, knowledge-free replacements are **NOT built yet**:
 
-- **Certified-neutral rescue pass** *(buildable on current ledger/TS machinery — not yet built)*. Pair unexplained
+- **Certified-neutral rescue pass** *(BUILT 2026-07 as pass 7 — `certified_neutral.py` + `run_pass_certified` + `scripts/certify_neutrals.py`; docs/CERTIFIED_NEUTRAL.md. First real-ledger offline run blind-rediscovered benzothiazole (C7H5NS, core 135.0143) from the unexplained residual.)* Pair unexplained
   peaks that differ by a known channel offset (H⁺↔urea, H⁺↔NH₄) **AND** co-vary in time → each surviving pair
   *certifies a neutral mass* (two independent mass constraints per neutral, so no mass-degeneracy blow-up). Enumerate
   **THAT one mass only** with the exotic elements opened (P, higher S, Cl) → server-score the survivors. Generic
