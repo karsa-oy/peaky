@@ -284,7 +284,7 @@ def stage_a_iso_pairs(client, sample_id: str, ledger: pd.DataFrame, profile,
         # WIDE-carbon grid is a combinatorial blow-up: each pair's ranges differ
         # (per-pair halogen count + clamp) so the grid cache misses and rebuilds a
         # ~20M-formula grid per pair -- on a sample with many unclamped pairs this
-        # spins for many minutes (orange Br: 68 pairs). The legitimate fluorinated
+        # spins for many minutes (a dense Br- batch: 68 pairs). The legitimate fluorinated
         # finds (e.g. TFA.Br- @192.9116) carry a 13C satellite -> they ARE clamped,
         # so F where C is pinned (tiny grid) keeps them; F on the wide grid only
         # produces the C9H13ClF2O16-class mass-fit monsters the O>6 cap exists for.

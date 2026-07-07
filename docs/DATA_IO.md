@@ -190,7 +190,7 @@ All in `peaky/io/io_mascope.py`.
 - **`flatten_match_tree` is pure** (no network) and unit-tested against a captured
   fixture — the contract the offline test suite locks.
 - **Batch names are matched as a case-insensitive REGEX** (`str.contains`). A
-  literal name with metacharacters — `Orange peeling (Ur+ CIMS)`, a `^Nitrate`
+  literal name with metacharacters — `Sample run (Ur+ CIMS)`, a `^Nitrate`
   prefix — silently matches nothing unless run through `escape_batch` (`re.escape`).
 - **`-H+` is not a cation.** The server names deprotonation `-H+` (the *removed*
   species' sign), but it yields an anion. `_mechanism_names` normalizes the

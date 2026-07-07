@@ -12,14 +12,14 @@ Ran the full pipeline on two June-3 batches in dataset **"<dataset>"**:
 # uronium (positive, urea-CIMS):
 mascope-assign batch --reagent Ur \
   --batch "<uronium-batch>" \
-  --dataset "<dataset>" --out-dir ~/peaky-output/peaky
+  --dataset "<dataset>" --out-dir <output>/peaky
 # ¹⁵N nitrate (negative):
 mascope-assign batch --reagent NO3_15N \
   --batch "<nitrate-batch>" \
-  --dataset "<dataset>" --out-dir ~/peaky-output/peaky
+  --dataset "<dataset>" --out-dir <output>/peaky
 # (add --ts <run>/<tag>_ts.parquet to reuse a cached batch time series and skip the re-fetch)
 ```
-Latest outputs: uronium `~/peaky-output/peaky/<uronium-run>/`
+Latest outputs: uronium `<output>/<uronium-run>/`
 (1738 M0, OPEs Identified); ¹⁵NO₃⁻ `<nitrate-run>/` (623 M0, 13
 chlorinated paraffins Identified). **NEW this session (committed):** `NO3_15N` ¹⁵N
 profile + `flatten_match_tree` ¹⁵N re-anchor; `auto_bin_minutes` now bins at the NATIVE
@@ -81,13 +81,13 @@ batch. Clean per-sample fix impact (<sample>, cutoff=100, same path): M0 **1009�
 test_passes +8 total (CP recover/no-fabricate/single-sat/F-excluded; non-Br doublet kept; sub-floor
 clamp skipped); suite 31 files green. **COMMITTED ed2001a.** NOT pushed.
 
-**REPORT RE-RUN (batch, ed2001a, --ts reused):** `~/peaky-output/peaky/<nitrate-run>/`. Merged batch: assigned M0 **623→1375** (Identified 372→**645**, Candidate
+**REPORT RE-RUN (batch, ed2001a, --ts reused):** `<output>/<nitrate-run>/`. Merged batch: assigned M0 **623→1375** (Identified 372→**645**, Candidate
 251→730), unassigned peaks **1461→684 (−53%)**. Big jump = the Br-doublet bug fired on all 6 files
 (no Br reagent) so recovery compounds across files+merge. NB the large Candidate share is honestly
 low-confidence (incl. ~314 F-containing mass-coincidences flagged `below_assignability`); the
 Identified gain (+273) is the meaningful-confidence improvement. The `reclaim_envelope_tails`
 session-5 "no-op on real data" bug is now moot for this batch (the leak was the two audit clears,
-not deep halogen tails). Diagnostic scratch was in ~/peaky-output/_ckpt/ (cleaned).
+not deep halogen tails). Diagnostic scratch was in <output>/<ckpt>/ (cleaned).
 
 ### REPRODUCIBILITY INDEX + time-series query (2026-06-22, follow-up 3)
 User: the per-batch `<reagent>_ts.parquet` holds the full peak×time table (all peaks, assigned +
@@ -115,7 +115,7 @@ pip CLI + a portable Claude skill; **mascope-sdk is on PUBLIC PyPI (MIT) → now
 `pip install` pulls it, no private index); validators need desktop Claude Code + creds, **NO custom shell
 MCP** (built-in Bash, or the CLI in a terminal, is the host-exec path; the cowork `mcp__shell__run_command`
 is an author-sandbox artifact); NO3⁻ reagent to be added before ship → reagent profiles must become
-config-expandable; Orange Ur+Br shareable as the offline demo. Data path LIVE-VERIFIED via host Python
+config-expandable; the demo (Ur+Br) shareable as the offline demo. Data path LIVE-VERIFIED via host Python
 (`mascope-assign list datasets` → 35; "<workspace>" → "<dataset>" → <sample-id>,
 961 peaks).
 - **Phase 0 DONE — installable.** `pyproject.toml` (PEP 621 / hatchling; deps pinned, mascope-sdk core,
@@ -140,10 +140,10 @@ config-expandable; Orange Ur+Br shareable as the offline demo. Data path LIVE-VE
   generate_report (no env/subprocess). VERIFICATION (A/B old driver vs new fn, fixed SOURCE_DATE_EPOCH, Br):
   cluster CSVs+PNGs+xlsx byte-identical (9 figs); VK CSV+2 PNGs byte-identical; **generate_report reproduces the
   whole scratch chain byte-for-byte — 18 artifacts incl. the 6.95 MB PDF**. The PACKAGE now has NO {Ur,Br} maps
-  (functions read profile.label); the orange maps remain only in the orange-specific shims. test_clustering (8)
+  (functions read profile.label); the demo maps remain only in the demo-specific shims. test_clustering (8)
   + RunContext (4). **Suite 780/28 green.** REMAINING: `mascope-assign batch` (full live path) is wired but not
   yet LIVE-validated end-to-end (needs a ~40-min live assign run; WAF-prone) — once it is, DELETE the
-  orange-assign scratch shims. Deferred: thread assign_batch's computed maps through its return (the file-based
+  demo-assign scratch shims. Deferred: thread assign_batch's computed maps through its return (the file-based
   inter-stage contract is deterministic + verified, so low priority).
 - **Phase 3 DONE — pytest-compat + smoke + determinism + CI.** Each tests/test_*.py now exposes a validating
   `test_all()` guarded by `if __name__=='__main__'`, so `pytest tests/` collects + passes (was INTERNALERROR on
@@ -157,12 +157,12 @@ config-expandable; Orange Ur+Br shareable as the offline demo. Data path LIVE-VE
   reagents — `profiles.register()` / `load_config()` (JSON/TOML) + `resolve(config=)` + CLI `--reagent-config`
   on assign/batch (add a reagent WITHOUT forking); test_profiles.py 14. (4d) QUICKSTART.md (clone→install→creds→
   list→assign→batch→report + reagent-config example + troubleshooting); README links it, SKILL notes NO3/config.
-  Suite 847/31 green. REMAINING: (4c) `--demo` offline mode from a bundled Orange parquet — the Br demo is ~5.8 MB
+  Suite 847/31 green. REMAINING: (4c) `--demo` offline mode from a bundled demo parquet — the Br demo is ~5.8 MB
   (per_file 2.1M + ts 3.6M); decide bundle-direct vs Git LFS vs trimmed (.gitignore `*.parquet` needs a carve-out
   + hatchling `artifacts`). (4b) polarity/profile-aware `cleanup.py` (drive RECOVERY_ADDUCTS / reagent_element
   from the profile) — DEFERRED to when NO3⁻ is live-tested, because it changes a verified assignment module that
   can't be re-validated offline (needs a ~40-min Br/Ur re-run to prove no regression). (4e) `ClusterConfig` for
-  cluster.py constants. PLUS: LIVE-validate `mascope-assign batch` end-to-end, then DELETE the orange-assign
+  cluster.py constants. PLUS: LIVE-validate `mascope-assign batch` end-to-end, then DELETE the demo-assign
   shims. **Private GitHub remote DONE — `alekseishcherbinin/mascope-assign` (private); `origin` tracks
   main; CI green on 3.11–3.13.** Creds: `.env` can now live in the repo root (project-local, git-ignored,
   found regardless of cwd via `io_mascope._find_env`) as well as `~/.mascope/.env`.
@@ -170,7 +170,7 @@ config-expandable; Orange Ur+Br shareable as the offline demo. Data path LIVE-VE
 **REPORT CRITICAL-REVIEW FIXES (session 3, 2026-06-20) — committed, reports regenerated.**
 A 6-dimension adversarial review of the Ur/Br PDFs surfaced two genuinely misleading
 headline numbers + a missing science narrative; all fixed in-package (presentation only,
-no live re-run — regenerated from the canonical orange-assign/<tag>/ ledgers via run_peaky.py):
+no live re-run — regenerated from the canonical demo-assign/<tag>/ ledgers via run_peaky.py):
 - **NEW `peaky/composition.py`** (pure; test_composition.py 24): `signal_by_backbone`
   (intensity-weighted CHO/CHON/CHOS), `amine_shadow_stats`/`collapsed_composition` (the
   [M+NH4]+(CHO) vs [M+H]+(amine X+NH3) degeneracy — 243 of 414 Ur CHON share an exact NH3-shifted
@@ -221,15 +221,15 @@ no live re-run — regenerated from the canonical orange-assign/<tag>/ ledgers v
   (out_prefix + paginated, returns list; pdf_report.changers embeds fit-to-A4 not native; driver passes
   the prefix). Decade-snapped log y (major ticks only), title sized to fit. **Every report page is now
   595x842pt (A4)** — verified. (b) default PDF filename embeds the Report ID → `report_<run_id>.pdf`.
-  test_cluster 41 (A4-portrait assertion). Final reports: `~/peaky-output/peaky/Orange-peeling-{Ur,
+  test_cluster 41 (A4-portrait assertion). Final reports: `<output>/<batch-slug>-{Ur,
   Br}-CIMS_2026-06-20T131{003,052}Z/` (git f423de6). NB a PARALLEL session added scratch
-  `~/peaky-output/gka-iter/accretion_prototype.py` + an accretion-VK revive note in the memory — left
+  `<output>/accretion-prototype.py` + an accretion-VK revive note in the memory — left
   untouched (separate workstream).
 
 **SESSION WRAP (2026-06-20, git be91636 + docs).** All report improvements committed; SKILL.md +
 README.md refreshed (SECTIONS list, composition.py/plausibility.py modules, A4 changers, PDF-name=Report
 ID, determinism note, test count **749 across 26 files**). Tree clean. **NEXT FOCUS = REFACTORING.**
-Prime candidates: (1) fold the scratch drivers `~/peaky-output/orange-assign/run_{orange,clusters,
+Prime candidates: (1) fold the scratch drivers `<output>/run_{demo,clusters,
 vankrevelen,report,peaky}.py` into ONE parameterised package CLI (`peaky/cli.py` or extend
 `pipeline.py`) — they're the last copy-paste layer outside the repo and the label/batch/reagent maps are
 duplicated across them; (2) the report drivers re-read per-file ledgers to rebuild the explained-mz /
@@ -242,7 +242,7 @@ suite green through the refactor; nothing about the report CONTENT should change
 live file (the `mcp__mascope__*` tools hold a stale token). **<server> is behind a Cloudflare
 WAF** — a burst of live runs trips a 403 HTML block ("Attention Required", NOT a token error)
 that clears after 15-30 min of NO traffic (polling EXTENDS it). For a blocked live re-run use
-`~/peaky-output/orange-assign/deferred_rerun.py` (waits it out, then runs).
+`<output>/deferred-rerun.py` (waits it out, then runs).
 
 **PIPELINE — all built + tested this session (`peaky/`):**
 - `profiles.py` — ReagentProfile (Br/Ur: polarity/adducts/normaliser/`context`) + `resolve('auto')`.
@@ -312,13 +312,13 @@ that clears after 15-30 min of NO traffic (polling EXTENDS it). For a blocked li
   `channel_agreement_<tag>.csv` QC output. The families report page notes members=ion-channels.
 - **RUN VERSIONING (NEW, user 2026-06-20):** every set of outputs goes in its OWN timestamped folder
   so a re-run never overwrites a prior one. `pipeline.slugify/run_stamp/run_id/make_run_dir` →
-  `~/peaky-output/peaky/<batch-slug>_<YYYY-MM-DDTHHMMSSZ>/` (folder name == run id; pass ONE
+  `<output>/<batch-slug>_<YYYY-MM-DDTHHMMSSZ>/` (folder name == run id; pass ONE
   `datetime.now(timezone.utc)` per run so folder/id/cover all agree). **Timestamps are UTC** (folder
   `…Z`, cover `… UTC`) — user 2026-06-20 caught that the run env clock was UTC+3 (EEST) while theirs was
   UTC+1, so a local-time stamp came out 2h off the file dates; UTC is unambiguous. `run_stamp` converts a
   tz-aware `when` to UTC and assumes naive = UTC. `pdf_report.build(run_id=)` stamps the cover (title
   page) with the Report ID and a date+TIME-UTC `generated` line. Orchestrator `run_peaky.py <tag>`
-  (scratch) picks the timestamp once, copies the assignment inputs from the canonical `orange-assign/
+  (scratch) picks the timestamp once, copies the assignment inputs from the canonical `demo-assign/
   <tag>/` into the run folder, then runs clusters+VK+report into it via `PEAKY_OUT/PEAKY_RUN_ID/
   PEAKY_GENERATED` env (run_clusters/run_vankrevelen/run_report honour PEAKY_OUT; default = canonical
   dir). Assignment (live, WAF-gated) still lands in the canonical dir; downstream generation versions.
@@ -340,11 +340,11 @@ that clears after 15-30 min of NO traffic (polling EXTENDS it). For a blocked li
   small-multiples (not 1 CH2 panel, not coloured-by-family ladders), full y-range. Pure
   `detect_series` / `family_summary` / `kmd`; needs only `neutral_formula` (merged OR single-file
   ledger). CH2-over-detection handled by highlighting only the longest `top_chains=10` series
-  ≥`highlight_min_len=5` per panel. Test `tests/test_gka_figure.py` (13 checks). Built into Orange
-  Ur+Br reports (`~/peaky-output/gka-iter/` has the iteration PNGs v1→v5). **v5 (user review):**
+  ≥`highlight_min_len=5` per panel. Test `tests/test_gka_figure.py` (13 checks). Built into the demo
+  Ur+Br reports (`<output>/` has the iteration PNGs v1→v5). **v5 (user review):**
   each panel now highlights ONLY its own base-unit series (every ladder horizontal by construction —
   a TILTED line had meant a folded-in non-base unit, e.g. C3H6O under the C2H4O base); EMPTY families
-  (siloxane/CF2 on orange) are DROPPED via a dynamic ceil((n+1)/2)×2 grid; the rollup bar is now
+  (siloxane/CF2 on the demo) are DROPPED via a dynamic ceil((n+1)/2)×2 grid; the rollup bar is now
   base-unit-consistent with the panels (oxidation = 72 O-series, not the 251 O+CO+CO2+H2O family count).
   **v6 (user 2026-06-20 — "siloxanes weren't in GKA"):** CONTAMINANT families (siloxane→Si, fluorinated→F)
   now have an `element` field and are ELEMENT-based, not ladder-based — the 16 Ur siloxanes were assigned
@@ -366,12 +366,12 @@ that clears after 15-30 min of NO traffic (polling EXTENDS it). For a blocked li
 - `residual.py` pass4.A FIX: F enabled only for carbon-CLAMPED pairs (F×wide-C grid was a CPU
   blow-up that HUNG on high-iso-pair Br samples). **CAVEAT: re-verify Br ambient-ref flagships.**
 
-**ORANGE RESULTS** (live "Orange peeling (Ur+ CIMS)" / "(Br- CIMS)", <server>, 81/80 samples).
-Outputs in `~/peaky-output/orange-assign/{Ur,Br}/` (report_*.pdf + clusters/VK pngs + merged_
+**DEMO RESULTS** (live "the demo (Ur+ CIMS)" / "(Br- CIMS)", <server>, 81/80 samples).
+Outputs in `<output>/{Ur,Br}/` (report_*.pdf + clusters/VK pngs + merged_
 ledger.csv + per_file/). **Ur 1319 M0 (1065 Id); channels [M+H]+ 670/urea 454/NH4 155/Na 40**
 (after the amine gate; from-scratch re-run reproduced it). **Br 502 M0 (402 Id).** Scratch drivers
-(NOT in repo): run_orange / run_clusters / run_vankrevelen / run_report / run_triple_traces /
-deferred_rerun, all in `~/peaky-output/orange-assign/`.
+(NOT in repo): run_demo / run_clusters / run_vankrevelen / run_report / run_triple_traces /
+deferred_rerun, all in `<output>/`.
 
 **NEXT (priority):**
 1. **Na+ gate (proposed, NOT done):** the 40 uronium [M+Na]+ are the WEAKEST channel (mean score
@@ -395,7 +395,7 @@ don't run scoring CONCURRENTLY.
 ## ✅ DONE (2026-06-16): URONIUM run through the FULL pipeline (positive mode)
 The positive-mode **uronium MODE** is built and the full `assign.run` ran on
 `<sample-id>` (2025-10-02 08:20, batch "<batch>", dataset
-"<dataset>", <server>). Outputs: `~/peaky-output/uronium-v2/`
+"<dataset>", <server>). Outputs: `<output>/`
 (ledger.csv + 11-sheet assignments.xlsx + summary.md + gka.html + FINDINGS.md).
 **Result: 701 M0 (606 Identified / 95 Candidate), 165 iso_child, 13 artifact,
 398 unexplained; 0 ledger problems; 540 offline tests green.** Channels 474
@@ -449,7 +449,7 @@ corroboration). What was built:
   passes). +3 tests (io_mascope estimate_offset, passes pass-0 offset gate).
 
 ### ✅ DONE (2026-06-16, user-requested): siloxane ladder ASSIGNED + analyte cluster
-Outputs now `~/peaky-output/uronium-v5/`. Two follow-ups the user asked for:
+Outputs now `<output>/`. Two follow-ups the user asked for:
 **(A) Assign the characterized PDMS/siloxane ladder.** The 36% unexplained was
 dominated by a PDMS ladder spaced by **+74.0186 = C2H6OSi** (the server even fit
 684 as a Si10 monster). It's mass-DEGENERATE per peak: at the -2.45 ppm offset a
@@ -477,8 +477,8 @@ oxygenated-CHON/amine pool (C12-15 NOx). Tooling `assign-dev/ts_uro/
 analyte_cluster.py` -> plot `uronium_analyte_cluster.png` + `uronium_changing_
 peaks.csv`. (The siloxane background is correctly NOT in the spiking analyte cluster.)
 Residual gaps (minor): 610/653/684 ladder rungs still unassigned (weak 29Si
-confirmation); 684 keeps a C44 amine monster. Characterisation in uronium-v2/
-FINDINGS.md; superseded outputs uronium-v2/v3/v4/.
+confirmation); 684 keeps a C44 amine monster. Characterisation in <run>/
+FINDINGS.md; superseded outputs <run>/v3/v4/.
 
 ## ⭐ LESSONS from the uronium/positive-mode session (2026-06-16)
 

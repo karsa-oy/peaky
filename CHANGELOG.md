@@ -103,7 +103,7 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     **Assigned-tier cross-file support** — ranked by (Assigned-file count, file
     count, best tier, best score) — instead of the single highest per-file
     `ion_score`. A no-op when a cluster carries one formula.
-  - Validated on the orange-uronium Ur⁺ batch: m/z 424.218 returns to **C18H30O10
+  - Validated on a Ur⁺ batch: m/z 424.218 returns to **C18H30O10
     [M+NH4]+** (the α-pinene HOM oligomer, Assigned across 5 files, on the bundled
     Kang reflist) and m/z 464.143 returns to **C22H23N3O7 [M+Na]+** (on-cal CHON)
     instead of the off-cal C17H31N5O6 (5 N, no N source) and C36H17N (DBE-29

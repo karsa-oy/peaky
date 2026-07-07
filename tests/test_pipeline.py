@@ -20,8 +20,8 @@ def check(name, cond, detail=""):
 WHEN = datetime(2026, 6, 20, 14, 35, 12)   # naive -> assumed UTC
 
 check("slugify: spaces/punct -> single dashes, trimmed",
-      PL.slugify("Orange peeling (Ur+ CIMS)") == "Orange-peeling-Ur-CIMS",
-      PL.slugify("Orange peeling (Ur+ CIMS)"))
+      PL.slugify("Sample run (Ur+ CIMS)") == "Sample-run-Ur-CIMS",
+      PL.slugify("Sample run (Ur+ CIMS)"))
 check("slugify: empty -> 'run'", PL.slugify("  ") == "run")
 
 folder, human = PL.run_stamp(WHEN)
@@ -32,24 +32,24 @@ aware = datetime(2026, 6, 20, 16, 35, 12, tzinfo=timezone(timedelta(hours=2)))  
 check("run_stamp: tz-aware input converts to UTC", PL.run_stamp(aware)[0] == "2026-06-20T143512Z",
       PL.run_stamp(aware))
 
-rid = PL.run_id("Orange peeling (Ur+ CIMS)", WHEN)
-check("run_id: slug + ISO-UTC stamp", rid == "Orange-peeling-Ur-CIMS_2026-06-20T143512Z", rid)
+rid = PL.run_id("Sample run (Ur+ CIMS)", WHEN)
+check("run_id: slug + ISO-UTC stamp", rid == "Sample-run-Ur-CIMS_2026-06-20T143512Z", rid)
 
 with tempfile.TemporaryDirectory() as d:
-    rd = PL.make_run_dir(d, "Orange peeling (Br- CIMS)", WHEN)
+    rd = PL.make_run_dir(d, "Sample run (Br- CIMS)", WHEN)
     check("make_run_dir: creates a fresh per-run folder", os.path.isdir(rd), rd)
     check("make_run_dir: folder basename == run_id (id locates the folder)",
-          os.path.basename(rd) == PL.run_id("Orange peeling (Br- CIMS)", WHEN),
+          os.path.basename(rd) == PL.run_id("Sample run (Br- CIMS)", WHEN),
           os.path.basename(rd))
     check("make_run_dir: name carries the batch, the date AND the UTC time",
-          "Orange-peeling-Br-CIMS" in os.path.basename(rd)
+          "Sample-run-Br-CIMS" in os.path.basename(rd)
           and "2026-06-20" in os.path.basename(rd) and "143512Z" in os.path.basename(rd))
 
 # RunContext / make_run_context: one `when` -> consistent folder / id / cover stamp
 with tempfile.TemporaryDirectory() as d:
-    ctx = PL.make_run_context(d, "Orange peeling (Br- CIMS)", P.BR, when=WHEN)
+    ctx = PL.make_run_context(d, "Sample run (Br- CIMS)", P.BR, when=WHEN)
     check("make_run_context: run_id == folder basename == run_id(when)",
-          ctx.run_id == os.path.basename(ctx.out_dir) == PL.run_id("Orange peeling (Br- CIMS)", WHEN),
+          ctx.run_id == os.path.basename(ctx.out_dir) == PL.run_id("Sample run (Br- CIMS)", WHEN),
           ctx.run_id)
     check("make_run_context: tag/label from the profile",
           ctx.tag == "Br" and ctx.label == P.BR.label, (ctx.tag, ctx.label))

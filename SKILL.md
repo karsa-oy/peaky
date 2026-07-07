@@ -240,7 +240,7 @@ composition, scrutiny, gka, families, changers, clusters, methods]`, each a `sec
 The whole assign → merge → cluster → Van Krevelen → PDF chain is now in-package:
 run **`peaky batch --batch ... --dataset ... --reagent ...`** (one versioned run
 folder), and **`peaky report --run-dir ...`** to regenerate figures + the PDF
-offline from an existing run. (The old `run_orange.py` / `run_clusters.py` /
+offline from an existing run. (The old `run_assign.py` / `run_clusters.py` /
 `run_vankrevelen.py` / `run_report.py` scratch drivers are superseded by these.)
 **A server may sit behind a Cloudflare WAF** — a burst of live runs can trip a 403
 ("Attention Required") that clears after 15-30 min of no traffic (polling extends it).

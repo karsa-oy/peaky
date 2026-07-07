@@ -154,7 +154,7 @@ All in `peaky/batch/sampling.py`.
 - **Selection in time, not index.** Row-index thinning over-samples a dense early
   region and skips a sparse late one; `linspace` over real timestamps fixes both.
 - **Max-TIC ≠ analyte coverage on CIMS.** The reagent ion dominates TIC, so the
-  max-TIC sample is brightest for only ~13 % of analyte bins (measured, orange Br⁻
+  max-TIC sample is brightest for only ~13 % of analyte bins (measured, a representative Br⁻
   batch) — that is the whole reason brightest-coverage exists. It is a coverage
   play (more analyte peaks), not a speed play (~`k_max` assigns either way).
 - **Disjoint winner sets** make set-cover trivial — there is no NP-hard subset

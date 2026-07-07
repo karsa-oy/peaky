@@ -108,7 +108,7 @@ check("auto_bin_minutes returns the native cadence (6 min)", TS.auto_bin_minutes
 check("auto_bin_minutes floors at >=1 and falls back on <3 samples",
       TS.auto_bin_minutes(_ts24) >= 1 and isinstance(TS.auto_bin_minutes(_ts6.head(2)), int))
 # sub-minute / non-integer cadence must round UP, never down: a bin narrower than the
-# real spacing aliases -> empty time bins -> a spurious drop-to-floor comb (orange Br-
+# real spacing aliases -> empty time bins -> a spurious drop-to-floor comb (a Br-
 # was 73 s cadence -> the old round() gave a 60 s bin with ~19% empty bins).
 _ts73 = pd.DataFrame([{"sample_item_id": f"s{i}", "datetime_utc": _base + pd.Timedelta(seconds=73 * i),
                        "mz": 100.0, "height": 1.0} for i in range(80)])

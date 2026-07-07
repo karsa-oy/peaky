@@ -46,7 +46,7 @@ STAGES = ("matrix", "assign", "cluster", "validate")
 # Pass `when` explicitly (one now() per run) so folder/id/cover all agree.
 # ---------------------------------------------------------------------------
 def slugify(name: str) -> str:
-    """Filesystem-safe batch slug: 'Orange peeling (Ur+ CIMS)' -> 'Orange-peeling-Ur-CIMS'."""
+    """Filesystem-safe batch slug: 'Sample run (Ur+ CIMS)' -> 'Sample-run-Ur-CIMS'."""
     return re.sub(r"[^0-9A-Za-z]+", "-", str(name)).strip("-") or "run"
 
 

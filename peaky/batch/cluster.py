@@ -46,7 +46,7 @@ SETTLE_FRAC = 0.18       # skip this leading fraction of the run when re-checkin
                          # a genuinely-flat background family in the co-varying set. A family
                          # flat AFTER the settling window is background -> also demoted, BUT
                          # ONLY when it STARTS HIGH (see SETTLING_START_MIN) so a real early
-                         # EVENT (rise from a low pre-event baseline, e.g. orange-peel) is
+                         # EVENT (rise from a low pre-event baseline, e.g. a VOC-emission burst) is
                          # never mistaken for settling and demoted.
 SETTLING_START_MIN = 0.8  # a settling family sits at >= this fraction of its own peak in the
                           # first bins (it starts at the max and DECAYS). A rise-event starts
