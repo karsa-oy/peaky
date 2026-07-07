@@ -114,5 +114,11 @@ check("certificates independent of input row order",
       [(round(a.core_mass, 6), a.n_channels) for a in c1]
       == [(round(b.core_mass, 6), b.n_channels) for b in c2])
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)

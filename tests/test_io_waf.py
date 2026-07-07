@@ -70,5 +70,11 @@ check("_is_transient: NOT 404", not IO._is_transient(Exception("HTTP 404 not fou
 check("_is_transient: NOT a plain ValueError",
       not IO._is_transient(ValueError("bad formula C3H5ClO17")))
 
-print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+
+def test_all():
+    assert FAIL == 0, f"{FAIL} checks failed"
+
+
+if __name__ == "__main__":
+    print(f"\n{PASS} passed, {FAIL} failed")
+    sys.exit(1 if FAIL else 0)
