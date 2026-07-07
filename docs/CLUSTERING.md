@@ -21,8 +21,11 @@ in `peaky/reporting/analyte_viz.py` (`ion_traces`).
 After assignment, each batch sample has a peak list with committed formulas. This
 stage asks a purely **temporal** question: *which assigned ion channels rise and
 fall together over the run?* Channels that move as a group ("co-vary") are
-reported as **families**; channels that don't move are pushed to a flat-background
-overview. No chemistry is used here — only the shapes of the traces in time. It is
+reported as **families**; channels that don't move *much* are pushed to a flat-background
+overview. ⚠ **"Flat" here means LOW-AMPLITUDE, not structureless** — the gates test how
+*far* a trace swings, never whether it carries coherent time-of-day *structure*, so a
+low-amplitude but coherent diurnal wave can be mislabeled flat (see §8). No chemistry is
+used here — only the shapes of the traces in time. It is
 deliberately **event-agnostic** (it knows nothing about when an experiment's event
 happened), so the same logic works for any batch.
 
@@ -120,8 +123,9 @@ All thresholds are the named constants from `cluster.py` (see §4).
    masquerade as family dynamics. The `_starts_high` guard is what keeps a **real
    early event** (which rises from a low pre-event baseline) from being mistaken
    for settling and demoted. Everything else is a **dynamic co-varying family**.
-   ⚠ The base test is a pure **magnitude** test — it measures *how much* the family
-   moves, **not when** (see §8).
+   ⚠ The base test is a pure **magnitude/amplitude** test — it measures *how much*
+   the family moves, **not when** and **not whether the movement has coherent
+   structure** (see §8 — a coherent low-amplitude diurnal wave can be mislabeled flat).
 
 7. **Shape label** (`shape_of`). On the z-scored family mean, compare
    `mean(first 6)` vs `mean(last 6)` with gap 0.5 → `rise` / `fall` / `peak`,
@@ -172,7 +176,9 @@ All in `peaky/batch/cluster.py` (entry floor in `clustering.py`).
   trace; ~1 = flat, a coherent burst scores high. Smoothing first kills single-bin
   noise.
 - **`cluster_flatness`** — `_smoothed_range` of the **member-mean** trace; ~1 means
-  the members co-vary but the family is flat (correlated background).
+  the members co-vary but the family is flat (correlated background). ⚠ Amplitude-only:
+  a *low-amplitude but coherent* diurnal wave (e.g. a shared ~15:00 afternoon rise)
+  scores near 1 and is demoted despite carrying real structure (see §8).
 - **`panel_median`** — for the rendered bold line: NaN holes are below-detection
   LOWS, so they are filled to the family's detection floor before a *plain* median
   (`nanmedian` would drop the holes → survivorship bias → the line wrongly stays
@@ -219,6 +225,18 @@ spike barely moves cv, so the burst term catches it); and correlation is on
   at the *end* of a run (not at any event) can still clear
   `FLAT_CLUSTER_RANGE` and be labelled "rise". This is intentional — the stage is
   universal and event-agnostic; do **not** special-case a known event here.
+- **"Flat" ≠ structureless — both flat gates are amplitude-family.** `split_varying`
+  (cv gate, `FLAT_CV`) and `split_flat_clusters` (smoothed max/median gate,
+  `FLAT_CLUSTER_RANGE`) both measure *amplitude*; neither tests whether a low-amplitude
+  trace carries coherent time-of-day *structure*. So a channel can be binned "flat
+  background" while carrying a real, weak diurnal wave. Measured on **one ambient urea-CIMS
+  batch (2026-07-07, positive urea-CIMS)**: of ~1010 channels the report binned as
+  "flat background", the MEDIAN fraction of log-variance explained by time-of-day
+  (diurnal η²) was ~0.52 and ~70% had η²≥0.3 — most were **not** flat; they carried a
+  coherent low-amplitude ~15:00 afternoon (common-mode) wave the amplitude-only gate
+  misses. After removing that shared common-mode wave, ~42% still retained independent
+  structure (real weak analytes). Treat these as one-batch measurements, not universal
+  constants; a structure-aware (not amplitude-only) gate is not yet built.
 - **Complete linkage + signed distance** are load-bearing: average/single linkage
   collapses everything into one family; unsigned distance folds anti-correlated
   channels together.

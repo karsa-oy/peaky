@@ -92,7 +92,7 @@ candidate generation                    chemistry.py grid (integer-DBE / Senior 
 SCORING  ── local_scoring ────►         io_mascope.score_candidates: in-process mascope_tools (default)
    │  (Mascope's maths, run locally;     → per-isotopologue table; match_compounds is the opt-in fallback
    ▼
-arbitration + multi-pass commit         passes.py director (passes 1–6 + sweeps; §4)
+arbitration + multi-pass commit         passes/ director (passes 1–6 + sweeps; §4)
    │                                     complexity-penalised, isotopologue-gated; commit M0 owners
    ▼
 cleanup → degeneracy → tiers            cleanup.py · degeneracy.py · tiers.py
@@ -148,7 +148,7 @@ of threading environment variables or re-deriving `now()` per stage.
 
 ## 4. The assignment pass sequence
 
-The director lives in `passes.py`. Passes run in order; each only adds
+The director lives in `passes/directors.py` (the `passes/` package). Passes run in order; each only adds
 commitments the previous ones justify. (Condensed; the authoritative table is in
 [`SKILL.md`](../SKILL.md#the-pipeline).)
 
@@ -286,14 +286,14 @@ workspace-server fallback).
 complexity penalty), `isotopes.py` (prescan → grid constraints, envelope
 predictor), `reagents.py` / `profiles.py` (reagent library + per-reagent config).
 
-**Assignment** — `ledger.py` (state + invariants + commit API), `passes.py`
-(arbitration + pass director + calibration), `series_gka.py` / `series_detect.py`
+**Assignment** — `ledger.py` (state + invariants + commit API), `passes/`
+(the pass package: arbitration + pass director + calibration; `directors.py` / `core.py` / `postprocess.py` / `config.py`), `series_gka.py` / `series_detect.py`
 / `ladders.py` (series math, detection, ladder gap-fill), `residual.py` (pass 4),
 `siloxane.py` (PDMS ladder), `cleanup.py` (residual cleanup + plausibility
 demotes), `degeneracy.py` (mass-degeneracy), `tiers.py` (Assigned/Candidate
 verdict), `plausibility.py` (QC), `reflists.py` (curated reference-peaklist
 catalog in `data/peaklists/` → near-tie selection prior + mass-match rescue-verify),
-`assign.py` (single-sample orchestrator; `PassConfig` lives in `passes.py`),
+`assign.py` (single-sample orchestrator; `PassConfig` lives in `passes/config.py`),
 `local_scoring.py` (in-process mascope_tools scoring backend).
 
 **Batch** — `sampling.py` (sample selection: representative subset OR
