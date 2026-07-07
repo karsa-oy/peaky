@@ -1,7 +1,7 @@
 """Offline smoke test for clustering.cluster_batch — a tiny synthetic batch runs
 end to end and writes the cluster / flat / unassigned CSVs + a figure without
 crashing. (Faithful byte-equivalence vs the old scratch driver is checked
-separately against real Orange data.) Run: python3 tests/test_clustering.py"""
+separately against real batch data.) Run: python3 tests/test_clustering.py"""
 import os
 import sys
 import tempfile

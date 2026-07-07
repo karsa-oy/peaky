@@ -110,7 +110,7 @@ with tempfile.TemporaryDirectory() as d:
     check("build: resilient to a failing section", os.path.exists(out2) and os.path.getsize(out2) > 3000)
 
     # run versioning: run_id + a date+time 'generated' on the cover (title page)
-    RID = "Orange-peeling-Ur-CIMS_2026-06-20_143512"
+    RID = "Sample-run-Ur-CIMS_2026-06-20_143512"
     ctx_r = R.load_context(d, tag="Ur", label="Ur⁺ CIMS", run_id=RID)
     check("load_context carries run_id for the cover", ctx_r.get("run_id") == RID)
     out3 = R.build(d, tag="Ur", label="Ur⁺ CIMS", generated="2026-06-20 14:35",

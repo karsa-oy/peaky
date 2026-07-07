@@ -139,7 +139,7 @@ def _patch_datasets_list_for_legacy_servers() -> None:
 def escape_batch(name: str) -> str:
     """The SDK resolves `batch=`/`batches=` as a case-insensitive REGEX via
     str.contains, so a literal batch name with regex metacharacters (e.g.
-    'Orange peeling (Ur+ CIMS)' — parens + '+') silently fails to match. Escape
+    'Sample run (Ur+ CIMS)' — parens + '+') silently fails to match. Escape
     it to match literally."""
     return re.escape(name)
 
