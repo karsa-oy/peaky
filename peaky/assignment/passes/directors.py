@@ -71,7 +71,46 @@ def _known_species(polarity: str = "negative") -> dict:
             "C24H51O4P": "tris(2-ethylhexyl) phosphate (TEHP)",
             "C21H21O4P": "tricresyl phosphate (TMPP / TCrP)",
         }
-        return {"organophosphate": organophosphate}
+        # ORGANOTHIOPHOSPHATE / -DITHIOATE insecticides: agricultural
+        # organophosphorus pesticides (P + 1-3 S), primary AMBIENT analytes over
+        # farmland (not lab contaminants). Like the phosphate esters they are
+        # invisible to the CHNOS grid (P off; and the S2/S3 count is above the
+        # grid's max_S), and they ionise as [M+H]+ / [M+(urea)H]+. Unlike the
+        # esters they DO carry a ³⁴S twin, so a confirmed ³⁴S envelope can stand
+        # in for the 2nd channel (see the gate below). Seeded from a field
+        # campaign where the malathion family was the brightest unexplained
+        # nocturnal cluster (P off the grid) + common OP insecticides. Only
+        # those present + on-cal + corroborated commit; listing absent ones is
+        # harmless.
+        organothiophosphate = {
+            "C10H19O6PS2": "malathion",
+            "C11H21O6PS2": "malathion homolog (+CH2)",
+            "C9H17O6PS2": "malathion homolog (-CH2)",
+            "C8H13O5PS2": "malathion transformation product (-C2H6O)",
+            "C10H19O7PS": "malaoxon (malathion oxon)",
+            "C5H12NO3PS2": "dimethoate",
+            "C8H19O2PS3": "disulfoton",
+            "C7H17O2PS3": "phorate",
+            "C9H21O2PS3": "terbufos",
+            "C10H15O3PS2": "fenthion",
+            "C12H21N2O3PS": "diazinon",
+            "C10H14NO5PS": "parathion",
+            "C8H10NO5PS": "methyl parathion",
+            "C9H12NO5PS": "fenitrothion",
+            "C11H12NO4PS2": "phosmet",
+            "C10H12N3O3PS2": "azinphos-methyl",
+            "C9H11Cl3NO3PS": "chlorpyrifos",
+            "C7H7Cl3NO3PS": "chlorpyrifos-methyl",
+            # N-bearing malathion-relative dithioate observed in ambient air
+            # with a [M+H]+/urea pair (m/z 444.13); an isobaric CHON-Cl2 fit
+            # exists, but the >=2-channel gate + family context favour the
+            # P-thioate.
+            "C16H30NO7S2P": "organothiophosphate (C16 N-dithioate; Cl2 isobar)",
+        }
+        return {
+            "organophosphate": organophosphate,
+            "organothiophosphate": organothiophosphate,
+        }
     atmos = {
         # small atmospheric acids / radicals detected as Br- adducts -- the
         # PRIMARY analytes of a Br-CIMS, all invisible to the organic grid:
@@ -194,6 +233,16 @@ def run_pass0_known(
         & scored["sample_peak_id"].notna()
         & (pd.to_numeric(scored["iso_score"], errors="coerce").fillna(0) > 0.4)
     ]
+    # organothiophosphates carry S -> a matched ³⁴S satellite is INDEPENDENT
+    # isotope corroboration that the pure phosphate esters (monoisotopic in every
+    # atom) lack. It substitutes for the >=2-channel requirement below, so a
+    # single-channel dithioate with a confirmed ³⁴S envelope (e.g. des-ethyl
+    # malathion, seen only as [M+H]+) can still commit.
+    s34_confirmed = set(
+        kids[kids["iso_label"].astype(str).str.contains("34S", na=False)][
+            "compound_formula"
+        ].unique()
+    )
     mzs = ledger["mz"]
     for _, r in base.iterrows():
         ppm = r["ppm_error"]
@@ -229,14 +278,22 @@ def run_pass0_known(
             fam, lbl = label_of[r["compound_formula"]]
             # organophosphates are monoisotopic in P -> require >=2 ion channels
             # (e.g. [M+H]+ AND [M+(urea)H]+) before locking, since there is no
-            # isotope twin to confirm a single-channel mass coincidence.
+            # isotope twin to confirm a single-channel mass coincidence. EXCEPT
+            # organothiophosphates, whose matched ³⁴S envelope is an independent
+            # corroboration that stands in for the 2nd channel.
+            _s34_ok = (
+                fam == "organothiophosphate"
+                and r["compound_formula"] in s34_confirmed
+            )
             if (
-                fam == "organophosphate"
+                fam in ("organophosphate", "organothiophosphate")
                 and ope_channels.get(r["compound_formula"], 0) < 2
+                and not _s34_ok
             ):
                 log(
                     f"[pass0] skip {r['compound_formula']} @{float(r['sample_peak_mz']):.4f}: "
-                    f"single ion channel (monoisotopic P needs >=2 to corroborate)"
+                    f"single ion channel, no ³⁴S envelope (P needs >=2 channels "
+                    f"or a confirmed ³⁴S twin to corroborate)"
                 )
                 continue
             tag = (
@@ -246,6 +303,8 @@ def run_pass0_known(
                 if fam == "nitroaromatic"
                 else "organophosphate"
                 if fam == "organophosphate"
+                else "organothiophosphate"
+                if fam == "organothiophosphate"
                 else "perfluoroacid"
                 if fam == "perfluoroacid"
                 else "chlorinated-paraffin"
@@ -323,6 +382,14 @@ def run_pass0_known(
                         f"corroborated across {ope_channels.get(r['compound_formula'], 0)} "
                         "ion channels (monoisotopic P, no isotope twin)"
                         if fam == "organophosphate"
+                        else "; organothiophosphate/-dithioate pesticide (P off the "
+                        "grid, S above grid max); corroborated by "
+                        + (
+                            f"{ope_channels.get(r['compound_formula'], 0)} ion channels"
+                            if ope_channels.get(r["compound_formula"], 0) >= 2
+                            else "a confirmed ³⁴S isotope envelope (single channel)"
+                        )
+                        if fam == "organothiophosphate"
                         else "; perfluorocarboxylic acid (F off the grid); "
                         "known PFCA series formula, exact-mass committed"
                         if fam == "perfluoroacid"
