@@ -74,9 +74,22 @@ peaks  ──► resolve('auto', peaks)              name/alias ──► resolv
    TS/correlation layer), `reagent_ion_re` (regex on `ion_formula` picking reagent
    ions), `detect_adduct`, `context` (the assign-time mode + VK priors + caps), and
    `purity` (a labelled reagent's isotopic purity, threaded to
-   `predict_isotopes`). Built-ins: **`BR`** (Br⁻, neg, normalise on reagent),
-   **`UR`** (urea/uronium, pos, normalise on TIC), **`NO3`** (nitrate, neg,
-   reagent), **`NO3_15N`** (¹⁵N nitrate, neg, TIC, `purity 0.98`).
+   `predict_isotopes`), and — for labelled reagents — `label_isotope` /
+   `label_max` (the caret heavy isotope a *covalent product* can carry and its max
+   count; drives the heavy-isotope rescue in `labeled.py`). Built-ins: **`BR`**
+   (Br⁻, neg, normalise on reagent), **`UR`** (urea/uronium, pos, normalise on
+   TIC), **`NO3`** (nitrate, neg, reagent), **`NO3_15N`** (¹⁵N nitrate, neg, TIC,
+   `purity 0.98`, `label_isotope='^N'`, `label_max=2`).
+
+   > **¹⁵N-nitrate ¹⁴NO₃-cluster hazard.** In a NOx-oxidation run the chamber holds
+   > abundant *unlabelled* ¹⁴NO₃⁻, so a highly-oxygenated analyte X forms
+   > `[X+¹⁴NO₃]⁻` — the **exact isobar** of the deprotonated covalent organonitrate
+   > `[Y−H]⁻` (Y = X + HNO₃). `[M+NO3]-` (¹⁴N) is therefore **deliberately kept OFF
+   > `NO3_15N.adducts`** (adding it would let the scorer arbitrate the isobar
+   > arbitrarily); instead the post-tier `relabel_nitrate_clusters` pass re-reads a
+   > covalent organonitrate as the cluster only when the parent X is independently
+   > corroborated (ASSIGNMENT_DETAIL §3.9). The ¹⁵N cluster channel is the ordinary
+   > `[M+^NO3]-`.
 
 3. **Pick the cluster-library key** (`reagent_for_adducts`). From the analyte
    adducts: `CH4N2O` → `"urea"`; `Br` → `"Br"`; `I` → `"I"`; `Cl` → `"Cl"`. This
@@ -102,6 +115,25 @@ peaks  ──► resolve('auto', peaks)              name/alias ──► resolv
    assignment (a reagent cluster has a known formula → it is *assigned*, just a
    different class — never left blank/red in the residual). Returns the count.
 
+6. **The positive cluster adducts carry N/O into every analyte ion** (uronium/
+   ammonium mode). The analyte channels of a positive N-reagent are not clean
+   protonation: the reagent contributes atoms to the observed ion. `[M+NH4]⁺` adds
+   `NH3` over `[M+H]⁺`, and the uronium/urea cluster `[M+(CH4N2O)H]⁺` adds a whole
+   `CH4N2O`. Two downstream consequences fall out of that extra N/O and are handled
+   in assignment, not here:
+   - **CHO-via-N-cluster is isobaric with protonated CHON.** A CHO neutral seen as
+     `[M+NH4]⁺` or `[M+(CH4N2O)H]⁺` yields the *same* ion formula as a CHON neutral
+     seen as `[M+H]⁺` (e.g. `C12H14O4[M+NH4]⁺` and `C12H17NO4[M+H]⁺` are both
+     `C12H18NO4⁺`). Mass and isotopes cannot separate them — the tier layer demotes
+     such a commit to Candidate unless an extra-spectral discriminator corroborates
+     it. See the reagent-N isobar gate in
+     [`ASSIGNMENT_DETAIL.md`](ASSIGNMENT_DETAIL.md) (tiers).
+   - **A pure hydrocarbon "seen via an N-cluster" is re-read as an N-heterocycle.**
+     A hydrocarbon has no site to bind `NH4⁺`/uronium and would show `[M+H]⁺`, so an
+     `[M+NH4]⁺` / `[M+(CH4N2O)H]⁺` reading of a bare CₓHᵧ is implausible; assignment
+     re-reads it as `[M+H]⁺` of the N-heterocycle `M' = M + (cluster − H)` (see
+     [`ASSIGNMENT_DETAIL.md`](ASSIGNMENT_DETAIL.md), reagent-N re-read).
+
 ---
 
 ## 4. Constants reference
@@ -113,6 +145,8 @@ peaks  ──► resolve('auto', peaks)              name/alias ──► resolv
 | `_HALOGEN_ISO` | Br: ⁷⁹/⁸¹ · Cl: ³⁵/³⁷ · I: ¹²⁷ | reagent-halogen isotope masses/labels |
 | `_CLUSTER_NEUTRALS` | `H2O`, `HBr`, `HF` | neutrals that cluster on a halide core (organic acids deliberately removed) |
 | `_POSITIVE_REAGENTS` | `{urea: CH4N2O}` | molecular positive reagents (protonated series) |
+| reagent-N cluster `[M+NH4]⁺` | `{N:1, H:3}` over `[M+H]⁺` | ammonium cluster adduct N/O added to the ion (isobar gate / re-read) |
+| reagent-N cluster `[M+(CH4N2O)H]⁺` | `{C:1, H:4, N:2, O:1}` | uronium/urea cluster adduct atoms added to the ion (isobar gate / re-read) |
 | `build_library` `max_n` | 4 (halide) / 6 (positive) | largest Rₙ cluster enumerated |
 | `build_library` `max_neutral` | 1 | max neutral adducts per halide core |
 | `label_reagents` `ppm` | 15.0 | reagent-cluster mass-match window |
@@ -163,6 +197,19 @@ peaks  ──► resolve('auto', peaks)              name/alias ──► resolv
   is set only for halogen reagents — never for urea.
 - **Charge bookkeeping:** halide clusters *gain* an electron (`+M_E`); the
   protonated positive series *loses* one (`−M_E`).
+- **Positive N-reagents make CHO readings isobaric with CHON.** Because `[M+NH4]⁺`
+  and `[M+(CH4N2O)H]⁺` fold reagent N/O into the observed ion, a CHO neutral via one
+  of these clusters is the *same ion formula* as a protonated CHON neutral — neither
+  mass nor isotopes distinguish them. This is a positive-mode-only hazard (the
+  halide anions add no N); the tier layer resolves it (isobar gate,
+  [`ASSIGNMENT_DETAIL.md`](ASSIGNMENT_DETAIL.md)). It is why `UR.ranges` opens N to
+  `N0-8` — the analyte space genuinely spans both readings.
+- **A bare hydrocarbon has no N-cluster site.** `NH4⁺`/uronium bind at a polar/basic
+  site a pure CₓHᵧ lacks; a hydrocarbon ionises as `[M+H]⁺`. An `[M+NH4]⁺` /
+  `[M+(CH4N2O)H]⁺` reading of a hydrocarbon is therefore re-read as the N-heterocycle
+  `[M+(cluster−H)+H]⁺` (assignment, not this layer) — *unless* that hydrocarbon also
+  has a genuine `[M+H]⁺` row (a real terpene forming `[M+NH4]⁺`), which is left
+  alone.
 - **`detect_adduct` disambiguates isotopic twins.** `NO3` vs `NO3_15N` differ only
   by their diagnostic adduct (`[M+NO3]⁻` vs `[M+^NO3]⁻`), so auto-detect picks the
   right one; `purity` then flows to the labelled-reagent envelope predictor.

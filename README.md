@@ -143,12 +143,13 @@ module map, and chemistry rules: **[SKILL.md](SKILL.md)**.
 
 ## Validation
 
-Peaky is validated end-to-end on the **orange-peeling** CIMS experiment
-(representative-sample assign → merge → clustering → Van Krevelen → PDF report):
+Peaky is validated end-to-end on a representative two-reagent CIMS oxidation
+experiment (representative-sample assign → merge → clustering → Van Krevelen →
+PDF report):
 
-- **Orange peeling (Br⁻ CIMS)** — 80 samples / ~96 min → merged **502 M0**
+- **Br⁻ CIMS run** — 80 samples / ~96 min → merged **502 M0**
   (402 Assigned / 100 Candidate), ~4× the per-file coverage.
-- **Orange peeling (Ur⁺ CIMS)** — 81 samples / ~97 min → merged **1319 M0**
+- **Ur⁺ CIMS run** — 81 samples / ~97 min → merged **1319 M0**
   (1065 Assigned / 254 Candidate); the positive-mode NH₄→amine co-variation gate
   is applied at merge.
 

@@ -208,11 +208,11 @@ check("_REPO_ENV points at the repo-root .env (next to the package)",
 
 # ---------- legacy (workspace-based) server resolution (offline, monkeypatched) ----------
 _WS = pd.DataFrame([
-    {"workspace_name": "Orange acquisitions", "workspace_id": "WACQ", "workspace_type": "ACQUISITION"},
+    {"workspace_name": "Demo acquisitions", "workspace_id": "WACQ", "workspace_type": "ACQUISITION"},
     {"workspace_name": "Sandbox", "workspace_id": "WSBX", "workspace_type": "ANALYSIS"},
 ])
 _BATCHES = pd.DataFrame([
-    {"workspace_id": "WACQ", "sample_batch_name": "Orange peeling Uronium acquisition",
+    {"workspace_id": "WACQ", "sample_batch_name": "Sample run Uronium acquisition",
      "sample_batch_id": "BURO", "polarity": "+"},
     {"workspace_id": "WSBX", "sample_batch_name": "Chamber tests", "sample_batch_id": "BCHM", "polarity": "+-"},
     {"workspace_id": "WSBX", "sample_batch_name": "Uronium scratch copy", "sample_batch_id": "BDUP", "polarity": "+"},
@@ -223,7 +223,7 @@ IO._legacy_all_batches = lambda client: _BATCHES.copy()
 IO._legacy_workspaces = lambda client: _WS.copy()
 try:
     check("resolve_batch_id exact match",
-          IO.resolve_batch_id(None, "Orange peeling Uronium acquisition") == "BURO")
+          IO.resolve_batch_id(None, "Sample run Uronium acquisition") == "BURO")
     check("resolve_batch_id case-insensitive substring",
           IO.resolve_batch_id(None, "chamber TESTS") == "BCHM")
     amb = False                                  # 'Uronium' substring hits two batches
@@ -253,9 +253,9 @@ try:
 
     ds = IO.list_datasets(_FakeClient())
     check("list_datasets falls back to workspaces (reshaped)",
-          list(ds["dataset_name"]) == ["Orange acquisitions", "Sandbox"]
+          list(ds["dataset_name"]) == ["Demo acquisitions", "Sandbox"]
           and "dataset_id" in ds.columns and "dataset_type" in ds.columns)
-    lb = IO.list_batches(_FakeClient(), dataset="Orange acquisitions")
+    lb = IO.list_batches(_FakeClient(), dataset="Demo acquisitions")
     check("list_batches legacy fallback filters by workspace",
           len(lb) == 1 and lb.iloc[0]["sample_batch_id"] == "BURO")
 finally:

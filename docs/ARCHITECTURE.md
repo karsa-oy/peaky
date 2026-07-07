@@ -4,8 +4,10 @@ This document explains **how Peaky works** for someone reading or extending the
 code. Companion docs: [`README.md`](../README.md) (install + dev loop),
 [`QUICKSTART.md`](../QUICKSTART.md) (5-minute run), [`SKILL.md`](../SKILL.md)
 (Claude-Code operating instructions), [`ASSIGNMENT.md`](ASSIGNMENT.md) (what
-assignment produces, for a scientist), [`OUTPUTS.md`](OUTPUTS.md) (every artifact,
-where + what), and [`ROADMAP.md`](ROADMAP.md) (development history).
+assignment produces, for a scientist), [`CLUSTERING.md`](CLUSTERING.md) (how the
+time series becomes co-varying families — the first of the per-module
+"how the numbers are transformed" deep-dives), [`OUTPUTS.md`](OUTPUTS.md) (every
+artifact, where + what), and [`ROADMAP.md`](ROADMAP.md) (development history).
 
 **Per-module "how the numbers are transformed" deep-dives** — one doc per pipeline
 module (inputs → stages with exact constants → outputs → gotchas), indexed in
@@ -162,11 +164,11 @@ commitments the previous ones justify. (Condensed; the authoritative table is in
 | **6**        | `ladders`         | **anchored ladder gap-fill**: walk +O/+CH₂/+CO₂/−H₂O diagonals out from Assigned anchors (Candidate tier) |
 | iso-env      | `isotopes`        | claim each committed peak's full predicted M+2/M+4 envelope; displaces weak M0s that are really a parent's satellite |
 | siloxane     | `siloxane`        | dedicated PDMS/siloxane ladder on spacing + ²⁹Si/³⁰Si envelope (CHON monsters out-score the true Si formula otherwise) |
-| cleanup      | `cleanup`         | isotope-confirmed recovery, bromide-cluster labelling, ringing/sidelobe artifact flagging; **plausibility demotes** (carbon-cluster / implausible-ionization / speculative-residual, post-tier) + reagent-halocarbon relabel (Br runs) |
+| cleanup      | `cleanup`         | isotope-confirmed recovery, bromide-cluster labelling, ringing/sidelobe artifact flagging; **plausibility demotes** (carbon-cluster / implausible-ionization / speculative-residual, post-tier) + reagent-halocarbon relabel (Br runs) + **positive-mode reagent-N re-read** (a pure hydrocarbon via an NH₄/urea cluster → `[M+H]⁺` of an N-heterocycle `M+(cluster−H)`, Ur runs) |
 | reflist      | `reflists`        | **reference peaklists** (context-gated; contaminants always on): near-tie selection prior + mass-match **rescue** re-scored by the server — soft, provenance-tagged, never overrides an isotope-scored Assigned |
 | rearbitrate  | `passes`          | **off-cal degenerate re-arbitration**: applies the tier engine's calibration-sigma + corroboration gate AT WINNER-SELECTION — an off-cal (>\|2.6\|σ), uncorroborated, high-DBE/C aromatic-monster winner is displaced by an on-cal, plausible, lower-DBE stored alternative (so a degenerate competitor the scorer over-ranked can't keep an M0 slot it would only be tier-demoted out of) |
 | degeneracy   | `degeneracy`      | honest cross-family mass-degeneracy density; an uncorroborated mass-degenerate commit is capped at Candidate |
-| tiers        | `tiers`           | final **Assigned / Candidate** verdict (margin, density, mass-error gate, degeneracy-aware) |
+| tiers        | `tiers`           | final **Assigned / Candidate** verdict (margin, density, calibrated mass-error gate, degeneracy-aware). Writes the calibrated `ppm_error_cal` (raw `ppm_error − cal_mu`). **Positive-mode reagent-N isobar gate**: a CHO-on-`[M+NH₄]⁺`/urea reading is exactly isobaric with a protonated CHON neutral → capped at Candidate unless an N-free (`[M+H]⁺`/`[M+Na]⁺`/`[M+K]⁺`) channel, the NH₄+urea pair, or a series anchor discriminates it (isotopes can't — same ion) |
 
 Also interleaved: **composite detection** (`cleanup`/`degeneracy`) flags an M0
 whose intensity exceeds its M+1-implied owner — **halide-CIMS only, a no-op in

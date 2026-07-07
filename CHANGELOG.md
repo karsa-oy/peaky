@@ -6,6 +6,45 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased] — report refactor
 
+### Added (¹⁵N-labelled nitrate CIMS)
+- **Labelled-reagent covalent-product rescue** (`peaky/assignment/labeled.py`, pipeline
+  stage `labeled_15n`). In a ¹⁵N-nitrate run a covalent ¹⁵N-organonitrate product sits
+  *j·*0.997 Da off any grid formula, so it is left unexplained or absorbed by a
+  partially-fluorinated fit. The pass re-enumerates the CHON grid at the shifted mass,
+  substitutes ¹⁵N (`^N`), and commits only under a four-gate discipline (on-calibration
+  mass, organonitrate plausibility `O≥3·n(¹⁵N)`, matched isotopologue, non-degenerate).
+  No-op unless `profile.label_isotope` is set. `NO3_15N` now declares
+  `label_isotope='^N'`, `label_max=2`.
+- **¹⁵N-nitrate ¹⁴NO₃-cluster re-read** (`cleanup.relabel_nitrate_clusters`, post-tier
+  stage `relabel_nitrate_clusters`). In a NOx-oxidation run the free chamber ¹⁴NO₃⁻
+  clusters with oxygenated analytes to give `[X+¹⁴NO₃]⁻`, the exact isobar of the
+  covalent organonitrate `[Y−H]⁻` (Y = X + HNO₃). ¹⁴NO₃ is kept **off** the scoring
+  grid (an uncontrolled isobar competitor would flip genuine organonitrates arbitrarily);
+  instead `[Y−H]⁻` is re-read as `[X+NO₃]⁻` only when the parent X is independently
+  detected via its own `[X−H]⁻` and/or its ¹⁵N cluster `[X+¹⁵NO₃]⁻` (lenient bar). Tier
+  preserved (exact isobar → same ion/mass/score). Gated on the labelled-nitrate profile.
+
+### Fixed (¹⁵N over-reach + clustering)
+- **Fluorine F/H-coherence cap** (`tiers.F_H_COHERENCE`). A partially-fluorinated M0
+  (`F≥1 & F<2·H`, H-rich, sub-PFAS F) is the classic absorber of a mass shift the grid
+  cannot express (¹⁵N-organonitrates in a ¹⁵N run); ¹⁹F is monoisotopic, so the fluorine
+  count is a mass-only claim → demote Assigned→Candidate unless a ¹³C child pins the
+  carbon count. PFCA/TFA (`H=1`) and true polyfluoro (`F≥2H`) untouched. One of three
+  fluorine-exemption closures (with the plausibility carbon-cluster F-free-clause drop
+  and the cleanup `(H+F)/C` carbon-rich floor).
+- **¹⁵N-rescue calibration gate.** The covalent-product rescue now accepts a ¹⁵N reading
+  only inside the run's own calibrated mass window (`|z| ≤ 2.6` on the corroborated ¹⁴N
+  core) instead of a blind ±2 ppm window, so it never proposes a fill the tier engine
+  would demote as an off-calibration coincidence.
+- **Equilibration-settling family demote** (`cluster.py`). A family that is flat once the
+  leading `SETTLE_FRAC` (0.18) window is dropped **and** starts high
+  (`SETTLING_START_MIN` 0.8) is demoted as instrument/reagent settling; the `_starts_high`
+  guard spares real early events. **Bright modest movers**: a bright channel
+  (`≥1000 cps`) surfaces as a big changer at the lower `BIG_CHANGE_FOLD_BRIGHT` (2.0) fold.
+- **Column-less empty match frame guard** (`cleanup` halogen recovery): a no-match
+  `score_candidates` response can be a bare empty DataFrame with no columns; filtering
+  `sample_peak_id` then raised `KeyError`. Now tolerated.
+
 ### Changed (BREAKING — output schema)
 - **Report tier `Identified` renamed to `Assigned`.** The top assignment tier is now
   labelled **Assigned** everywhere it surfaces: the `tier` column values in
@@ -64,7 +103,7 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     **Assigned-tier cross-file support** — ranked by (Assigned-file count, file
     count, best tier, best score) — instead of the single highest per-file
     `ion_score`. A no-op when a cluster carries one formula.
-  - Validated on the orange-uronium Ur⁺ batch: m/z 424.218 returns to **C18H30O10
+  - Validated on a Ur⁺ batch: m/z 424.218 returns to **C18H30O10
     [M+NH4]+** (the α-pinene HOM oligomer, Assigned across 5 files, on the bundled
     Kang reflist) and m/z 464.143 returns to **C22H23N3O7 [M+Na]+** (on-cal CHON)
     instead of the off-cal C17H31N5O6 (5 N, no N source) and C36H17N (DBE-29

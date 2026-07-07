@@ -1026,12 +1026,21 @@ def methods(ctx, pdf):
     ]
     g = ctx.get("clusters", {}).get("gates", {})
     if g:
+        if g.get("entry_gate") == "episode":
+            assigned_rule = [
+                ("b", f"• An assigned channel is TRACKED only if detected (nonzero) in ≥{g.get('min_consecutive_bins', 3)} consecutive"),
+                ("b", f"  time bins — a real episode, not a sporadic spike (unexplained bins ≥{g['unassigned_median_cps_floor']:.0f} cps median)."),
+            ]
+        else:
+            assigned_rule = [
+                ("b", f"• A bin/channel is TRACKED only if detected in ≥{g['min_trace_points']} time points and above the"),
+                ("b", f"  brightness floor (unexplained ≥{g['unassigned_median_cps_floor']:.0f} cps median; "
+                      f"assigned ≥{g['assigned_clustering_floor_cps']:.0f} cps)."),
+            ]
         lines += [
             ("gap", 0.6),
             ("h", "Time-series gating (cluster & unexplained figures)"), ("gap", 0.3),
-            ("b", f"• A bin/channel is TRACKED only if detected in ≥{g['min_trace_points']} time points and above the"),
-            ("b", f"  brightness floor (unexplained ≥{g['unassigned_median_cps_floor']:.0f} cps median; "
-                  f"assigned ≥{g['assigned_clustering_floor_cps']:.0f} cps)."),
+            *assigned_rule,
             ("b", f"• 'Varying' = cv ≥ {g['varying_cv_min']:.2f} OR transient peak/median ≥ {g['varying_burst_range']:.1f}; "
                   "flat traces are bunched."),
             ("b", f"• Clusters: correlation r > {g['cluster_corr_r']:.1f} (complete linkage), near-identical shapes"),

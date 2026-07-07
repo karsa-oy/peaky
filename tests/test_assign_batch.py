@@ -61,7 +61,7 @@ check("formula disagreement flagged (formula_agree False)",
       len(mEF) == 1 and not bool(mEF.iloc[0]["formula_agree"]), mEF.to_dict("records"))
 
 # --- cross-file consensus: corroborated formula beats single-file outlier ----
-# The orange-uronium m/z 424.218 bug: a mass-degenerate competitor reads on-cal
+# The Ur+ m/z 424.218 bug: a mass-degenerate competitor reads on-cal
 # (Assigned) with a marginally higher local score in ONE file's calibration,
 # while five files agree on the real reflist HOM. The old "best (tier, ion_score)
 # row" let the single-file outlier win; the consensus vote must pick the formula

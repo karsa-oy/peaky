@@ -132,7 +132,7 @@ def select_representative_sample_ids(peaks: pd.DataFrame, *,
 # sample where that peak's isotope envelope is actually present, i.e. where it is
 # bright. On a reagent-CIMS run the max-TIC pick is dominated by the (huge) reagent
 # ion, so it is the brightest sample for only a small fraction of ANALYTE peaks
-# (measured: 13% on the orange Br- batch) and event-only analytes stay unexplained.
+# (measured: 13% on a representative Br- batch) and event-only analytes stay unexplained.
 #
 # Brightest-coverage instead bins ALL batch peaks by m/z (timeseries.build_matrix),
 # and for each significant bin takes the sample where it is BRIGHTEST. Because each
