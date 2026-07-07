@@ -6,6 +6,46 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased] — report refactor
 
+### Added (off-grid discovery: certified-neutral + organothiophosphates)
+- **Certified-neutral discovery** (pass 7 — `peaky/assignment/certified_neutral.py`,
+  `run_pass_certified`, `scripts/certify_neutrals.py`; see `docs/CERTIFIED_NEUTRAL.md`).
+  When ≥2 distinct ion channels in one spectrum converge on the same neutral core mass
+  (different adducts, or reagent-cluster ladder rungs `[M+nUrea+H]+`, urea step 60.0324),
+  those are N independent mass constraints on one unknown — a *certificate* that licenses
+  enumerating the expanded element box (P/S/Cl, past the per-peak caps) for that mass
+  only, oracle-scored, isotope-gated (³⁴S/³⁷Cl/⁸¹Br; ¹³C never), committed onto every
+  member peak under its own channel label. The pass-5 inverse: cross-channel evidence
+  *licenses* new formula space instead of *completing* known formulas — so off-grid
+  families (organophosphate pesticides, sulfonamide plasticizers) are discoverable
+  generically, with no whitelist. Also interrogates weak M0 incumbents: a strong
+  certificate (iso-confirmed or ≥3 channels) displaces a bogus single-channel fit (e.g.
+  an unsupported `[M+Na]+`) via `clear_assignment`, audit-trailed. Reagent-free primary
+  path; optional `ts_peaks` co-variation corroboration. Validated on the NBBS urea ladder
+  (→ C₁₀H₁₅NO₂S) and cross-channel malathion (C₁₀H₁₉O₆PS₂); first real-ledger run
+  blind-rediscovered benzothiazole (C₇H₅NS).
+- **Organothiophosphate pesticide family** in positive pass-0 (`_known_species`): malathion
+  + homologs + des-ethyl TP + ~14 common OP-thioate insecticides. P is off the grid and S
+  above `max_S`, so these were structurally invisible; committed under a ≥2-channel **or**
+  diagnostic-isotope gate (the fast-path/naming layer; certified-neutral is the generic path).
+
+### Changed (corroboration + I/O robustness)
+- **Generalized the pass-0 P-corroboration gate**: any confirmed diagnostic heavy-isotope
+  envelope (³⁴S/³⁷Cl/⁸¹Br) substitutes for the 2nd ion channel — not a hard-coded
+  `organothiophosphate`+³⁴S special case. ¹³C is explicitly excluded (every C formula has a
+  ¹³C line, so it can't refute an off-grid P). A ³⁷Cl-confirmed single-channel chlorinated
+  thiophosphate now commits; a ¹³C-only one still refuses.
+- **WAF-retry the bulk batch loader** (`io_mascope.fetch_batch_peaks`): bounded exponential
+  backoff on Cloudflare/origin transients (403/429/5xx/521/522, read timeouts); non-transient
+  errors (legacy 404) re-raise immediately so the per-sample fallback still fires. Prevents a
+  burst 521 from dropping whole-batch TS loads onto the per-sample loader (which hangs).
+
+### Fixed (docs reconciliation)
+- Pass-0 docs now list the organothiophosphate family + the isotope waiver; the "flat
+  background" cluster panels are documented as amplitude-only (a coherent low-amplitude
+  diurnal wave can be mislabeled flat); reagent-is-flat caveat added (reagent normalisation
+  cannot remove the common-mode wave — it is real ambient signal); ~45 stale `passes.py:NNN`
+  citations re-anchored by function name to `passes/{directors,core,postprocess,config}.py`.
+
 ### Added (¹⁵N-labelled nitrate CIMS)
 - **Labelled-reagent covalent-product rescue** (`peaky/assignment/labeled.py`, pipeline
   stage `labeled_15n`). In a ¹⁵N-nitrate run a covalent ¹⁵N-organonitrate product sits
