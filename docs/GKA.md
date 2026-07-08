@@ -11,7 +11,7 @@ decoy-controlled automatic detector, and the static Generalized Kendrick Analysi
 **Code:** `peaky/assignment/series_gka.py` (the Pass-2 engine + KMD math),
 `peaky/assignment/series_detect.py` (automatic, decoy-controlled detection), and
 `peaky/reporting/gka_figure.py` (the static figure). The engine **proposes**;
-`passes.py` decides truth via Mascope + isotopologue corroboration.
+the pass director (`run_pass2` in passes/directors.py) decides truth via Mascope + isotopologue corroboration.
 
 > Keep this in sync with the code. Every threshold below is a named constant or a
 > literal in these three modules; if you change one there, change it here.
@@ -38,7 +38,7 @@ ANCHORS (Pass 1)                 RESIDUAL peaks                 committed ledger
    │  anchor ± n·unit (n≤1)       │  _link_count vs decoy mean   │  (drop F-monsters)
    │  ion m/z within ppm 3        │  significant: links≥12 ∧     ▼
    ▼   support = #anchors ±1      │   enrichment≥3               present_families
- Proposal[]  → passes.py          ▼  action → open family       (longest ladder > 3)
+ Proposal[]  → passes/            ▼  action → open family       (longest ladder > 3)
  (validated by match_compounds)  evidence table (manifest)       ▼
                                                           render_gka: KMD panels
                                        GKM = mz·X / mass(base);  GKD = GKM − round(GKM)
@@ -169,7 +169,7 @@ ANCHORS (Pass 1)                 RESIDUAL peaks                 committed ledger
 ## 7. Properties, invariants & gotchas
 
 - **The engine proposes; it never decides truth.** Every proposal is validated by
-  `passes.py` against Mascope `match_compounds` and kept only if the isotopologue
+  the pass director (`run_pass2` in passes/directors.py) against Mascope `match_compounds` and kept only if the isotopologue
   pattern corroborates it — a ≥ 2-anchor proposal earns higher confidence.
 - **Decoys make detection honest.** A unit is significant only when its link count
   is both well above the irrational-offset decoy baseline (enrichment ≥ 3) **and**

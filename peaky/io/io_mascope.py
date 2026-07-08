@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -326,6 +327,43 @@ def fetch_batch_samples(client, batch: str, *, dataset: str | None = None,
     return sl
 
 
+# Cloudflare-WAF / origin-5xx / read-timeout signatures that CLEAR on retry. A
+# Mascope origin behind Cloudflare throws these under burst load (521/522 origin
+# down, 403 "Attention Required" WAF challenge, 429 rate-limit, gateway 5xx, read
+# timeouts). Distinct from a genuinely-missing endpoint (404 on a legacy server),
+# which must NOT be retried -- it falls through to the per-sample loader.
+_TRANSIENT_SIGNS = ("403", "429", "500", "502", "503", "504", "521", "522",
+                    "attention required", "timed out", "timeout",
+                    "temporarily unavailable", "bad gateway")
+
+
+def _is_transient(exc: Exception) -> bool:
+    s = str(exc).lower()
+    return any(sig in s for sig in _TRANSIENT_SIGNS)
+
+
+def _with_waf_retry(fn, *, tries: int = 4, base_delay: float = 2.0):
+    """Call ``fn()``; on a transient WAF/5xx/timeout error back off (base_delay·2ⁿ:
+    2s, 4s, 8s) and retry up to ``tries`` times. A NON-transient error re-raises
+    immediately so the legacy-server fallback in the caller still fires. Tests pass
+    ``base_delay=0`` to avoid real sleeps."""
+    for attempt in range(tries):
+        try:
+            return fn()
+        except Exception as exc:
+            if not _is_transient(exc) or attempt == tries - 1:
+                raise
+            delay = base_delay * (2 ** attempt)
+            try:
+                from loguru import logger
+                logger.warning(
+                    f"transient server error ({type(exc).__name__}); "
+                    f"retry {attempt + 1}/{tries - 1} in {delay:.0f}s")
+            except Exception:
+                pass
+            time.sleep(delay)
+
+
 def fetch_batch_peaks(client, dataset: str, batch: str, *, save_path: str | None = None
                       ) -> pd.DataFrame:
     """Load the per-sample peak time-series for a whole batch (the TS / cluster /
@@ -335,11 +373,15 @@ def fetch_batch_peaks(client, dataset: str, batch: str, *, save_path: str | None
     # name with metacharacters (e.g. the ^ in '... ^Nitrate ...' or '(Ur+ CIMS)')
     # must be escaped or it silently matches nothing -- same as fetch_batch_samples.
     # confirm_above=None: never prompt (non-interactive; batches can exceed 100 samples).
+    # Bulk load is the live default path (local scoring means match_compounds is off
+    # by default); WAF-retry it so a burst 521/403 doesn't drop us onto the slow
+    # per-sample legacy loader (which then hangs over ~2000 samples).
     try:
-        peaks = client.load_peaks(dataset=dataset, batches=escape_batch(batch),
-                                  confirm_above=None)
+        peaks = _with_waf_retry(
+            lambda: client.load_peaks(dataset=dataset, batches=escape_batch(batch),
+                                      confirm_above=None))
     except Exception:
-        peaks = None  # legacy server (no /api/datasets) -> per-sample loader below
+        peaks = None  # legacy server (no /api/datasets) or exhausted -> per-sample loader below
     if peaks is None or len(peaks) == 0:
         peaks = _legacy_load_batch_peaks(client, batch, dataset=dataset)
     if peaks is None or len(peaks) == 0:

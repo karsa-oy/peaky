@@ -86,7 +86,7 @@ The lowest layer provides exact monoisotopic masses, Hill-notation formula parsi
 
 | Gate | Value | Effect / ref |
 |---|---|---|
-| `search_ppm` | **3.0 ppm** | Grid enumeration window (~8σ of 0.35 ppm instrument accuracy). Reduced 5→3 (v0.8.0), ~1.7× fewer candidates. `match_compounds` independently keeps a **5 ppm** window so real 29Si/81Br satellites are still found; the z-gate owns final rejection. (PassConfig, passes.py:47) |
+| `search_ppm` | **3.0 ppm** | Grid enumeration window (~8σ of 0.35 ppm instrument accuracy). Reduced 5→3 (v0.8.0), ~1.7× fewer candidates. `match_compounds` independently keeps a **5 ppm** window so real 29Si/81Br satellites are still found; the z-gate owns final rejection. (`PassConfig` in passes/config.py) |
 | Default grid C-max (ambient) | 40, auto-scaled `min(40, max(12, est_max_C+4))` | contexts.py:52; build_ranges |
 | Default grid O-max (ambient) | 30 (uronium: 32) | contexts.py:53,205 |
 | Uronium grid | C-max 46, O-max 32, max_Si 12, min_C_for{Si}=2 | contexts.py:186–210 |
@@ -99,7 +99,7 @@ The lowest layer provides exact monoisotopic masses, Hill-notation formula parsi
 - `_COMPLEXITY_WEIGHT = {N:3, S:8, P:25, Cl:50, Br:50, Si:80, I:80, F:30}`.
 - Penalty = `min(Σ weight[el]·count[el] · 0.01, 0.20)`. CHO forms face zero prior; Br/Cl/Si/I need a 0.05–0.20 eff_score margin over CHO to win.
 
-### 2.5 The arbitration scoring model (`arbitrate`, passes.py:242–384)
+### 2.5 The arbitration scoring model (`arbitrate` in passes/core.py)
 
 A **pure function** selecting a single best M0 owner per observed peak from the flat `match_compounds` table.
 
@@ -120,7 +120,7 @@ A **pure function** selecting a single best M0 owner per observed peak from the 
 
 **Output**: `{winners DataFrame[peak_id, neutral, ion_formula, adduct, ion_score, compound_score, raw_score, eff_score, eff_margin, ppm_error, n_iso, tied, alternatives], iso_children DataFrame[peak_id, parent_peak_id, iso_label, iso_score]}`.
 
-### 2.6 Confidence labelling (`confidence_label`, passes.py:119–138)
+### 2.6 Confidence labelling (`confidence_label` in passes/core.py)
 
 Grades a winner on raw score + offset-aware mass proximity + isotope count + tie status:
 
@@ -138,7 +138,7 @@ Pre-calibration (`cal_mu=None`) the center is 0 ppm. The method suffix (e.g. `se
 
 ## 3. The Passes, In Order
 
-`commit_winners(ledger, arb, *, pass_no, method, context, cfg, lock, min_raw_score, confidence_suffix="", claim_unexplained_only=False, only_peaks=None)` (passes.py:437–577) is the shared commit engine for all passes. Gates at commit time:
+`commit_winners(ledger, arb, *, pass_no, method, context, cfg, lock, min_raw_score, confidence_suffix="", claim_unexplained_only=False, only_peaks=None)` (`commit_winners` in passes/core.py) is the shared commit engine for all passes. Gates at commit time:
 - Reject if `raw_score < min_raw_score` (line 461).
 - Reject if `ppm_error` is NaN (no mass evidence) (lines 465–467).
 - **Calibrated mass gate** (lines 472–477): if `cal_mu` set, `z = |ppm − cal_mu|/cal_sigma`; reject if `z > cal_z_pattern (4.0)`; if `cal_z_accept (2.0) < z ≤ 4.0` require pattern evidence (`n_iso ≥ 1` OR `series_like`). Uncalibrated → gate off.
@@ -147,32 +147,32 @@ Pre-calibration (`cal_mu=None`) the center is 0 ppm. The method suffix (e.g. `se
 - Attach iso_children; displace weak non-locked child M0s onto stronger parents within the pass (lines 534–570).
 - `lock=True` only in pass 1 (and pass 0 / siloxane via their own `lock_peaks`).
 
-### 3.0 Pass 0 — Known-Species Registry (passes.py:686–830)
+### 3.0 Pass 0 — Known-Species Registry (`run_pass0_known` in passes/directors.py)
 
 **Purpose**: assign high-confidence contaminant series and atmospheric radicals BEFORE the organic CHO/CHON pass, and **lock** them so pass 1 grid fits cannot displace them.
 
-**`_known_species(polarity)` registry** (passes.py:595–672), polarity-specific:
+**`_known_species(polarity)` registry** (`_known_species` in passes/directors.py), polarity-specific:
 - **Negative-mode Br-CIMS**: `atmospheric {HO2, HNO3, HNO2, HNO4}`, `nitroaromatic {C6H4N2O5, C6H5NO3, C6H5NO4, C7H6N2O5}`, `perfluoroacid {C2HF3O2 … C12HF23O2}`, `chlorinated_paraffin {C10H17Cl3 … C30H3Cl15}`, `contaminant:silanediol {C2H8O2Si … C16H50O9Si8}`.
-- **Positive-mode urea-CIMS**: ONLY `organophosphate {C6H15O4P … C21H21O4P}` — the grid itself reaches N-bases and oxygenated VOCs, so positive mode largely skips pass 0 (polarity check at passes.py:603).
+- **Positive-mode urea-CIMS**: `organophosphate {C6H15O4P … C21H21O4P}` (phosphate esters / phosphine oxides — TEP/TBP/TPPO…, monoisotopic P) **and** `organothiophosphate {C10H19O6PS2 malathion … chlorpyrifos, diazinon, parathion, phorate, dimethoate, phosmet}` (~19 OP-thioate/-dithioate insecticides incl. malathion ±CH₂ homologs + a des-ethyl transformation product; P off the grid, S₂/S₃ above the grid's `max_S`). The organic grid still reaches N-bases and oxygenated VOCs, so positive mode otherwise largely skips pass 0 (polarity check in passes/directors.py).
 
 **Driver `run_pass0_known`**: scores all known-species formulas via Mascope (isotope model covers 29Si/30Si + reagent halogen). For each base ion, commits those passing **three independent gates**:
 
 | Gate | Value | Ref |
 |---|---|---|
-| Mass offset-aware | `|ppm_error − prior_offset| ≤ 2.0 ppm` | passes.py:731 |
-| Own-81Br twin ratio (`[M+Br]-` adducts only) | `0.5 ≤ h_twin/h_M0 ≤ 1.7` (twin at m/z+1.9979535) — composite detector | passes.py:743–753 |
-| Organophosphate channel gate | `≥ 2` distinct ion mechanism_ids on-cal (`|ppm−prior_offset|≤2.0`) — P is monoisotopic, no twin | passes.py:755–761 |
-| Chlorinated-paraffin isotope gate | `n_kids ≥ 2` matched 37Cl satellites — Cl is off-grid, isotope envelope alone proves it | passes.py:770–779 |
+| Mass offset-aware | `|ppm_error − prior_offset| ≤ 2.0 ppm` | `run_pass0_known` in passes/directors.py |
+| Own-81Br twin ratio (`[M+Br]-` adducts only) | `0.5 ≤ h_twin/h_M0 ≤ 1.7` (twin at m/z+1.9979535) — composite detector | `run_pass0_known` in passes/directors.py |
+| P-bearing (organophosphate + organothiophosphate) corroboration gate | `≥ 2` distinct ion mechanism_ids on-cal (`|ppm−prior_offset|≤2.0`) — P is monoisotopic, no twin — **OR** a confirmed **diagnostic** heavy-isotope envelope (³⁴S / ³⁷Cl / ⁸¹Br) may substitute for the 2nd channel (e.g. des-ethyl malathion, ³⁴S-confirmed, seen only as [M+H]⁺). **¹³C is explicitly excluded** — every C-bearing formula has a ¹³C line, so it refutes nothing and can never license an off-grid P. | `run_pass0_known` in passes/directors.py |
+| Chlorinated-paraffin isotope gate | `n_kids ≥ 2` matched 37Cl satellites — Cl is off-grid, isotope envelope alone proves it | `run_pass0_known` in passes/directors.py |
 
-**Confidence**: Good if `ion_score ≥ 0.7` or `n_kids ≥ 2`, else Low. **All pass-0 commits are locked** (`lock_peaks`, passes.py:808). Iso children attached from `is_base=False` rows with `iso_score > 0.4`. Method = `known:{family}`; commentary records the tag (atmospheric / nitroaromatic / organophosphate / perfluoroacid / chlorinated-paraffin / contaminant). `relabel_confidence` skips locked M0s, so a deliberate Low stays Low — the lock is the intent.
+**Confidence**: Good if `ion_score ≥ 0.7` or `n_kids ≥ 2`, else Low. **All pass-0 commits are locked** (`lock_peaks`, in `run_pass0_known` passes/directors.py). Iso children attached from `is_base=False` rows with `iso_score > 0.4`. Method = `known:{family}`; commentary records the tag (atmospheric / nitroaromatic / organophosphate / organothiophosphate / perfluoroacid / chlorinated-paraffin / contaminant). `relabel_confidence` skips locked M0s, so a deliberate Low stays Low — the lock is the intent.
 
-**Recovery pass `_recover_isotope_locked_known`** (passes.py:833–944): for `_RECOVERABLE_KNOWN_FAMS = {"chlorinated_paraffin"}` only (Cl/Br/S families with isotope diagnostics). Re-anchors families the server scored too low to anchor (`sample_peak_id` NaN — e.g. 15N-labelled poly-Cl whose aggregate score collapsed under 14N phantoms + wide envelope). Commits **only when BOTH**: (1) a real unexplained ledger peak within `anchor_tol=2.0 ppm` (offset-aware, `theo·(1+prior_offset·1e-6)`, line 877) of the theoretical M0, AND (2) `≥ min_sats=2` confirmed 37Cl satellites within `sat_ppm=7.0 ppm` (looser than M+1/M+2's 5 ppm). Height floors: M0 `≥ height_floor=20 cps`, satellites `≥ 10 cps`. Cannot fabricate — no peak or no envelope means no commit. Monoisotopic F (perfluoroacid) and P (organophosphate) are NOT recoverable.
+**Recovery pass `_recover_isotope_locked_known`** (`_recover_isotope_locked_known` in passes/directors.py): for `_RECOVERABLE_KNOWN_FAMS = {"chlorinated_paraffin"}` only (Cl/Br/S families with isotope diagnostics). Re-anchors families the server scored too low to anchor (`sample_peak_id` NaN — e.g. 15N-labelled poly-Cl whose aggregate score collapsed under 14N phantoms + wide envelope). Commits **only when BOTH**: (1) a real unexplained ledger peak within `anchor_tol=2.0 ppm` (offset-aware, `theo·(1+prior_offset·1e-6)`) of the theoretical M0, AND (2) `≥ min_sats=2` confirmed 37Cl satellites within `sat_ppm=7.0 ppm` (looser than M+1/M+2's 5 ppm). Height floors: M0 `≥ height_floor=20 cps`, satellites `≥ 10 cps`. Cannot fabricate — no peak or no envelope means no commit. Monoisotopic F (perfluoroacid) and P (organophosphate) are NOT recoverable.
 
 ### Pre-Pass-1 — Offset Estimation
 
 `io_mascope.estimate_offset(peaks, min_n=8)` computes the median ppm of base-ion server matches (skipping heavy-isotope rows), returning None if `< 8` matches. `cfg.prior_offset = prior if prior is not None else estimate_offset(raw)` (default 0.0). This seeds the offset-aware pass-0 / pass-1 pre-commit gates so a large systematic offset (e.g. −2.45 ppm uronium source) doesn't blind pass 0 to on-trend contaminants. `prescan(ledger)` detects isotope patterns (Br/Cl/S/13C) and caps the grid C-range.
 
-### 3.1 Pass 1 — CHO/CHON Backbone (passes.py:1880–1901)
+### 3.1 Pass 1 — CHO/CHON Backbone (`run_pass1` in passes/directors.py)
 
 **Purpose**: assign and **lock** the high-confidence CHO/CHON backbone before calibration.
 
@@ -189,21 +189,21 @@ Pre-calibration (`cal_mu=None`) the center is 0 ppm. The method suffix (e.g. `se
 
 ### Pre/Pass-1 Self-Calibration
 
-`calibrate(ledger, cfg)` (passes.py:152–183) runs AFTER pass 1:
+`calibrate(ledger, cfg)` (`calibrate` in passes/core.py) runs AFTER pass 1:
 1. Select backbone: M0 rows with `ppm_error` notna AND `score ≥ tau_good (0.80)` AND **CHO-CHON only** (`set(parse_formula) ⊆ {C,H,O,N}`). Backbone is **score-selected**, not confidence-selected, so a large offset doesn't exclude the real backbone.
 2. `mu = median(ppm_error)`, `sigma = max(1.4826·MAD, cal_sigma_floor=0.25 ppm)`.
 3. Require `n ≥ cal_min_n=20`, else return None (calibration stays off, mass gate disabled).
 4. Store `cfg.cal_mu`, `cfg.cal_sigma`.
 
-`relabel_confidence(ledger, cfg)` (passes.py:201–237) then re-grades **unlocked** pass-1 M0s against `cal_mu` (vs 0 pre-calibration), preserving the method suffix. At a large offset the whole backbone reads Low pre-calibration; this recovers true High/Good. Locked commits (pass-0 known, siloxane, pass-1 High) are immune. `z_of(ppm, cfg) = |ppm − cal_mu|/cal_sigma` (passes.py:185–192).
+`relabel_confidence(ledger, cfg)` (`relabel_confidence` in passes/core.py) then re-grades **unlocked** pass-1 M0s against `cal_mu` (vs 0 pre-calibration), preserving the method suffix. At a large offset the whole backbone reads Low pre-calibration; this recovers true High/Good. Locked commits (pass-0 known, siloxane, pass-1 High) are immune. `z_of(ppm, cfg) = |ppm − cal_mu|/cal_sigma` (`z_of` in passes/core.py).
 
 **Persisted calibrated ppm (Q1)**: `tiers.stamp_calibrated_ppm(ledger)` (tiers.py:499–530, called from `apply_tiers` at tiers.py:555) writes a new ledger column **`ppm_error_cal = ppm_error − mu` (OFFSET ONLY)** on every row, where `mu` is the robust per-file mass offset the tier engine already fits from the corroborated CHO/CHON core (`tiers._calibrate` — median + scaled MAD; `CAL_MIN_N=20`, `CAL_SIGMA_FLOOR=0.15` ppm). The raw `ppm_error` stays as the theoretical error of record; `ppm_error_cal` re-centres the *displayed* accuracy without any new fitting (Ur ≈ +0.10 ppm, Br ≈ −0.13 ppm offsets removed). A per-file LINEAR (slope) term was tested and rejected. It falls back to the Assigned-M0 `ppm_error` median when the core is too small to calibrate, and stashes `(mu, sigma)` in `ledger.attrs`. **No tier decision reads this column** — tiering was already calibration-aware (`_calibrate` centres the z-gate on the robust median, not 0) — so it is display/provenance-only and tier counts are unchanged. The QC panel plots `ppm_error_cal` when present, raw otherwise.
 
 ### Pre-Pass-4 Demotions and First Iso-Envelope
 
 - `complete_isotope_envelopes` (1st run, see §3.5) — claim full patterns, displace weak M0s.
-- `demote_carbon_inconsistent` (passes.py:1284–1342): clears unlocked M0s whose 13C satellite contradicts the carbon count — `C ≥ 8`, reliable 13C `≥ height_cutoff`, `|c_est − n_c| > max(2.5, 0.35·n_c)`, **no Si** (Si skipped at 1306–1307: 29Si M+1 overwhelms 13C). Frees bright peaks for re-assignment.
-- `demote_massgate_monsters` (passes.py:1345–1371): clears unlocked M0s with `z > cal_z_pattern (4.0)`.
+- `demote_carbon_inconsistent` (in passes/postprocess.py): clears unlocked M0s whose 13C satellite contradicts the carbon count — `C ≥ 8`, reliable 13C `≥ height_cutoff`, `|c_est − n_c| > max(2.5, 0.35·n_c)`, **no Si** (Si skipped: 29Si M+1 overwhelms 13C). Frees bright peaks for re-assignment.
+- `demote_massgate_monsters` (in passes/postprocess.py): clears unlocked M0s with `z > cal_z_pattern (4.0)`.
 
 Both run BEFORE pass 4 so freed peaks are re-offered.
 
@@ -211,7 +211,7 @@ Both run BEFORE pass 4 so freed peaks are re-offered.
 
 `assign_siloxane_ladder` claims the PDMS `+C2H6OSi` (+74.019) oligomer ladder, mass-degenerate per rung with high-O CHON fits, using the series spacing + the 29Si/30Si envelope as decisive evidence, and **locks** its commits so the CHON-centric audits can't undo them. **Si-count intensity gate** (`_m1_ratio`, audit rule): the 29Si M+1 must not only be *matched* by the oracle but its **observed (M+1)/(M0) ratio must be ≥ `SI_M1_MIN_FRAC` (0.6) × the predicted `nSi·4.68% + nC·1.07%`** — otherwise the Si count is over-claimed and the commit is skipped. This stopped C₈H₂₆O₅Si₄ being locked over the real HOM C₁₀H₁₈O₁₁ at m/z 393.004 (M+1 ~13% where Si₄ needs ~27%).
 
-### 3.2 Pass 2 — GKA Series Expansion (passes.py:1906–1947)
+### 3.2 Pass 2 — GKA Series Expansion (`run_pass2` in passes/directors.py)
 
 **Purpose**: iterative greatest-common-addition series expansion from locked M0 anchors. Walks homologous chains (CH2, PDMS `C2H6OSi`, CF2) outward step-by-step, re-anchoring on each round's confirmed members; each proposal is Mascope-scored.
 
@@ -223,13 +223,13 @@ Both run BEFORE pass 4 so freed peaks are re-offered.
 
 Commits with `method="gka-series"`, `confidence_suffix="series"`, **not locked**, `claim_unexplained_only=True` (only fills gaps; never displaces a prior commit).
 
-### 3.3 Pass 3 — Contaminant Families & HX-Clusters (passes.py:1953–2091)
+### 3.3 Pass 3 — Contaminant Families & HX-Clusters (`run_pass3` in passes/directors.py)
 
 **Purpose**: low-quality recovery. Opens the context's contaminant families and resolves HX-cluster artifacts.
 
-**Stage 1 — HX clusters** (`_resolve_hx_clusters`, passes.py:1688–1813): for each locked anchor Y (± 1 CH2 GKA homologs), proposes `Y+HX` scored under `[M+X]-` (e.g. `Y·HBr·Br-` on Br-CIMS — the identical ion to the covalent alias), commits with `neutral=Y`, `adduct=[M+HX+X]-`, method `cluster:Br`. Accepts the base line OR the +2 heavy-isotope line. The `cluster_claimed` set excludes these compositions from the covalent family below.
+**Stage 1 — HX clusters** (`_resolve_hx_clusters` in passes/directors.py): for each locked anchor Y (± 1 CH2 GKA homologs), proposes `Y+HX` scored under `[M+X]-` (e.g. `Y·HBr·Br-` on Br-CIMS — the identical ion to the covalent alias), commits with `neutral=Y`, `adduct=[M+HX+X]-`, method `cluster:Br`. Accepts the base line OR the +2 heavy-isotope line. The `cluster_claimed` set excludes these compositions from the covalent family below.
 
-**Stage 2 — families** (`pass3_families` per context + auto-detected GKA evidence): family-specific element budgets override context caps (e.g. sulfate S 1-1/O 3-4; organosulfate S 1-1/O 3-6; nitrate N 1-2/O 3-8; siloxane Si 1-6/O 1-6/C 2-12/H 6-36; PDMS Si 4-12/O 3-14/C 8-26/H 18-78). **Chain-based enumeration** (passes.py:2020–2050): detected repeat-unit chains (CF2 links, Si-O-Si rungs) open a family and bypass context elemental caps (CF2 chains open `fluorinated` even on ambient `max_F=0`), guarded by series consistency + arbitration priors. Bromo/chloro: drop covalent-X where `X−HX` is an existing anchor or is `cluster_claimed`.
+**Stage 2 — families** (`pass3_families` per context + auto-detected GKA evidence): family-specific element budgets override context caps (e.g. sulfate S 1-1/O 3-4; organosulfate S 1-1/O 3-6; nitrate N 1-2/O 3-8; siloxane Si 1-6/O 1-6/C 2-12/H 6-36; PDMS Si 4-12/O 3-14/C 8-26/H 18-78). **Chain-based enumeration** (in `run_pass3`, passes/directors.py): detected repeat-unit chains (CF2 links, Si-O-Si rungs) open a family and bypass context elemental caps (CF2 chains open `fluorinated` even on ambient `max_F=0`), guarded by series consistency + arbitration priors. Bromo/chloro: drop covalent-X where `X−HX` is an existing anchor or is `cluster_claimed`.
 
 Commits with `method="contaminant:{family}"`, `confidence_suffix=family`, **not locked**, `claim_unexplained_only=True`, `min_raw_score=tau_suspect=0.50`. `bromo_organic`/`chloro_organic` auto-added on Br/Cl reagent.
 
@@ -239,13 +239,13 @@ Isotope pairs + series chains, DBE-only plausibility (no `match_compounds`, just
 
 ### 3.5 Pass 5 — Completion & Isotope Envelopes
 
-**`run_pass5_completion`** (passes.py:947–1027). **Purpose**: open the known-neutral space after passes 1–4 lock. Two mechanisms:
+**`run_pass5_completion`** (in passes/directors.py). **Purpose**: open the known-neutral space after passes 1–4 lock. Two mechanisms:
 - **(a) Cross-channel partners**: for each adduct, `ion_mz(neutral, adduct)` of a High/Good assigned neutral, `_peak_near` within `search_ppm` → targets (e.g. `[M+Br]-` partner of a Good `[M-H]-`).
 - **(b) Series-gap members**: `formula_add(neutral, "CH2", k)` to find ladder anchors, interpolate missing rungs, `ion_mz`, `_peak_near`. Malformed/invalid additions return None and are skipped.
 
 `score_fn` scores all targets → `arbitrate` → `commit_winners(claim_unexplained_only=True, only_peaks=union)`. The **`completion` method tag grants the pattern-evidence z-band** (z up to `cal_z_pattern=4.0`) because the neutral is already independently assigned (lines 455–456).
 
-**`complete_isotope_envelopes(ledger, cfg, min_rel=0.06, ppm=12.0)`** (passes.py:1045–1140). Runs **3 times** (before pass 4, after audits, after pass 6). Claims the FULL predicted isotope envelope of every committed M0:
+**`complete_isotope_envelopes(ledger, cfg, min_rel=0.06, ppm=12.0)`** (in passes/postprocess.py). Runs **3 times** (before pass 4, after audits, after pass 6). Claims the FULL predicted isotope envelope of every committed M0:
 1. `isotope_pattern(ion_formula, min_rel=0.06, max_shift=12.0)` (isotopes.py:90–163) predicts `(dmass, rel_intensity, label)` lines ≥ 6% via per-atom convolution, merging within ~3 mDa.
 2. Process M0s in **ascending m/z** (line 1070–1071) so a satellite cannot claim a lighter parent.
 3. For each predicted line: `line_ppm = 5.0 if dmass < 2.5 else cfg.ppm (12.0)` (line 1096) — tight for M+1/M+2 to separate 13C (+1.00335) from 29Si (+0.99957, 3.8 mDa apart), loose for multi-isotope M+4+ centroids.
@@ -254,27 +254,27 @@ Isotope pairs + series chains, DBE-only plausibility (no `match_compounds`, just
 
 | Gate | Value | Ref |
 |---|---|---|
-| `min_rel` | 0.06 (only claim lines ≥ 6% of M0) | passes.py:1046 |
-| M+1/M+2 ppm | 5.0 | passes.py:1096 |
-| M+4+ ppm | 12.0 (`cfg.ppm`) | passes.py:1096 |
-| Attach ratio | 0.3–3.5 | passes.py:1110 |
-| Displace ratio | 0.45–2.2 | passes.py:1128 |
-| Locked immunity | locked M0 never displaced | passes.py:1118 |
+| `min_rel` | 0.06 (only claim lines ≥ 6% of M0) | `complete_isotope_envelopes` in passes/postprocess.py |
+| M+1/M+2 ppm | 5.0 | `complete_isotope_envelopes` in passes/postprocess.py |
+| M+4+ ppm | 12.0 (`cfg.ppm`) | `complete_isotope_envelopes` in passes/postprocess.py |
+| Attach ratio | 0.3–3.5 | `complete_isotope_envelopes` in passes/postprocess.py |
+| Displace ratio | 0.45–2.2 | `complete_isotope_envelopes` in passes/postprocess.py |
+| Locked immunity | locked M0 never displaced | `complete_isotope_envelopes` in passes/postprocess.py |
 
 ### Post-Run Audits
 
-**`audit_isotopes`** (passes.py:1374–1527): on unlocked M0s.
+**`audit_isotopes`** (in passes/postprocess.py): on unlocked M0s.
 - **Br-doublet repair**: two M0s 1.9980–1.9988 apart at height ratio 0.6–1.45 — one is the 81Br isotopologue. If the lighter carries Br → attach the heavier as `81Br` child. If **neither** carries Br → **clear both, ONLY if `cfg.reagent_element == "Br"`** (lines 1424–1440). On non-Br reagents (e.g. 15NO3-) unrelated CHON pairs routinely sit 1.998 apart; clearing both there destroyed 54 real `[M+15NO3]-` M0s (fixed ed2001a).
 - **13C sweeper**: attaches obvious unclaimed 13C satellites. Includes twin-satellite fallback (a 13C+81Br satellite counts as carbon evidence, lines 1487–1497) and cross-channel fallback (same neutral assigned High/Good on another channel spares a missing-13C clear, lines 1498–1510).
 - **13C carbon-clamp**: same threshold as `demote_carbon_inconsistent`; only fires on a 13C satellite `≥ height_cutoff` (line 1475); Si-bearing skipped.
 - **13C completeness**: formula predicting a bright 13C with no peak → cleared.
 
-**`audit_mass_gate`** (passes.py:1530–1569): applies the calibrated mass gate to pre-calibration (pass-1) commits. Clears (never rewrites) M0s with `z > cal_z_pattern (4.0)`, or `cal_z_accept (2.0) < z ≤ 4.0` with no pattern evidence. No-op when uncalibrated. Returns `{cleared_z, cleared_z_noiso, cleared_nan}`.
+**`audit_mass_gate`** (in passes/postprocess.py): applies the calibrated mass gate to pre-calibration (pass-1) commits. Clears (never rewrites) M0s with `z > cal_z_pattern (4.0)`, or `cal_z_accept (2.0) < z ≤ 4.0` with no pattern evidence. No-op when uncalibrated. Returns `{cleared_z, cleared_z_noiso, cleared_nan}`.
 
 ### Composites and Pass 6
 
-- `detect_composites` (passes.py:1150–1234): flags (does not demote) M0s whose intensity exceeds what their halogen-free M+1 (13C/29Si/15N) implies — `min_m1_rel≥0.06`, `excess_frac≥0.25`, `min_excess≥400 cps`, `ppm=8.0`. Halogen content guessed from the even-shift M+2/M+4 residual. Runs only when `has_halogen_adduct` (in positive mode an even shift is isotope structure, not co-component).
-- `split_composites` (passes.py:1237–1281): de-blends — owner keeps `assigned_fraction` of measured height; a synthetic sub-peak `<id>.2` (same m/z, `synthetic=True`, `host_peak_id`) carries the co-component share + halogen guess. Signal conserved.
+- `detect_composites` (in passes/postprocess.py): flags (does not demote) M0s whose intensity exceeds what their halogen-free M+1 (13C/29Si/15N) implies — `min_m1_rel≥0.06`, `excess_frac≥0.25`, `min_excess≥400 cps`, `ppm=8.0`. Halogen content guessed from the even-shift M+2/M+4 residual. Runs only when `has_halogen_adduct` (in positive mode an even shift is isotope structure, not co-component).
+- `split_composites` (in passes/postprocess.py): de-blends — owner keeps `assigned_fraction` of measured height; a synthetic sub-peak `<id>.2` (same m/z, `synthetic=True`, `host_peak_id`) carries the co-component share + halogen guess. Signal conserved.
 - **Pass 6 (ladder)**: gapfill homolog/oxidation diagonals; then the 3rd `complete_isotope_envelopes`.
 
 ### 3.6 Off-cal re-arbitration (`rearbitrate_offcal_degenerate`, pipeline stage `rearbitrate`, assign.py:236)
@@ -539,7 +539,7 @@ A reference list is used in **three** places, all soft and provenance-tagged (a 
 |---|---|
 | `chemistry.py` | Element masses, formula parse/format, neutral/ion mass, DBE + Senior + oxygen gates, grid enumeration, complexity penalty |
 | `ledger.py` | The per-peak DataFrame: create, commit/attach/clear/displace/mark/lock, role/lock queries, validate, stats; invariants I2–I5 |
-| `passes.py` | All assignment passes (0–6), arbitration, calibration, confidence labelling, commit engine, iso-envelope completion, audits, composites, pre-pass-4 demotions |
+| `passes/` (package) | All assignment passes (0–6), arbitration, calibration, confidence labelling, commit engine, iso-envelope completion, audits, composites, pre-pass-4 demotions. Split into `directors.py` (pass drivers + known-species registry), `core.py` (`arbitrate` / `calibrate` / `commit_winners` / `confidence_label` / `relabel_confidence` / `z_of`), `postprocess.py` (iso-envelope completion, audits, composites, demotions), `config.py` (`PassConfig`) |
 | `assign.py` | `run()` orchestrator wiring the full per-sample multi-pass chain |
 | `contexts.py` | ContextProfile (Van Krevelen windows, heteroatom caps, grid bounds, pass3 families), filter_by_profile, classify_compound, contaminant family budgets |
 | `reagents.py` | Cluster-ion library (isotopologue-enumerated), `label_reagents`, reagent auto-inference |

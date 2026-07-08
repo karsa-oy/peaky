@@ -1112,6 +1112,108 @@ s_ope1 = P.run_pass0_known(None, "SID", led_ope1, PROF_URO, ACFG,
 check("pass0 refuses a single-channel organophosphate (no cross-channel support)",
       s_ope1["committed"] == 0, s_ope1)
 
+# ---------- positive polarity: organothiophosphate pesticide family (malathion) ----
+check("_known_species(positive) carries the organothiophosphate family with malathion",
+      "organothiophosphate" in P._known_species("positive")
+      and "C10H19O6PS2" in P._known_species("positive")["organothiophosphate"])
+# malathion (C10H19O6PS2) seen in BOTH [M+H]+ and [M+(urea)H]+ -> committed
+_mzMH = CH.ion_mz("C10H19O6PS2", "[M+H]+")
+_mzMU = CH.ion_mz("C10H19O6PS2", "[M+(CH4N2O)H]+")
+def _mal_row(ion, mz, pid, mech):
+    return dict(compound_formula="C10H19O6PS2", compound_score=0.9, ion_formula=ion,
+                ion_score=0.9, iso_label="M0", is_base=True, theo_mz=mz,
+                rel_abundance=1.0, iso_score=0.9, sample_peak_id=pid,
+                sample_peak_mz=mz, sample_peak_intensity=5000.0, ppm_error=0.0,
+                abundance_error=0.0, mechanism_id=mech)
+def fake_mal2(client, sid, formulas, *, mechanism_ids=None, **kw):
+    if "C10H19O6PS2" not in formulas:
+        return pd.DataFrame([])
+    return pd.DataFrame([_mal_row("C10H20O6PS2+", _mzMH, "malH", "mH"),
+                         _mal_row("C11H24N2O7PS2+", _mzMU, "malU", "mU")])
+led_mal = mk_ledger([("malH", _mzMH, 5000.0), ("malU", _mzMU, 4000.0)])
+s_mal = P.run_pass0_known(None, "SID", led_mal, PROF_URO, ACFG,
+                          ["[M+H]+", "[M+(CH4N2O)H]+"], score_fn=fake_mal2,
+                          log=lambda *a: None)
+check("pass0 commits malathion across both ion channels (organothiophosphate)",
+      s_mal["committed"] == 2
+      and led_mal.loc[led_mal.peak_id == "malH", "neutral_formula"].iloc[0] == "C10H19O6PS2"
+      and led_mal.loc[led_mal.peak_id == "malH", "method"].iloc[0] == "known:organothiophosphate", s_mal)
+# single-channel malathion -> NOT committed (P needs >=2 channels)
+def fake_mal1(client, sid, formulas, *, mechanism_ids=None, **kw):
+    if "C10H19O6PS2" not in formulas:
+        return pd.DataFrame([])
+    return pd.DataFrame([_mal_row("C10H20O6PS2+", _mzMH, "malH", "mH")])
+led_mal1 = mk_ledger([("malH", _mzMH, 5000.0)])
+s_mal1 = P.run_pass0_known(None, "SID", led_mal1, PROF_URO, ACFG,
+                           ["[M+H]+", "[M+(CH4N2O)H]+"], score_fn=fake_mal1,
+                           log=lambda *a: None)
+check("pass0 refuses a single-channel organothiophosphate (no cross-channel support)",
+      s_mal1["committed"] == 0, s_mal1)
+# single channel BUT a matched 34S envelope -> commits (isotope stands in for 2nd channel)
+_mzDE = CH.ion_mz("C8H13O5PS2", "[M+H]+")
+def fake_de_s34(client, sid, formulas, *, mechanism_ids=None, **kw):
+    if "C8H13O5PS2" not in formulas:
+        return pd.DataFrame([])
+    base = _mal_row("C8H14O5PS2+", _mzDE, "deH", "mH")
+    base["compound_formula"] = "C8H13O5PS2"
+    s34 = dict(base); s34.update(iso_label="34S", is_base=False,
+                                 theo_mz=_mzDE + 1.99579, sample_peak_id="deS34",
+                                 sample_peak_mz=_mzDE + 1.99579, iso_score=0.9)
+    return pd.DataFrame([base, s34])
+led_de = mk_ledger([("deH", _mzDE, 9000.0), ("deS34", _mzDE + 1.99579, 800.0)])
+s_de = P.run_pass0_known(None, "SID", led_de, PROF_URO, ACFG,
+                         ["[M+H]+", "[M+(CH4N2O)H]+"], score_fn=fake_de_s34,
+                         log=lambda *a: None)
+check("pass0 commits a single-channel organothiophosphate with a confirmed 34S envelope",
+      L.role_of(led_de, "deH") == L.ROLE_M0
+      and led_de.loc[led_de.peak_id == "deH", "neutral_formula"].iloc[0] == "C8H13O5PS2", s_de)
+# same single channel but NO 34S match -> still refused (guards the phosphate esters)
+def fake_de_nos34(client, sid, formulas, *, mechanism_ids=None, **kw):
+    if "C8H13O5PS2" not in formulas:
+        return pd.DataFrame([])
+    base = _mal_row("C8H14O5PS2+", _mzDE, "deH", "mH")
+    base["compound_formula"] = "C8H13O5PS2"
+    return pd.DataFrame([base])
+led_de2 = mk_ledger([("deH", _mzDE, 9000.0)])
+s_de2 = P.run_pass0_known(None, "SID", led_de2, PROF_URO, ACFG,
+                          ["[M+H]+", "[M+(CH4N2O)H]+"], score_fn=fake_de_nos34,
+                          log=lambda *a: None)
+check("pass0 still refuses a single-channel thiophosphate with no 34S envelope",
+      s_de2["committed"] == 0, s_de2)
+# GENERALIZED: single channel + a 37Cl envelope (not 34S) also corroborates
+_mzCP = CH.ion_mz("C9H11Cl3NO3PS", "[M+H]+")   # chlorpyrifos (in the OTP list)
+def fake_cp_cl37(client, sid, formulas, *, mechanism_ids=None, **kw):
+    if "C9H11Cl3NO3PS" not in formulas:
+        return pd.DataFrame([])
+    base = _mal_row("C9H12Cl3NO3PS+", _mzCP, "cpH", "mH")
+    base["compound_formula"] = "C9H11Cl3NO3PS"
+    cl37 = dict(base); cl37.update(iso_label="37Cl", is_base=False,
+                                   theo_mz=_mzCP + 1.99705, sample_peak_id="cpCl37",
+                                   sample_peak_mz=_mzCP + 1.99705, iso_score=0.9)
+    return pd.DataFrame([base, cl37])
+led_cp = mk_ledger([("cpH", _mzCP, 9000.0), ("cpCl37", _mzCP + 1.99705, 3000.0)])
+s_cp = P.run_pass0_known(None, "SID", led_cp, PROF_URO, ACFG,
+                         ["[M+H]+", "[M+(CH4N2O)H]+"], score_fn=fake_cp_cl37,
+                         log=lambda *a: None)
+check("pass0 commits a single-channel thiophosphate via a 37Cl envelope (generalized)",
+      L.role_of(led_cp, "cpH") == L.ROLE_M0, s_cp)
+# 13C GUARD: a 13C line is NOT a diagnostic heteroatom isotope -> must NOT license off-grid P
+def fake_de_13c_only(client, sid, formulas, *, mechanism_ids=None, **kw):
+    if "C8H13O5PS2" not in formulas:
+        return pd.DataFrame([])
+    base = _mal_row("C8H14O5PS2+", _mzDE, "deH", "mH")
+    base["compound_formula"] = "C8H13O5PS2"
+    c13 = dict(base); c13.update(iso_label="13C", is_base=False,
+                                 theo_mz=_mzDE + 1.00336, sample_peak_id="deC13",
+                                 sample_peak_mz=_mzDE + 1.00336, iso_score=0.9)
+    return pd.DataFrame([base, c13])
+led_13c = mk_ledger([("deH", _mzDE, 9000.0), ("deC13", _mzDE + 1.00336, 800.0)])
+s_13c = P.run_pass0_known(None, "SID", led_13c, PROF_URO, ACFG,
+                          ["[M+H]+", "[M+(CH4N2O)H]+"], score_fn=fake_de_13c_only,
+                          log=lambda *a: None)
+check("pass0 refuses a single-channel thiophosphate corroborated only by 13C (13C guard)",
+      s_13c["committed"] == 0, s_13c)
+
 # ---------- selection prior: a reference-list neutral wins a near-tie ----------
 sp = pd.DataFrame([
     iso_row(sample_peak_id="Z", compound_formula="C8H12O4", compound_score=0.88,
@@ -1133,6 +1235,145 @@ sp2 = pd.DataFrame([
 ])
 check("reflist prior does NOT override a clear winner (gap 0.12 > 0.04)",
       P.arbitrate(sp2, cfg_sp)["winners"].iloc[0]["neutral"] == "C8H12O4")
+
+
+# ---------- pass 7: certified-neutral discovery (NBBS urea ladder) ----------
+# 3 unexplained peaks: [M+H]+, [M+urea+H]+, [M+2urea+H]+ of NBBS C10H15NO2S.
+# The oracle anchors the two REGISTERED channels; the 2-urea rung commits on
+# certificate evidence. The 34S kid on the [M+H]+ makes it Good (certified).
+_mzN0 = CH.ion_mz("C10H15NO2S", "[M+H]+")            # 214.0896
+_mzN1 = CH.ion_mz("C10H15NO2S", "[M+(CH4N2O)H]+")    # 274.1220
+_mzN2 = _mzN1 + 60.0323627601                         # 334.1544 (no registered channel)
+def _nbbs_row(ion, mz, pid, mech, formula="C10H15NO2S"):
+    return dict(compound_formula=formula, compound_score=0.9, ion_formula=ion,
+                ion_score=0.93, iso_label="M0", is_base=True, theo_mz=mz,
+                rel_abundance=1.0, iso_score=0.93, sample_peak_id=pid,
+                sample_peak_mz=mz, sample_peak_intensity=50000.0, ppm_error=0.05,
+                abundance_error=0.0, mechanism_id=mech)
+def fake_cert_nbbs(client, sid, formulas, *, mechanism_ids=None, **kw):
+    if "C10H15NO2S" not in formulas:
+        return pd.DataFrame([])
+    b0 = _nbbs_row("C10H16NO2S+", _mzN0, "n0", "mH")
+    b1 = _nbbs_row("C11H20N3O3S+", _mzN1, "n1", "mU")
+    s34 = dict(b0); s34.update(iso_label="34S", is_base=False,
+                               theo_mz=_mzN0 + 1.99580, sample_peak_id="n0s",
+                               sample_peak_mz=_mzN0 + 1.99580, iso_score=0.9)
+    return pd.DataFrame([b0, b1, s34])
+led_cn = mk_ledger([("n0", _mzN0, 50000.0), ("n1", _mzN1, 400000.0),
+                    ("n2", _mzN2, 3000.0), ("n0s", _mzN0 + 1.99580, 2200.0),
+                    ("bg", 401.3337, 900.0)])
+s_cn = P.run_pass_certified(None, "SID", led_cn, PROF_URO, ACFG,
+                            ["[M+H]+", "[M+(CH4N2O)H]+", "[M+NH4]+"],
+                            reagent="urea", score_fn=fake_cert_nbbs,
+                            log=lambda *a: None)
+check("pass7 certifies + commits the NBBS ladder", s_cn["committed"] == 1, s_cn)
+check("pass7 claims all three rungs (2 anchored + 1 ladder rung)",
+      s_cn["peaks_claimed"] == 3 and s_cn["rungs_committed"] == 1, s_cn)
+check("pass7 commits the SAME neutral on every member peak",
+      set(led_cn.loc[led_cn.peak_id.isin(["n0", "n1", "n2"]), "neutral_formula"])
+      == {"C10H15NO2S"})
+check("pass7 cross-channel: >=2 distinct adduct labels on the neutral",
+      led_cn.loc[(led_cn.neutral_formula == "C10H15NO2S")
+                 & (led_cn.role == L.ROLE_M0), "adduct"].nunique() >= 2)
+check("pass7 method labels anchored vs ladder-rung commits",
+      led_cn.loc[led_cn.peak_id == "n0", "method"].iloc[0] == "certified:multi-channel"
+      and led_cn.loc[led_cn.peak_id == "n2", "method"].iloc[0] == "certified:ladder-rung")
+check("pass7 34S kid attached to the anchored M0",
+      L.role_of(led_cn, "n0s") == L.ROLE_ISO)
+check("pass7 iso-confirmed -> Good (certified)",
+      str(led_cn.loc[led_cn.peak_id == "n0", "confidence"].iloc[0]).startswith("Good"))
+check("pass7 leaves unrelated peaks unexplained",
+      L.role_of(led_cn, "bg") == L.ROLE_UNEXPLAINED)
+
+# oracle anchors only ONE member channel -> no commit (certificate unproven)
+def fake_cert_one(client, sid, formulas, *, mechanism_ids=None, **kw):
+    if "C10H15NO2S" not in formulas:
+        return pd.DataFrame([])
+    return pd.DataFrame([_nbbs_row("C10H16NO2S+", _mzN0, "n0", "mH")])
+led_cn1 = mk_ledger([("n0", _mzN0, 50000.0), ("n1", _mzN1, 400000.0),
+                     ("n2", _mzN2, 3000.0)])
+s_cn1 = P.run_pass_certified(None, "SID", led_cn1, PROF_URO, ACFG,
+                             ["[M+H]+", "[M+(CH4N2O)H]+", "[M+NH4]+"],
+                             reagent="urea", score_fn=fake_cert_one,
+                             log=lambda *a: None)
+check("pass7 refuses a certificate the oracle anchors on only 1 channel",
+      s_cn1["committed"] == 0, s_cn1)
+
+# ts_peaks=None path (default) already covered above; ts co-variation gate:
+_ts_rows = []
+for t in range(12):
+    for mz, base_h in ((_mzN0, 50000.0), (_mzN1, 400000.0), (_mzN2, 3000.0)):
+        _ts_rows.append(dict(datetime_utc=f"2026-06-0{(t % 7) + 1}T0{t % 10}:00:00Z",
+                             mz=mz, height=base_h * (1.0 + 0.5 * ((t * 7) % 5))))
+_ts = pd.DataFrame(_ts_rows)
+led_cn2 = mk_ledger([("n0", _mzN0, 50000.0), ("n1", _mzN1, 400000.0),
+                     ("n2", _mzN2, 3000.0), ("n0s", _mzN0 + 1.99580, 2200.0)])
+s_cn2 = P.run_pass_certified(None, "SID", led_cn2, PROF_URO, ACFG,
+                             ["[M+H]+", "[M+(CH4N2O)H]+", "[M+NH4]+"],
+                             reagent="urea", ts_peaks=_ts, score_fn=fake_cert_nbbs,
+                             log=lambda *a: None)
+check("pass7 with co-varying ts_peaks still commits (extra corroboration)",
+      s_cn2["committed"] == 1, s_cn2)
+check("pass7 ts co-variation lands in the commentary",
+      "co-vary in time" in str(led_cn2.loc[led_cn2.peak_id == "n0", "commentary"].iloc[0]))
+
+
+# ---------- pass 7: weak-M0 interrogation + displacement ----------
+# The n1 peak (274.122) carries a BOGUS single-channel [M+Na]+ Candidate-grade
+# fit (instrument makes no Na). A 3-channel iso-confirmed certificate must
+# displace it and re-read the peak as [M+urea+H]+ of the certified neutral.
+led_dp = mk_ledger([("n0", _mzN0, 50000.0), ("n1", _mzN1, 400000.0),
+                    ("n2", _mzN2, 3000.0), ("n0s", _mzN0 + 1.99580, 2200.0)])
+L.commit_assignment(led_dp, "n1", neutral_formula="C12H21NO4", adduct="[M+Na]+",
+                    ion_formula="C12H21NNaO4+", ion_score=0.86, ppm_error=0.4,
+                    pass_no=1, method="grid", confidence="Low",
+                    commentary="single-channel Na mass fit")
+s_dp = P.run_pass_certified(None, "SID", led_dp, PROF_URO, ACFG,
+                            ["[M+H]+", "[M+(CH4N2O)H]+", "[M+NH4]+"],
+                            reagent="urea", score_fn=fake_cert_nbbs,
+                            log=lambda *a: None)
+check("pass7 displaces a weak [M+Na]+ Candidate under a strong certificate",
+      s_dp["displaced"] == 1, s_dp)
+check("pass7 re-reads the displaced peak as the certified neutral",
+      led_dp.loc[led_dp.peak_id == "n1", "neutral_formula"].iloc[0] == "C10H15NO2S"
+      and "CH4N2O" in str(led_dp.loc[led_dp.peak_id == "n1", "adduct"].iloc[0]))
+check("pass7 displacement is audited in the commentary",
+      "displaced by certified-neutral" in str(
+          led_dp.loc[led_dp.peak_id == "n1", "commentary"].iloc[0])
+      or "DISPLACED" in str(led_dp.loc[led_dp.peak_id == "n1", "commentary"].iloc[0])
+      or "CLEARED" in str(led_dp.loc[led_dp.peak_id == "n1", "commentary"].iloc[0]))
+
+# a Good-confidence incumbent is NOT interrogated: cert forms from the rest
+led_gd = mk_ledger([("n0", _mzN0, 50000.0), ("n1", _mzN1, 400000.0),
+                    ("n2", _mzN2, 3000.0), ("n0s", _mzN0 + 1.99580, 2200.0)])
+L.commit_assignment(led_gd, "n1", neutral_formula="C12H21NO4", adduct="[M+Na]+",
+                    ion_formula="C12H21NNaO4+", ion_score=0.95, ppm_error=0.1,
+                    pass_no=1, method="grid", confidence="Good",
+                    commentary="well-scored fit")
+s_gd = P.run_pass_certified(None, "SID", led_gd, PROF_URO, ACFG,
+                            ["[M+H]+", "[M+(CH4N2O)H]+", "[M+NH4]+"],
+                            reagent="urea", score_fn=fake_cert_nbbs,
+                            log=lambda *a: None)
+check("pass7 leaves a Good-confidence incumbent alone",
+      s_gd["displaced"] == 0
+      and led_gd.loc[led_gd.peak_id == "n1", "neutral_formula"].iloc[0] == "C12H21NO4",
+      s_gd)
+
+# incumbent already IS the certified neutral -> corroborated, not displaced
+led_cb = mk_ledger([("n0", _mzN0, 50000.0), ("n1", _mzN1, 400000.0),
+                    ("n2", _mzN2, 3000.0), ("n0s", _mzN0 + 1.99580, 2200.0)])
+L.commit_assignment(led_cb, "n1", neutral_formula="C10H15NO2S",
+                    adduct="[M+(CH4N2O)H]+", ion_formula="C11H20N3O3S+",
+                    ion_score=0.8, ppm_error=0.3, pass_no=1, method="grid",
+                    confidence="Low", commentary="weak but right")
+s_cb = P.run_pass_certified(None, "SID", led_cb, PROF_URO, ACFG,
+                            ["[M+H]+", "[M+(CH4N2O)H]+", "[M+NH4]+"],
+                            reagent="urea", score_fn=fake_cert_nbbs,
+                            log=lambda *a: None)
+check("pass7 counts a same-formula weak incumbent as corroborated, not displaced",
+      s_cb["corroborated_existing"] == 1 and s_cb["displaced"] == 0
+      and led_cb.loc[led_cb.peak_id == "n1", "neutral_formula"].iloc[0] == "C10H15NO2S",
+      s_cb)
 
 
 def test_all():

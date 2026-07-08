@@ -164,8 +164,15 @@ All in `peaky/batch/timeseries.py`.
   **di-bromide / CO3** Assigned commit (TS-confirmed background) — every other
   disposition is annotation + commentary.
 - **Reagent-less profiles pass through.** Uronium / ¹⁵N-nitrate normalise on TIC
-  (their reagent ions sit below the acquisition window); the profile's
-  `normaliser` decides, so `normalize` here is a no-op for them.
+  (their reagent ions sit below the acquisition window — a positive urea-CIMS
+  spectrum starts at ~m/z 122, excluding the 61/121 uronium reagent ions); the
+  profile's `normaliser` decides, so `normalize` here is a no-op for them.
+- **A flat reagent can't cancel a varying common-mode.** Measured on one ambient urea-CIMS
+  batch (2026-07-07): the uronium reagent ions are essentially flat over the diurnal
+  cycle (m/z 61 ~5% / m/z 121 ~2% amplitude; the dimer even weakly anti-correlates
+  with the flat-panel ~15:00 afternoon wave). So even where a reagent divisor applied,
+  reagent-normalisation would **not** remove that afternoon wave — it is real ambient/
+  environmental signal, not a reagent/detection artifact. (One-batch measurement.)
 - **`trace` is reproducible** — it reads the run's own `*_ts.parquet` +
   `merged_ledger.csv`, so the answer is fixed by the run, not re-derived.
 

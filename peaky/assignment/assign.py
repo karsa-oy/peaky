@@ -97,6 +97,7 @@ class _RunState:
     do_pass3: bool
     do_pass4: bool
     do_pass5: bool
+    do_pass_certified: bool
     reflists_active: object
     ts_peaks: object
     label_isotope: object
@@ -211,6 +212,15 @@ _STAGES = [
     _Stage("pass5", lambda st: passes.run_pass5_completion(
         st.client, st.sample_id, st.led, st.profile, st.cfg, st.adducts, log=st.log),
            when=lambda st: st.do_pass5),
+    # Pass 7: certified-neutral discovery over the residual -- multi-channel /
+    # cluster-ladder convergence licenses off-grid (P/S/Cl) formula space that
+    # the per-peak grid forbids. The pass-5 INVERSE: from unknown peak groups
+    # to a licensed neutral, not from known neutrals to their partners. Before
+    # the audits so the calibrated mass gate judges its commits like any other.
+    _Stage("pass_certified", lambda st: passes.run_pass_certified(
+        st.client, st.sample_id, st.led, st.profile, st.cfg, st.adducts,
+        reagent=st.reagent, ts_peaks=st.ts_peaks, log=st.log),
+           when=lambda st: st.do_pass_certified),
     # post-run audits: apply the calibrated mass gate to pre-calibration commits.
     _Stage("audit_iso", lambda st: passes.audit_isotopes(st.led, st.cfg, log=st.log), safe=False),
     _Stage("audit", lambda st: passes.audit_mass_gate(st.led, st.cfg, log=st.log), safe=False),
@@ -294,7 +304,8 @@ _STAGES = [
 def run(sample_id: str, context: str = "ambient-air", *,
         cfg: passes.PassConfig | None = None, use_cache: bool = True,
         do_pass2: bool = True, do_pass3: bool = True, do_pass4: bool = True,
-        do_pass5: bool = True, ts_peaks=None, adducts=None, reflists_active=None,
+        do_pass5: bool = True, do_pass_certified: bool = True,
+        ts_peaks=None, adducts=None, reflists_active=None,
         label_isotope=None, label_max=2,
         log=print, checkpoint_dir=None) -> dict:
     cfg = cfg or passes.PassConfig()
@@ -371,6 +382,7 @@ def run(sample_id: str, context: str = "ambient-air", *,
         client=client, sample_id=sample_id, led=led, profile=profile, pre=pre,
         cfg=cfg, adducts=adducts, reagent=reagent, has_halogen=has_halogen_adduct,
         do_pass2=do_pass2, do_pass3=do_pass3, do_pass4=do_pass4, do_pass5=do_pass5,
+        do_pass_certified=do_pass_certified,
         reflists_active=reflists_active, ts_peaks=ts_peaks,
         label_isotope=label_isotope, label_max=label_max, log=log,
         checkpoint_dir=checkpoint_dir)
