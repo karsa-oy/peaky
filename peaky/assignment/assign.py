@@ -296,6 +296,13 @@ _STAGES = [
     _Stage("reflist_rescue", lambda st: reflists.rescue_unexplained_by_reflist(
         st.client, st.sample_id, st.led, st.profile, st.cfg, st.reflists_active,
         st.adducts, log=st.log), when=lambda st: bool(st.reflists_active)),
+    # final envelope sweep: an M0 committed AFTER the three earlier sweeps (a pass-8
+    # reflist rescue, or a parent whose earlier assignment was cleared and re-won,
+    # orphaning its children) still owes its satellites -- without this its bright
+    # 13C line sits in the residual (the NBBS urea-adduct M+1 was the single
+    # brightest "unexplained" peak of a positive urea-CIMS ambient batch run).
+    _Stage("iso_env_final",
+           lambda st: passes.complete_isotope_envelopes(st.led, st.cfg, log=st.log)),
     _Stage("timeseries", _stage_timeseries,
            when=lambda st: st.ts_peaks is not None and len(st.ts_peaks)),
 ]

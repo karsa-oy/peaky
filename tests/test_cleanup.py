@@ -161,8 +161,76 @@ check("amine: corroborated NH4 adduct kept",
       leda.loc[1, "neutral_formula"] == "C9H16O" and leda.loc[1, "adduct"] == "[M+NH4]+")
 check("amine: saturated X (no valid amine) -> NH4 forced/kept",
       leda.loc[3, "neutral_formula"] == "C6H14O4" and leda.loc[3, "adduct"] == "[M+NH4]+")
-check("amine: summary counts", outa == {"relabeled": 1, "kept_corroborated": 1, "forced_nh4": 1}, outa)
+check("amine: summary counts",
+      outa == {"relabeled": 1, "kept_corroborated": 1, "forced_nh4": 1, "kept_si": 0}, outa)
 check("amine: relabel noted in tier_reason", "re-read" in str(leda.loc[0, "tier_reason"]))
+
+# --- amine gate: Si guard (siloxane NH4 adducts are real; aminosiloxanes are not)
+leds = pd.DataFrame([
+    dict(peak_id="si", mz=121.079, neutral_formula="C3H9NOSi", adduct="[M+NH4]+",
+         role=L.ROLE_M0, tier_reason=""),                # uncorroborated but Si -> keep
+])
+outs = CU.prefer_amine_over_ammonium(leds, log=lambda *a, **k: None)
+check("amine Si guard: Si-bearing NH4 kept (no aminosiloxane fabrication)",
+      leds.loc[0, "neutral_formula"] == "C3H9NOSi" and leds.loc[0, "adduct"] == "[M+NH4]+"
+      and outs["kept_si"] == 1, (leds.loc[0].to_dict(), outs))
+
+# --- amine gate co-variation mode: flat-trace / missing-trace presence fallback ---
+# The NBBS bug: a FLAT background parent (instrument bleed) can never pass a
+# correlation bar, so its real NH4 adduct was re-read into a phantom amine even
+# with the parent assigned on two channels in every file. Flat-flat and missing
+# trace pairs must fall back to PRESENCE; a shaped non-tracking pair must not.
+X1, X2, X3, X4 = "C10H15NO2S", "C10H16O2", "C9H16O", "C8H16O3"
+_samples = [f"s{k}" for k in range(8)]
+_up = [1e3, 3e3, 1e4, 3e4, 1e5, 3e5, 1e6, 3e6]           # strongly varying (cv >> 0.3)
+_ts_rows = []
+for k, s in enumerate(_samples):
+    _ts_rows += [
+        # X1: parent + NH4 both FLAT with ANTI-correlated jitter (old code: r<0 -> re-read)
+        dict(sample_item_id=s, mz=C.ion_mz(X1, "[M+H]+"), height=5e5 + 100 * k),
+        dict(sample_item_id=s, mz=C.ion_mz(X1, "[M+NH4]+"), height=5e4 - 10 * k),
+        # X2: shaped pair, NH4 anti-tracks the parent -> genuine non-corroboration
+        dict(sample_item_id=s, mz=C.ion_mz(X2, "[M+H]+"), height=_up[k]),
+        dict(sample_item_id=s, mz=C.ion_mz(X2, "[M+NH4]+"), height=_up[7 - k]),
+        # X3: shaped pair, NH4 tracks the parent (r=1) -> co-variation keeps it
+        dict(sample_item_id=s, mz=C.ion_mz(X3, "[M+H]+"), height=_up[k]),
+        dict(sample_item_id=s, mz=C.ion_mz(X3, "[M+NH4]+"), height=_up[k] * 0.1),
+        # X4: parent trace only -- the NH4 channel is NOT in the TS at all
+        dict(sample_item_id=s, mz=C.ion_mz(X4, "[M+H]+"), height=_up[k]),
+    ]
+ts = pd.DataFrame(_ts_rows)
+ledt2 = pd.DataFrame([
+    dict(peak_id="x1n", mz=C.ion_mz(X1, "[M+NH4]+"), neutral_formula=X1,
+         adduct="[M+NH4]+", role=L.ROLE_M0, tier_reason=""),
+    dict(peak_id="x1p", mz=C.ion_mz(X1, "[M+H]+"), neutral_formula=X1,
+         adduct="[M+H]+", role=L.ROLE_M0, tier_reason=""),     # presence for X1
+    dict(peak_id="x2n", mz=C.ion_mz(X2, "[M+NH4]+"), neutral_formula=X2,
+         adduct="[M+NH4]+", role=L.ROLE_M0, tier_reason=""),
+    dict(peak_id="x2p", mz=C.ion_mz(X2, "[M+H]+"), neutral_formula=X2,
+         adduct="[M+H]+", role=L.ROLE_M0, tier_reason=""),     # presence must NOT save X2
+    dict(peak_id="x3n", mz=C.ion_mz(X3, "[M+NH4]+"), neutral_formula=X3,
+         adduct="[M+NH4]+", role=L.ROLE_M0, tier_reason=""),   # no presence: TS-only
+    dict(peak_id="x4n", mz=C.ion_mz(X4, "[M+NH4]+"), neutral_formula=X4,
+         adduct="[M+NH4]+", role=L.ROLE_M0, tier_reason=""),
+    dict(peak_id="x4p", mz=C.ion_mz(X4, "[M+H]+"), neutral_formula=X4,
+         adduct="[M+H]+", role=L.ROLE_M0, tier_reason=""),     # presence for X4
+])
+outt = CU.prefer_amine_over_ammonium(ledt2, ts_peaks=ts, log=lambda *a, **k: None)
+check("amine ts-mode: FLAT parent+NH4 (NBBS case) falls back to presence -> kept",
+      ledt2.loc[0, "neutral_formula"] == X1 and ledt2.loc[0, "adduct"] == "[M+NH4]+",
+      ledt2.loc[0].to_dict())
+check("amine ts-mode: shaped NON-tracking NH4 re-read despite presence",
+      ledt2.loc[2, "neutral_formula"] == "C10H19NO2" and ledt2.loc[2, "adduct"] == "[M+H]+",
+      ledt2.loc[2].to_dict())
+check("amine ts-mode: shaped tracking NH4 kept by co-variation (no presence needed)",
+      ledt2.loc[4, "neutral_formula"] == X3 and ledt2.loc[4, "adduct"] == "[M+NH4]+",
+      ledt2.loc[4].to_dict())
+check("amine ts-mode: NH4 trace missing from TS falls back to presence -> kept",
+      ledt2.loc[5, "neutral_formula"] == X4 and ledt2.loc[5, "adduct"] == "[M+NH4]+",
+      ledt2.loc[5].to_dict())
+check("amine ts-mode: summary counts",
+      outt == {"relabeled": 1, "kept_corroborated": 3, "forced_nh4": 0, "kept_si": 0},
+      outt)
 
 # ---------- demote_unconfirmed_fluorine (F-monster curb) ----------
 ledf = pd.DataFrame([
