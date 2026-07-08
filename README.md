@@ -120,6 +120,25 @@ assignment loop**, so every run is reproducible and auditable. Claude orchestrat
 chemistry. Heavy work runs on the **host Python** (which has `mascope-sdk`) via the
 Bash tool / `peaky` CLI — never transport peak tables through an MCP into context.
 
+## Run it from any MCP client (ChatGPT, Cursor, Claude Desktop)
+
+Claude Code is the most direct interface (it runs the CLI for you), but any
+[MCP](https://modelcontextprotocol.io) client can drive Peaky too:
+
+```bash
+pip install 'mascope-peaky[mcp]'
+peaky mcp                       # streamable-HTTP on 127.0.0.1:8765
+peaky mcp --transport stdio     # for a local stdio client (Claude Desktop)
+```
+
+It exposes the pipeline as tools — `list_*`, `certify_neutrals` (offline),
+`assign_sample` / `run_batch` (background jobs). The server runs **host-side**:
+`io_mascope` stays a direct in-process HTTP client, so peak tables never cross
+the MCP boundary and your credentials never leave the host. For **ChatGPT**
+(Developer Mode connectors speak SSE / streamable-HTTP over a URL, not
+localhost), expose it through a tunnel — full setup, incl. the ngrok +
+connector steps, in **[docs/MCP.md](docs/MCP.md)**.
+
 ## Run it as a CLI (scripted)
 
 ```bash
