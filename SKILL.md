@@ -90,6 +90,15 @@ manifest.json, gka.html}` + per-pass checkpoints (~5 min on a ~1000-peak Br-CIMS
 sample). Batch writes one versioned run folder — see **Outputs** below and
 `docs/OUTPUTS.md`.
 
+### MCP server (drive peaky from ChatGPT / Claude Desktop / Cursor)
+
+`peaky mcp` (extra: `pip install 'mascope-peaky[mcp]'`) serves the pipeline as MCP
+tools — `list_*`, `certify_neutrals` (offline), `assign_sample`/`run_batch`
+(background jobs → `job_status`). It runs HOST-SIDE: `io_mascope` stays a direct
+in-process HTTP client so peak tables never cross the MCP boundary, and creds stay
+in `.env`. ChatGPT Developer Mode connectors need a URL (SSE/streamable-HTTP) via a
+tunnel, not localhost. See `docs/MCP.md`.
+
 ### Contexts
 
 `ambient-air` (= atmospheric), `chamber`, `indoor-air`, `object-headspace`,

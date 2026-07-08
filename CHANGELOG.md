@@ -7,6 +7,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased] — report refactor
 
 ### Added (off-grid discovery: certified-neutral + organothiophosphates)
+- **MCP server** (`peaky/mcp_server.py`, `peaky mcp`; extra `pip install
+  'mascope-peaky[mcp]'`; see `docs/MCP.md`). Drives the pipeline from any MCP
+  client (ChatGPT Developer Mode, Claude Desktop, Cursor) without a shell —
+  tools: `health`, `list_workspaces/datasets/batches/samples`, `certify_neutrals`
+  (offline), `assign_sample`/`run_batch` (background jobs → `job_status`).
+  `io_mascope` stays a direct in-process HTTP client (peak tables never cross
+  the MCP boundary); credentials stay server-side. Tool functions are plain
+  Python (FastMCP imported lazily), so the offline suite covers them without the
+  optional dependency.
 - **Certified-neutral discovery** (pass 7 — `peaky/assignment/certified_neutral.py`,
   `run_pass_certified`, `scripts/certify_neutrals.py`; see `docs/CERTIFIED_NEUTRAL.md`).
   When ≥2 distinct ion channels in one spectrum converge on the same neutral core mass
