@@ -231,7 +231,7 @@ def generate_report(ctx: RunContext, ts, *, subject: str | None = None,
 
 def run_batch(*, batch: str, dataset: str | None = None, reagent: str = "auto",
               base_out: str, ts=None, when=None, subject: str | None = None,
-              amine_r_min: float = 0.7, do_report=True, config: str | None = None,
+              amine_r_min: float = 0.6, do_report=True, config: str | None = None,
               select: str = "representative", coverage_target: float = 0.85,
               k_max: int = 10, height_floor: float = 1000.0,
               log=print, **assign_kw) -> dict:
