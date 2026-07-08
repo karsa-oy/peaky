@@ -108,7 +108,23 @@ cutoff=100 default (above) is what the batch actually uses; the manifest records
 (12) + trace tests (3); suite 32 files green. Live-verified on the 190107Z run (trace C10H14O6 →
 Identified 309 pts; trace 179.0076 → unassigned, peak 5004). COMMIT: <this commit>.
 
+### OFF-GRID DISCOVERY — organothiophosphate family is a WHITELIST PATCH; two generic replacements NOT yet built (2026-07-07)
+The positive pass-0 `organothiophosphate` family (~19 named OP-thioate/-dithioate insecticides — malathion
+`C10H19O6PS2` + homologs, chlorpyrifos, diazinon, parathion, phorate, dimethoate, phosmet…) is a **hand-curated
+whitelist**: it only finds species someone thought to list, and P/high-S stay off the generic grid. It closed the
+bright unexplained nocturnal cluster in an ambient urea-CIMS batch, but the principled, knowledge-free replacements are **NOT built yet**:
 
+- **Certified-neutral rescue pass** *(BUILT 2026-07 as pass 7 — `certified_neutral.py` + `run_pass_certified` + `scripts/certify_neutrals.py`; docs/CERTIFIED_NEUTRAL.md. First real-ledger offline run blind-rediscovered benzothiazole (C7H5NS, core 135.0143) from the unexplained residual.)* Pair unexplained
+  peaks that differ by a known channel offset (H⁺↔urea, H⁺↔NH₄) **AND** co-vary in time → each surviving pair
+  *certifies a neutral mass* (two independent mass constraints per neutral, so no mass-degeneracy blow-up). Enumerate
+  **THAT one mass only** with the exotic elements opened (P, higher S, Cl) → server-score the survivors. Generic
+  off-grid discovery with **no pesticide knowledge** and no combinatorial explosion. This is the intended replacement
+  for the whitelist.
+- **Fragment-cation modeling** *(NOT buildable without a ledger schema change — honesty caveat)*. In-source fragment
+  ions such as `(CH3O)2P=S⁺` (`C2H6O2PS⁺`, m/z 124.98 — the dimethyl-OP marker) have **no intact "neutral M"**, so the
+  grid (which enumerates neutrals + adducts) literally cannot represent them. Needs a **ledger schema extension** — a
+  fragment/charge role for rows that are a bare cation, not `neutral + adduct`. Until that schema exists, this class of
+  evidence can't be captured at all.
 **SESSION 4 — SHAREABILITY REFACTOR (2026-06-20). Goal: a small group `pip install`s + validates on
 THEIR machines.** A 7-dimension review (48 findings) produced a 5-phase plan. DECISIONS: ship as BOTH a
 pip CLI + a portable Claude skill; **mascope-sdk is on PUBLIC PyPI (MIT) → now a CORE dependency** (a plain
@@ -577,7 +593,7 @@ NEUTRAL, already assign glycerol, keep isoprene polyols):
   generation. They previously slipped in ONLY via the pass-4 iso-pair bypass;
   DBE>=0 already caps H/C at 2+2/Ceff so the ceiling only clipped C3 glycols.
   Effect: glycerol now a pass-1 **High** commit (was "Good (iso-pair)").
-- **Nitroaromatics added to pass-0** (passes.py `_known_species` "nitroaromatic"
+- **Nitroaromatics added to pass-0** (`_known_species` in passes/directors.py, "nitroaromatic"
   family: C6H4N2O5 dinitrophenol, C6H5NO3 nitrophenol, C6H5NO4 nitrocatechol,
   C7H6N2O5 dinitrocresol): H-poor / high-DBE BrC tracers the ambient VK floor +
   DBE/C ceiling block from the grid. Only those present + |ppm|<=2 commit. Effect:

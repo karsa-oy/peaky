@@ -35,6 +35,7 @@ __all__ = [
     "run_pass1",
     "run_pass2",
     "run_pass3",
+    "run_pass_certified",
 ]
 
 
@@ -71,7 +72,46 @@ def _known_species(polarity: str = "negative") -> dict:
             "C24H51O4P": "tris(2-ethylhexyl) phosphate (TEHP)",
             "C21H21O4P": "tricresyl phosphate (TMPP / TCrP)",
         }
-        return {"organophosphate": organophosphate}
+        # ORGANOTHIOPHOSPHATE / -DITHIOATE insecticides: agricultural
+        # organophosphorus pesticides (P + 1-3 S), primary AMBIENT analytes over
+        # farmland (not lab contaminants). Like the phosphate esters they are
+        # invisible to the CHNOS grid (P off; and the S2/S3 count is above the
+        # grid's max_S), and they ionise as [M+H]+ / [M+(urea)H]+. Unlike the
+        # esters they DO carry a ³⁴S twin, so a confirmed ³⁴S envelope can stand
+        # in for the 2nd channel (see the gate below). Seeded from a field
+        # campaign where the malathion family was the brightest unexplained
+        # nocturnal cluster (P off the grid) + common OP insecticides. Only
+        # those present + on-cal + corroborated commit; listing absent ones is
+        # harmless.
+        organothiophosphate = {
+            "C10H19O6PS2": "malathion",
+            "C11H21O6PS2": "malathion homolog (+CH2)",
+            "C9H17O6PS2": "malathion homolog (-CH2)",
+            "C8H13O5PS2": "malathion transformation product (-C2H6O)",
+            "C10H19O7PS": "malaoxon (malathion oxon)",
+            "C5H12NO3PS2": "dimethoate",
+            "C8H19O2PS3": "disulfoton",
+            "C7H17O2PS3": "phorate",
+            "C9H21O2PS3": "terbufos",
+            "C10H15O3PS2": "fenthion",
+            "C12H21N2O3PS": "diazinon",
+            "C10H14NO5PS": "parathion",
+            "C8H10NO5PS": "methyl parathion",
+            "C9H12NO5PS": "fenitrothion",
+            "C11H12NO4PS2": "phosmet",
+            "C10H12N3O3PS2": "azinphos-methyl",
+            "C9H11Cl3NO3PS": "chlorpyrifos",
+            "C7H7Cl3NO3PS": "chlorpyrifos-methyl",
+            # N-bearing malathion-relative dithioate observed in ambient air
+            # with a [M+H]+/urea pair (m/z 444.13); an isobaric CHON-Cl2 fit
+            # exists, but the >=2-channel gate + family context favour the
+            # P-thioate.
+            "C16H30NO7S2P": "organothiophosphate (C16 N-dithioate; Cl2 isobar)",
+        }
+        return {
+            "organophosphate": organophosphate,
+            "organothiophosphate": organothiophosphate,
+        }
     atmos = {
         # small atmospheric acids / radicals detected as Br- adducts -- the
         # PRIMARY analytes of a Br-CIMS, all invisible to the organic grid:
@@ -194,6 +234,19 @@ def run_pass0_known(
         & scored["sample_peak_id"].notna()
         & (pd.to_numeric(scored["iso_score"], errors="coerce").fillna(0) > 0.4)
     ]
+    # A matched DIAGNOSTIC heavy-isotope satellite (³⁴S / ³⁷Cl / ⁸¹Br) is
+    # INDEPENDENT corroboration that a pure phosphate ester (monoisotopic in every
+    # atom) lacks: the envelope both confirms the heteroatom count and refutes a
+    # single-channel mass coincidence, so it substitutes for the >=2-channel
+    # requirement below (e.g. des-ethyl malathion, seen only as [M+H]+, is ³⁴S-
+    # confirmed). ¹³C is DELIBERATELY EXCLUDED -- every carbon-bearing formula has
+    # a ¹³C line, so it refutes nothing and must never license an off-grid P.
+    _DIAG_ISO = ("34S", "37Cl", "81Br")
+    iso_confirmed = set(
+        kids[kids["iso_label"].astype(str).str.contains("|".join(_DIAG_ISO), na=False)][
+            "compound_formula"
+        ].unique()
+    )
     mzs = ledger["mz"]
     for _, r in base.iterrows():
         ppm = r["ppm_error"]
@@ -229,14 +282,22 @@ def run_pass0_known(
             fam, lbl = label_of[r["compound_formula"]]
             # organophosphates are monoisotopic in P -> require >=2 ion channels
             # (e.g. [M+H]+ AND [M+(urea)H]+) before locking, since there is no
-            # isotope twin to confirm a single-channel mass coincidence.
+            # isotope twin to confirm a single-channel mass coincidence. The one
+            # accepted substitute for the 2nd channel is a confirmed DIAGNOSTIC
+            # heavy-isotope envelope (³⁴S / ³⁷Cl / ⁸¹Br) -- independent evidence a
+            # phosphate ester cannot forge. Generic across families (a chlorinated
+            # thiophosphate qualifies via ³⁷Cl, not just malathion via ³⁴S); ¹³C is
+            # excluded upstream in `iso_confirmed`.
+            _iso_ok = r["compound_formula"] in iso_confirmed
             if (
-                fam == "organophosphate"
+                fam in ("organophosphate", "organothiophosphate")
                 and ope_channels.get(r["compound_formula"], 0) < 2
+                and not _iso_ok
             ):
                 log(
                     f"[pass0] skip {r['compound_formula']} @{float(r['sample_peak_mz']):.4f}: "
-                    f"single ion channel (monoisotopic P needs >=2 to corroborate)"
+                    f"single ion channel, no diagnostic-isotope (³⁴S/³⁷Cl/⁸¹Br) "
+                    f"envelope (P needs >=2 channels or an isotope twin to corroborate)"
                 )
                 continue
             tag = (
@@ -246,6 +307,8 @@ def run_pass0_known(
                 if fam == "nitroaromatic"
                 else "organophosphate"
                 if fam == "organophosphate"
+                else "organothiophosphate"
+                if fam == "organothiophosphate"
                 else "perfluoroacid"
                 if fam == "perfluoroacid"
                 else "chlorinated-paraffin"
@@ -323,6 +386,15 @@ def run_pass0_known(
                         f"corroborated across {ope_channels.get(r['compound_formula'], 0)} "
                         "ion channels (monoisotopic P, no isotope twin)"
                         if fam == "organophosphate"
+                        else "; organothiophosphate/-dithioate pesticide (P off the "
+                        "grid, S above grid max); corroborated by "
+                        + (
+                            f"{ope_channels.get(r['compound_formula'], 0)} ion channels"
+                            if ope_channels.get(r["compound_formula"], 0) >= 2
+                            else "a confirmed diagnostic-isotope (³⁴S/³⁷Cl/⁸¹Br) "
+                            "envelope (single channel)"
+                        )
+                        if fam == "organothiophosphate"
                         else "; perfluorocarboxylic acid (F off the grid); "
                         "known PFCA series formula, exact-mass committed"
                         if fam == "perfluoroacid"
@@ -1179,3 +1251,264 @@ def run_pass3(
     log(f"[pass3] total {total}")
     total["series_evidence"] = evidence.to_dict("records")
     return total
+
+
+# ---------------------------------------------------------------------------
+# Certified-neutral discovery (the pass-5 INVERSE): multi-channel / cluster-
+# ladder convergence licenses off-grid formula space for UNEXPLAINED peaks.
+# Pure algorithm in peaky.assignment.certified_neutral; this director wires it
+# to the ledger + oracle. Ground truth: the NBBS urea ladder (214/274/334 ->
+# core 213.0823 = C10H15NO2S) and cross-channel malathion (C10H19O6PS2).
+# ---------------------------------------------------------------------------
+_CERT_MAX_CANDIDATES = 24   # a certificate whose expanded box yields more is
+#                             mass-saturated -> skip (degeneracy guard)
+_CERT_ENUM_TOL_MDA = 2.0    # candidate-enumeration window around the certified
+#                             core (tighter than the 3-mDa convergence gate: the
+#                             weighted core is sub-mDa when the channels agree)
+_CERT_DIAG_ISO = ("34S", "37Cl", "81Br")   # 13C excluded -- refutes nothing
+
+
+def run_pass_certified(
+    client,
+    sample_id: str,
+    ledger: pd.DataFrame,
+    profile,
+    cfg: PassConfig,
+    adducts: list[str],
+    *,
+    reagent: str | None = None,
+    ts_peaks=None,
+    score_fn=None,
+    log=print,
+) -> dict:
+    """Pass 7 -- certified-neutral discovery over the unexplained residual.
+
+    Find groups of unexplained peaks whose back-calculated neutral masses
+    CONVERGE across >=2 distinct ion channels (adducts and/or reagent-cluster
+    ladder rungs); for each certified core mass enumerate the EXPANDED element
+    box (P / S / Cl open -- the per-peak grid keeps them shut because a lone
+    mass cannot earn a monoisotopic heteroatom); score through the oracle;
+    commit the winning formula onto EVERY member peak (same neutral, each under
+    its own channel label) so the tier engine's cross-channel corroboration
+    sees the certificate. S/Cl/Br winners additionally want their diagnostic
+    isotope envelope; a matched one earns Good confidence.
+
+    ts_peaks is OPTIONAL (a batch may not include the reagent mass range, and a
+    single-sample run has no TS at all): when provided, member-channel time
+    co-variation is annotated as extra corroboration; when None the pass is
+    fully functional on the single-spectrum mass domain.
+    """
+    from peaky.assignment import certified_neutral as CN
+
+    score_fn = score_fn or IO.score_candidates
+    out = {"certificates": 0, "committed": 0, "peaks_claimed": 0,
+           "rungs_committed": 0, "iso_attached": 0, "skipped_saturated": 0,
+           "displaced": 0, "corroborated_existing": 0}
+    un = L.unassigned_peaks(ledger)
+    # ALSO interrogate weak M0s: an uncorroborated Low/Suspect or near-tie
+    # commit (e.g. a single-channel [M+Na]+ mass fit on an instrument with no
+    # Na source) is weaker evidence than a multi-channel certificate, so it
+    # must not shield its peak from re-reading. Locked and Good/High-confidence
+    # owners are NOT interrogated.
+    m0 = ledger[(ledger["role"] == L.ROLE_M0) & (~ledger["locked"].astype(bool))]
+    _conf = m0["confidence"].astype(str)
+    weak = m0[_conf.str.startswith("Low") | _conf.str.startswith("Suspect")
+              | (m0["tied"].fillna(False).astype(bool))]
+    weak_ids = set(weak["peak_id"])
+    interro = pd.concat([un, weak], axis=0)
+    if len(interro) < 2:
+        return out
+    offsets = CN.channel_offsets(adducts, reagent)
+    if len(offsets) < 2:
+        log("[pass7] <2 distinct channels for this profile; skipping")
+        return out
+    certs = CN.find_certificates(
+        interro[["peak_id", "mz", "height"]].reset_index(drop=True), offsets)
+    if not certs:
+        log("[pass7] no multi-channel certificates in the residual")
+        return out
+
+    # enumerate expanded-box candidates per certificate (off-grid P/S/Cl only:
+    # plain CHON near the core is pass-1's territory and already lost there)
+    cert_formulas: dict[int, list[str]] = {}
+    all_formulas: set[str] = set()
+    for ci, cert in enumerate(certs):
+        forms = CN.enumerate_certified(cert.core_mass, profile,
+                                       tol_mda=_CERT_ENUM_TOL_MDA, force=True)
+        forms = [f for f in forms
+                 if any(C.parse_formula(f).get(el, 0) > 0 for el in ("P", "S", "Cl"))]
+        if not forms:
+            continue
+        if len(forms) > _CERT_MAX_CANDIDATES:
+            out["skipped_saturated"] += 1
+            continue
+        cert_formulas[ci] = forms
+        all_formulas |= set(forms)
+    if not all_formulas:
+        log(f"[pass7] {len(certs)} certificates, none with off-grid candidates")
+        return out
+    out["certificates"] = len(cert_formulas)
+    log(f"[pass7] {len(certs)} certificates -> {len(cert_formulas)} with "
+        f"{len(all_formulas)} off-grid candidate formulas")
+
+    scored = score_fn(client, sample_id, sorted(all_formulas),
+                      mechanism_ids=cfg.mechanism_ids)
+    if scored is None or len(scored) == 0:
+        log("[pass7] WARNING scoring returned EMPTY for certified candidates")
+        return out
+    base = scored[scored["is_base"]
+                  & scored["sample_peak_id"].notna()
+                  & scored["ion_score"].notna()]
+    kids = scored[(~scored["is_base"])
+                  & scored["sample_peak_id"].notna()
+                  & (pd.to_numeric(scored["iso_score"], errors="coerce").fillna(0) > 0.4)]
+
+    for ci, cert in enumerate(certs):
+        forms = cert_formulas.get(ci)
+        if not forms:
+            continue
+        member_ids = {h.peak_id for h in cert.hits}
+        # rank candidates: server-anchored member coverage, then complexity-
+        # penalised mean score (the arbitrate() spirit, per-certificate)
+        ranked = []
+        for f in forms:
+            rows = base[(base["compound_formula"] == f)
+                        & (base["sample_peak_id"].isin(member_ids))]
+            ok_rows = rows[
+                (pd.to_numeric(rows["ppm_error"], errors="coerce")
+                 - cfg.prior_offset).abs() <= 2.0]
+            if not len(ok_rows):
+                continue
+            eff = (float(ok_rows["ion_score"].mean())
+                   - C.complexity_penalty(f))
+            ranked.append((len(set(ok_rows["sample_peak_id"])), eff, f, ok_rows))
+        ranked.sort(key=lambda t: (-t[0], -t[1], t[2]))
+        if not ranked or ranked[0][0] < 2:
+            continue   # the oracle must anchor >=2 member channels
+        n_anchored, eff, winner, win_rows = ranked[0]
+        tied = len(ranked) > 1 and ranked[1][0] == n_anchored and (eff - ranked[1][1]) < 0.02
+        # diagnostic-isotope gate for isotope-confirmable winners (13C never counts)
+        wf = C.parse_formula(winner)
+        wants_iso = any(wf.get(el, 0) > 0 for el in ("S", "Cl", "Br"))
+        win_kids = kids[kids["compound_formula"] == winner]
+        iso_ok = bool(win_kids["iso_label"].astype(str).str.contains(
+            "|".join(_CERT_DIAG_ISO), na=False).any())
+        # optional TS corroboration (guarded: fully optional)
+        ts_note = ""
+        if ts_peaks is not None and len(ts_peaks):
+            cov = CN.ts_covariation(ts_peaks, [h.mz for h in cert.hits])
+            if cov is not None:
+                ts_note = (f"; member channels co-vary in time (r_min={cov:.2f})"
+                           if cov >= 0.6 else
+                           f"; member channels DO NOT co-vary (r_min={cov:.2f})")
+                if cov < 0.3:
+                    log(f"[pass7] skip {winner} @core {cert.core_mass:.4f}: "
+                        f"channels anti-correlated in time (r_min={cov:.2f})")
+                    continue
+        n_corr = CN.corroboration_count(
+            cert.n_channels, iso_confirmed=iso_ok,
+            ts_covaries=bool(ts_note and "co-vary in time" in ts_note))
+        conf = ("Good (certified)"
+                if (iso_ok or (not wants_iso and cert.n_channels >= 3)) and not tied
+                else "Low (certified)")
+        cert_desc = (f"CERTIFIED core {cert.core_mass:.4f} by {cert.n_channels} "
+                     f"channels (spread {cert.spread_mda:.2f} mDa): "
+                     + ", ".join(f"{h.mz:.4f}[{h.adduct}"
+                                 + (f"+{h.cluster_order}R]" if h.cluster_order else "]")
+                                 for h in cert.hits))
+        anchored_by_pid = {r["sample_peak_id"]: r for _, r in win_rows.iterrows()}
+        committed_any = False
+        strong_cert = iso_ok or cert.n_channels >= 3
+        displaced_note: dict = {}
+        for h in cert.hits:
+            try:
+                role_now = L.role_of(ledger, h.peak_id)
+                if role_now == L.ROLE_M0 and h.peak_id in weak_ids:
+                    row_i = ledger.index[ledger["peak_id"] == h.peak_id][0]
+                    inc_formula = str(ledger.at[row_i, "neutral_formula"])
+                    inc_adduct = str(ledger.at[row_i, "adduct"])
+                    if inc_formula == winner:
+                        # the certificate CONFIRMS the incumbent -- corroboration,
+                        # not displacement (the tier engine sees the channels)
+                        out["corroborated_existing"] += 1
+                        continue
+                    if not strong_cert:
+                        continue   # a 2-channel no-iso cert is not stronger evidence
+                    L.clear_assignment(
+                        ledger, h.peak_id,
+                        reason=f"displaced by certified-neutral {winner}: "
+                               f"{cert.n_channels}-channel certificate"
+                               + ("+isotope envelope" if iso_ok else "")
+                               + f" outweighs weak {inc_formula} {inc_adduct}")
+                    displaced_note[h.peak_id] = (
+                        f"; DISPLACED weak incumbent {inc_formula} {inc_adduct}")
+                    out["displaced"] += 1
+                elif role_now != L.ROLE_UNEXPLAINED:
+                    continue
+                r = anchored_by_pid.get(h.peak_id)
+                if r is not None:
+                    L.commit_assignment(
+                        ledger, h.peak_id,
+                        neutral_formula=winner,
+                        adduct=_mech_to_adduct(r),
+                        ion_formula=r["ion_formula"],
+                        ion_score=float(r["ion_score"]),
+                        compound_score=_f(r.get("compound_score")),
+                        ppm_error=_f(r.get("ppm_error")),
+                        tied=tied,
+                        pass_no=7,
+                        method="certified:multi-channel",
+                        confidence=conf,
+                        commentary=(f"Pass 7 (certified-neutral): {winner} -- {cert_desc}"
+                                    f"; {n_corr} corroborations"
+                                    + ("; diagnostic isotope envelope confirmed" if iso_ok else "")
+                                    + ts_note
+                                    + displaced_note.get(h.peak_id, "")),
+                    )
+                else:
+                    # a ladder rung above the oracle's registered channels
+                    # ([M+2R+H]+ ...): committed on the certificate evidence,
+                    # with the rung's OWN ppm vs the certified core so the
+                    # calibrated mass-gate audit can judge it.
+                    off = next(o for a, n, o in offsets
+                               if a == h.adduct and n == h.cluster_order)
+                    theo = cert.core_mass + off
+                    rung_ppm = (h.mz - theo) / theo * 1e6
+                    rung_adduct = (h.adduct if h.cluster_order == 0 else
+                                   f"[M+{h.cluster_order}R{h.adduct[2:]}")
+                    L.commit_assignment(
+                        ledger, h.peak_id,
+                        neutral_formula=winner,
+                        adduct=rung_adduct,
+                        ion_score=float(win_rows["ion_score"].min()),
+                        ppm_error=float(rung_ppm),
+                        tied=tied,
+                        pass_no=7,
+                        method="certified:ladder-rung",
+                        confidence=conf,
+                        commentary=(f"Pass 7 (certified-neutral, ladder rung "
+                                    f"n={h.cluster_order}): {winner} -- {cert_desc}"
+                                    + ts_note
+                                    + displaced_note.get(h.peak_id, "")),
+                    )
+                    out["rungs_committed"] += 1
+                out["peaks_claimed"] += 1
+                committed_any = True
+                for _, k in kids[(kids["compound_formula"] == winner)
+                                 & (kids["sample_peak_id"] != h.peak_id)].iterrows():
+                    try:
+                        L.attach_isotopologue(ledger, k["sample_peak_id"], h.peak_id,
+                                              iso_label=k["iso_label"],
+                                              iso_match_score=_f(k["iso_score"]))
+                        out["iso_attached"] += 1
+                    except L.LedgerError:
+                        continue
+            except L.LedgerError:
+                continue
+        if committed_any:
+            out["committed"] += 1
+            log(f"[pass7] {winner} committed on {cert.n_channels} channels "
+                f"@core {cert.core_mass:.4f} ({conf}"
+                + (", iso-confirmed" if iso_ok else "") + ")")
+    log(f"[pass7] {out}")
+    return out

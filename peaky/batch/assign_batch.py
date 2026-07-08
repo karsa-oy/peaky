@@ -299,6 +299,12 @@ def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
     if getattr(prof, "label_isotope", None):
         assign_kw.setdefault("label_isotope", prof.label_isotope)
         assign_kw.setdefault("label_max", prof.label_max)
+    # thread the batch TS to the per-sample run so pass-7 (certified-neutral)
+    # can use member-channel co-variation as OPTIONAL corroboration. Guarded:
+    # the pass is fully functional with ts_peaks=None (single-sample runs, or
+    # batches whose mass range excludes the reagent ions).
+    if ts_peaks is not None:
+        assign_kw.setdefault("ts_peaks", ts_peaks)
     # context-unlock the reference peaklists (contaminants always; chemistry-
     # specific lists when the batch metadata matches) -> selection prior + rescue.
     from peaky.assignment import reflists as RL
