@@ -258,6 +258,19 @@ def cmd_gka(args) -> None:
 # --------------------------------------------------------------------------- #
 # parser + entry point
 # --------------------------------------------------------------------------- #
+def cmd_mcp(args) -> None:
+    """Launch the peaky MCP server (drive the pipeline from an MCP client:
+    ChatGPT Developer Mode, Claude Desktop, Cursor, ...). Credentials stay
+    server-side; only small tool results cross the MCP boundary."""
+    _require_creds()
+    from peaky import mcp_server
+    print(f"[mcp] peaky MCP server on {args.transport} at "
+          f"{args.host}:{args.port} (Ctrl-C to stop)")
+    print("[mcp] tools: health, list_workspaces/datasets/batches/samples, "
+          "certify_neutrals, assign_sample, run_batch, job_status, list_jobs")
+    mcp_server.serve(host=args.host, port=args.port, transport=args.transport)
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="peaky",
@@ -357,6 +370,17 @@ def build_parser() -> argparse.ArgumentParser:
                      help="skill folder name under the skills dir (default: peaky)")
     pis.add_argument("--dir", default=None, help="skills dir (default: ~/.claude/skills)")
     pis.set_defaults(func=cmd_install_skill)
+
+    pm = sub.add_parser("mcp", help="run peaky as an MCP server (ChatGPT Developer "
+                                    "Mode / Claude Desktop / Cursor)")
+    pm.add_argument("--host", default="127.0.0.1",
+                    help="bind host (default 127.0.0.1; a tunnel/ngrok exposes it to ChatGPT)")
+    pm.add_argument("--port", type=int, default=8765, help="bind port (default 8765)")
+    pm.add_argument("--transport", default="streamable-http",
+                    choices=("streamable-http", "sse", "stdio"),
+                    help="MCP transport (default streamable-http = ChatGPT connectors; "
+                         "stdio for local Claude Desktop)")
+    pm.set_defaults(func=cmd_mcp)
 
     return ap
 
