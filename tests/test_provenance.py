@@ -74,6 +74,14 @@ check("hashing is deterministic (reproducible fingerprint)",
       and m2["output"]["merged_ledger_sha1"] == m["output"]["merged_ledger_sha1"])
 
 check("sha1_file returns None for a missing path", PV.sha1_file(_rd + "/nope") is None)
+
+# --- stage ordering: a pass-8 reflist rescue commits AFTER the three envelope
+# sweeps, so a final sweep must follow it (else a rescued parent's 13C satellite
+# stays "unexplained" -- the NBBS urea-adduct M+1 bug).
+_names = [s.name for s in _A._STAGES]
+check("iso_env_final runs after reflist_rescue",
+      "iso_env_final" in _names and "reflist_rescue" in _names
+      and _names.index("iso_env_final") > _names.index("reflist_rescue"), _names)
 check("record_run is non-fatal on a bad dir (returns {})",
       PV.record_run(run_dir="/nonexistent/xyz", base_out="/nonexistent",
                     batch_name="B", dataset=None, sample_ids=[], reagent="r",

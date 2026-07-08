@@ -1044,7 +1044,13 @@ def prefer_amine_over_ammonium(ledger: pd.DataFrame, *, ts_peaks=None, r_min: fl
         time series it is the stronger CO-VARIATION test: the NH4 trace must
         correlate (log Pearson r >= r_min) with the [M+H]+ OR urea-cluster trace of
         the SAME m/z -- a faint NH4 peak that does not track the parent is NOT
-        corroboration; or
+        corroboration. Correlation is only a genuine verdict against a SHAPED
+        parent trace: a FLAT parent (constant background, e.g. instrument bleed)
+        has no shape to track, so its pairs -- and channels missing from the TS --
+        FALL BACK to presence-based corroboration instead of failing the gate; or
+      * X contains Si: ammonium adducts of siloxanes are real contaminant
+        chemistry, while the +NH3 re-read would fabricate an "aminosiloxane"
+        neutral no chemistry supports -- the NH4 reading is kept; or
       * the amine X+NH3 is valence-impossible (saturated X -> negative DBE); the
         NH4 adduct is then the only valid reading and is FORCED/kept.
 
@@ -1052,16 +1058,20 @@ def prefer_amine_over_ammonium(ledger: pd.DataFrame, *, ts_peaks=None, r_min: fl
     identical). Relabels in place; returns a summary.
     """
     if not {"neutral_formula", "adduct"} <= set(ledger.columns):
-        return {"relabeled": 0, "kept_corroborated": 0, "forced_nh4": 0}
+        return {"relabeled": 0, "kept_corroborated": 0, "forced_nh4": 0,
+                "kept_si": 0}
     is_m0 = (ledger["role"] == L.ROLE_M0) if "role" in ledger.columns \
         else pd.Series(True, index=ledger.index)
 
     keeps = _make_corroboration_test(ledger, ts_peaks, r_min)
 
-    relabeled = kept = forced = 0
+    relabeled = kept = forced = kept_si = 0
     for i in ledger.index[is_m0 & (ledger["adduct"] == "[M+NH4]+")]:
         X = str(ledger.at[i, "neutral_formula"] or "")
         if not X or X == "nan":
+            continue
+        if C.parse_formula(X).get("Si"):                  # siloxane NH4 adduct -> keep
+            kept_si += 1
             continue
         if keeps(X):                                      # corroborated -> keep NH4
             kept += 1
@@ -1082,20 +1092,30 @@ def prefer_amine_over_ammonium(ledger: pd.DataFrame, *, ts_peaks=None, r_min: fl
         relabeled += 1
     mode = f"co-variation r>={r_min}" if ts_peaks is not None else "presence"
     log(f"[uronium-amine] ({mode}) {relabeled} [M+NH4]+ re-read as [M+H]+ amine; "
-        f"kept {kept} corroborated NH4 adducts; {forced} forced (no valid amine)")
-    return {"relabeled": relabeled, "kept_corroborated": kept, "forced_nh4": forced}
+        f"kept {kept} corroborated + {kept_si} Si-bearing NH4 adducts; "
+        f"{forced} forced (no valid amine)")
+    return {"relabeled": relabeled, "kept_corroborated": kept, "forced_nh4": forced,
+            "kept_si": kept_si}
 
 
 def _make_corroboration_test(ledger, ts_peaks, r_min):
     """Return keeps(neutral) -> bool. Presence-based unless a time series is given,
     then NH4 is kept only when its trace co-varies (log r>=r_min) with the [M+H]+ or
-    urea-cluster trace."""
+    urea-cluster trace. The co-variation test only applies where correlation is
+    INFORMATIVE, which is keyed on the PARENT trace's shape: a FLAT parent
+    (constant background, e.g. instrument bleed) has no shape to track -- its NH4
+    bin can even look shaped from a co-binned isobar -- so formulas with no shaped
+    parent trace (or missing from the TS) fall back to the presence test. A shaped
+    parent whose NH4 fails r>=r_min is a genuine non-tracking verdict and does NOT
+    fall back."""
+    corrob = set(ledger.loc[ledger["adduct"].isin(["[M+H]+", "[M+(CH4N2O)H]+"]),
+                            "neutral_formula"].dropna().astype(str))
+    presence = lambda X: X in corrob  # noqa: E731
     if ts_peaks is None:
-        corrob = set(ledger.loc[ledger["adduct"].isin(["[M+H]+", "[M+(CH4N2O)H]+"]),
-                                "neutral_formula"].dropna().astype(str))
-        return lambda X: X in corrob
+        return presence
 
     import numpy as np
+    from peaky.batch import cluster as CL
     from peaky.batch import timeseries as TS
     mat, bin_mz = TS.build_matrix(ts_peaks)
     bm = bin_mz.sort_values(); arr = bm.to_numpy(); idx = bm.index.to_numpy()
@@ -1115,16 +1135,33 @@ def _make_corroboration_test(ledger, ts_peaks, r_min):
             return None
         return np.log10(mat[best[0]].clip(lower=1).to_numpy())
 
+    def _flat(logtrace):
+        lin = 10.0 ** logtrace
+        m = float(lin.mean())
+        return m <= 0 or float(lin.std()) / m < CL.FLAT_CV
+
     def keeps(X):
         nh4 = _logtrace(X, "[M+NH4]+")
         if nh4 is None:
-            return False
+            return presence(X)          # channel not in the TS: presence is all there is
+        testable = False
         for ref in ("[M+H]+", "[M+(CH4N2O)H]+"):
             t = _logtrace(X, ref)
             if t is None:
                 continue
             ok = np.isfinite(nh4) & np.isfinite(t)
-            if ok.sum() >= 6 and np.corrcoef(nh4[ok], t[ok])[0, 1] >= r_min:
+            if ok.sum() < 6:
+                continue
+            if _flat(t[ok]):
+                # A FLAT parent has no shape to track, so r is uninformative no
+                # matter what the NH4 bin does (the bin may even look shaped from
+                # a co-binned isobar 1 ppm away). Only a SHAPED parent can issue
+                # a genuine non-tracking verdict.
+                continue
+            testable = True
+            if np.corrcoef(nh4[ok], t[ok])[0, 1] >= r_min:
                 return True
+        if not testable:                # no shaped parent anywhere -> presence fallback
+            return presence(X)
         return False
     return keeps
