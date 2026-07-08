@@ -168,7 +168,7 @@ pipeline assigns a **representative subset and merges by m/z**:
   spaced in TIME (nearest distinct sample to each of 5 equally-spaced target times;
   endpoints always in) **+ the max-TIC sample**. Selecting in time (not row index)
   means a lone late file in an irregular run still gets a pick.
-- **`assign_batch.run(batch=NAME | peaks=, reagent='auto', out_dir=, ts_peaks=, amine_r_min=0.7)`**
+- **`assign_batch.run(batch=NAME | peaks=, reagent='auto', out_dir=, ts_peaks=, amine_r_min=0.6)`**
   — resolves the `profiles.ReagentProfile`, runs `assign.run` per selected file
   (keeps each `per_file/<sid>_ledger.csv`), then an **offset-aware merge** (`align`)
   - a file-to-file **jitter** table. Pass `ts_peaks` (the full-batch per-peak time
@@ -185,10 +185,20 @@ pipeline assigns a **representative subset and merges by m/z**:
 
 `assign.run(..., adducts=)` forces a known reagent's channels (a sparse-match positive
 file otherwise falls back to `[M-H]-` = wrong polarity). For positive urea-CIMS,
-**`cleanup.prefer_amine_over_ammonium(ledger, ts_peaks=, r_min=0.7)`** re-reads
-`[M+NH4]+` as `[M+H]+` of the +NH3 amine (the SAME ion) UNLESS the NH4 trace co-varies
-(r>=0.7) with the `[M+H]+`/urea parent, or the amine is valence-impossible. (Run via
-`assign_batch` at the merged level, where corroboration is complete.)
+**`cleanup.prefer_amine_over_ammonium(ledger, ts_peaks=, r_min=0.6, protected=)`** resolves
+the exact-mass degeneracy `[M+NH4]+` of X ≡ `[M+H]+` of the amine X+NH3 by TIME: a real
+ammonium adduct must TRACK X's own `[M+H]+`/urea parent (2 h-binned log-corr). THREE-WAY
+per neutral — **keep** the adduct (Assigned) when it tracks a shaped parent (r≥`r_min`);
+**re-read** to the amine when it fails to track a shaped parent (r≤0.2) OR the parent
+channels are absent from the TS (their absence refutes the ammonium reading); **cap at
+Candidate** (keep the adduct but demote) when the pairing is weak (0.2<r<`r_min`) or the
+present parent is FLAT (no shape to correlate — the NBBS blind spot). Overrides that keep
+the adduct at tier: Si-bearing X (siloxane adducts are real), a `protected` neutral
+(reflist-rescue / known-species / certified provenance, established independent of the NH4
+channel — this holds NBBS, whose weak isobar-contaminated NH4 trace fails the tracking
+test), and a valence-impossible amine (forced). Without a TS it degrades to the binary
+presence test. (Run via `assign_batch` at the merged level, where corroboration is complete;
+`assign_batch` gathers the `protected` set from the per-file `method` provenance.)
 
 ### Time-series clustering + figures + report
 
@@ -348,10 +358,10 @@ already open. `peaky assign` emits one per run (plus a second over the unexplain
 | **`certified_neutral.py`** | PURE certified-neutral core: `channel_offsets` (adduct + cluster-ladder offsets, alias de-dup), `find_certificates` (>=2-channel convergence -> `Certificate`, parsimony selection), `enumerate_certified` (expanded P/S/Cl box for a certified mass ONLY), `ts_covariation` (optional batch-TS corroboration), `corroboration_count`. Pipeline entry `run_pass_certified` (passes/directors, pass 7); standalone `scripts/certify_neutrals.py` (offline certificate table / full oracle mode) |
 | `analyte_viz.py`      | **consistent** Van Krevelen + raw time-series from a ledger + batch TS (one row per neutral, RAW intensity, changing-cv threshold). **`render_van_krevelen_full`** = EVERY assigned peak by CHO/CHON/CHOS backbone (Si/F/halogen folded in). `attach_dynamics(bin_minutes=)` for short batches. CLIs: `scripts/analyte_plots.py`, `scripts/analyte_widgets.py` (interactive HTML)                                        |
 | `degeneracy.py`       | honest cross-family mass-degeneracy measurement (`degeneracy_density`/note)                                                                                                                                                                                                                                                                                                                                              |
-| `cleanup.py`          | residual cleanup: isotope-confirmed recovery, bromide-cluster labelling, ringing-artifact flagging, satellite reclaim, **`prefer_amine_over_ammonium`** (positive: re-read uncorroborated/non-co-varying `[M+NH4]+` as the `[M+H]+` amine); **plausibility demotes** `demote_implausible_carbon` / `demote_implausible_ionization` / `demote_speculative_residual` + `relabel_reagent_halocarbons` (Br-reagent-gated)                                                                                                                                                                               |
+| `cleanup.py`          | residual cleanup: isotope-confirmed recovery, bromide-cluster labelling, ringing-artifact flagging, satellite reclaim, **`prefer_amine_over_ammonium`** (positive: THREE-WAY time-tracking gate — keep `[M+NH4]+` adduct that tracks a shaped parent, re-read to the `[M+H]+` amine when it fails to track / the parent is absent, cap Candidate when weak-or-flat; Si + `protected`-provenance + valence overrides); **plausibility demotes** `demote_implausible_carbon` / `demote_implausible_ionization` / `demote_speculative_residual` + `relabel_reagent_halocarbons` (Br-reagent-gated)                                                                                                                                                                               |
 | **`reflists.py`**     | curated, self-describing **reference-peaklist** catalog (`peaky/data/peaklists/`: metadata + version + references + provenance) — `load_catalog`/`active_lists` (context-gated; contaminants always on), `match_assigned` (selection-prior corroboration), `rescue_unexplained_by_reflist` (mass-match → server re-score → commit-if-confirmed, else tentative Candidate). Soft + provenance-tagged; never overrides an isotope-scored Assigned |
 | **`sampling.py`**     | THE RULE — `select_representative_samples` (5 evenly-time-spaced + max-TIC) for batch assignment                                                                                                                                                                                                                                                                                                                         |
-| **`assign_batch.py`** | `run(batch\|peaks, ts_peaks=, amine_r_min=)` — assign the reps, keep per-file ledgers, offset-aware merge (`align`) + jitter table; applies the positive amine gate at merge level                                                                                                                                                                                                                                       |
+| **`assign_batch.py`** | `run(batch\|peaks, ts_peaks=, amine_r_min=)` — assign the reps, keep per-file ledgers, offset-aware merge (`align`) + jitter table; applies the positive amine gate at merge level (three-way time-tracking)                                                                                                                                                                                                                                       |
 | **`cluster.py`**      | correlation clustering (log-corr, COMPLETE linkage r>0.6, signed distance) → `render_a4` A4-portrait paginated panels + remaining-peaks overview. **Flatness gate** `split_varying`/`render_flat_panel` (cv<`FLAT_CV` bunched, not clustered). `render_changers` = A4-portrait big-standalone-changers page. `write_cluster_workbook(when=)` — byte-reproducible per-cluster XLSX (timestamps pinned to a FIXED content epoch, not the run time) |
 | **`composition.py`**  | report composition accounting (pure): `signal_by_backbone` (intensity-weighted CHO/CHON/CHOS), `amine_shadow_stats`/`collapsed_composition` (the [M+NH4]+/[M+H]+-amine degeneracy two-way), `top_species_by_signal`, `oligomer_flag` (high-C high-O HOM-dimer candidates)                                                                                                                                                |
 | **`plausibility.py`** | chemical-plausibility QC: `scan(merged, polarity)` flags Candidate-only mass-coincidence formulas (high heteroatom / very low H/C / wrong-mode halogen); Assigned never flagged (powers the `scrutiny` report section)                                                                                                                                                                                                 |

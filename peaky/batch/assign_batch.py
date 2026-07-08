@@ -235,6 +235,22 @@ def _m0(ledger: pd.DataFrame) -> pd.DataFrame:
     return m[cols].copy()
 
 
+# provenance prefixes whose neutral identity is established independently of the
+# [M+NH4]+ channel (curated reference lists, pass-0 known species, cross-channel
+# certified neutrals) -- the amine gate keeps their ammonium adducts regardless of
+# the NH4-vs-parent tracking test. The merged ledger drops `method`, so the set is
+# gathered here from the full per-file ledgers.
+_PROTECTED_METHODS = ("reflist-rescue", "known:", "certified:")
+
+
+def _protected_neutrals(ledger: pd.DataFrame) -> set:
+    if not {"method", "neutral_formula"} <= set(ledger.columns):
+        return set()
+    meth = ledger["method"].astype(str)
+    keep = meth.str.startswith(_PROTECTED_METHODS)
+    return set(ledger.loc[keep, "neutral_formula"].dropna().astype(str)) - {"nan", ""}
+
+
 # ---------------------------------------------------------------------------
 # network: assign each representative file, keep per-file records, combine
 # ---------------------------------------------------------------------------
@@ -244,7 +260,7 @@ def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
         select: str = "representative", coverage_target: float = 0.85,
         k_max: int = 10, height_floor: float = 1000.0,
         out_dir: str, tol_ppm: float = DEFAULT_TOL_PPM,
-        sample_ids: list | None = None, ts_peaks=None, amine_r_min: float = 0.7,
+        sample_ids: list | None = None, ts_peaks=None, amine_r_min: float = 0.6,
         log=print, **assign_kw) -> dict:
     """Assign the representative subset of a batch and combine, keeping per-file
     ledgers. Provide EITHER `peaks` (a batch peak/sample table) OR `batch` (a
@@ -315,12 +331,17 @@ def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
             f"(context {sorted(_tags) or 'contaminants-only'})")
     per_file, offsets, per_stats = {}, {}, []
     plaus_audit: list = []     # per-file O-monster / carbon-cluster demotes, pooled
+    protected_neutrals: set = set()   # curated/cross-channel identities the amine
+    #   gate must not re-read (reflist / known-species / certified provenance) --
+    #   e.g. NBBS, whose weak isobar-contaminated NH4 trace fails the tracking test
+    #   yet is a genuine Keller-list contaminant adduct.
     for i, sid in enumerate(sample_ids, 1):
         log(f"[assign_batch] ({i}/{len(sample_ids)}) assigning {sid} ...")
         res = A.run(sid, context=context, log=log, reflists_active=reflists_active, **assign_kw)
         led = res["ledger"]
         led.to_csv(os.path.join(pfdir, f"{sid}_ledger.csv"), index=False)
         plaus_audit.extend(res.get("plausibility_audit") or [])
+        protected_neutrals |= _protected_neutrals(led)
         per_file[sid] = _m0(led)
         try:
             offsets[sid] = IO.estimate_offset(IO.fetch_peaks(client, sid, use_cache=True))
@@ -338,7 +359,8 @@ def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
     # MERGED level where cross-channel corroboration is complete.
     if prof.polarity == "+":
         from peaky.assignment import cleanup
-        cleanup.prefer_amine_over_ammonium(merged, ts_peaks=ts_peaks, r_min=amine_r_min, log=log)
+        cleanup.prefer_amine_over_ammonium(merged, ts_peaks=ts_peaks, r_min=amine_r_min,
+                                           protected=protected_neutrals, log=log)
     from peaky.assignment import plausibility as PL
     summary_plaus = {}
     # one audit row per touched peak (per-file O/C-monster + carbon-cluster demotes);

@@ -96,6 +96,20 @@ me, je = AB.align({})
 check("empty -> empty merged + jitter with schema",
       len(me) == 0 and "n_files" in me.columns and "cluster" in je.columns)
 
+# --- _protected_neutrals: curated/known/certified provenance shields NH4 adducts
+_ledp = pd.DataFrame([
+    dict(neutral_formula="C10H15NO2S", method="reflist-rescue:contaminants_keller2008"),  # NBBS
+    dict(neutral_formula="C10H19O6PS2", method="known:organophosphate"),                  # malathion
+    dict(neutral_formula="C6H10O2",    method="certified:multi-channel"),
+    dict(neutral_formula="C8H10O",     method="cheminfo+grid"),        # ordinary -> NOT protected
+    dict(neutral_formula="C3H9NOSi",   method="contaminant:siloxane"), # NOT via this set (Si guard owns it)
+])
+_prot = AB._protected_neutrals(_ledp)
+check("_protected_neutrals: reflist/known/certified in; grid/siloxane out",
+      _prot == {"C10H15NO2S", "C10H19O6PS2", "C6H10O2"}, _prot)
+check("_protected_neutrals: missing columns -> empty set",
+      AB._protected_neutrals(pd.DataFrame({"x": [1]})) == set())
+
 def test_all():
     assert FAIL == 0, f"{FAIL} checks failed"
 
