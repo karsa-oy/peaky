@@ -354,6 +354,14 @@ def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
         log(f"[assign_batch]   {sid}: offset={offsets[sid]} stats={res.get('stats')}")
 
     merged, jitter = align(per_file, tol_ppm=tol_ppm, offsets=offsets)
+    # Merge guard: drop reagent-cluster ions a per-file pass mislabelled as analyte
+    # (urea [R_n+H]+/[R_n+NH4]+ read as CHNO/CH4N2O on the [M+NH4]+/urea channel) --
+    # they otherwise dominate the 'assigned' signal. Belt-and-braces with the
+    # per-file reagent lock/reclaim (older per-file ledgers predate that fix).
+    from peaky.chem import reagents as _RG
+    _rgk = _RG.reagent_for_adducts(list(prof.adducts or []))
+    if _rgk:
+        merged, _rgstrip = _RG.strip_reagent_cluster_rows(merged, _rgk, log=log)
     # Positive urea-CIMS: re-read uncorroborated [M+NH4]+ adducts as [M+H]+ of the
     # +NH3 amine (mass/isotope-identical; simpler in an N-rich source). Done at the
     # MERGED level where cross-channel corroboration is complete.
