@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import itertools
 
+import numpy as np
 import pandas as pd
 
 from peaky.chem import chemistry as C
@@ -200,6 +201,71 @@ def label_reagents(ledger: pd.DataFrame, reagent: str = "Br", *, ppm: float = 15
             except L.LedgerError:
                 continue
     return n
+
+
+def label_reagent_isotopologues(ledger: pd.DataFrame, *, ppm: float = 12.0,
+                                min_rel: float = 0.004, gate: float = 3.0,
+                                log=print) -> dict:
+    """Claim the ISOTOPE SATELLITES of every already-labelled reagent ion.
+
+    A reagent cluster ion is bright, so its ¹³C/¹⁵N (and for halide reagents ³⁷Cl/
+    ⁸¹Br) satellites are large in ABSOLUTE terms even though small relative to the
+    parent -- the ¹³C/¹⁵N of the 15.9M-cps urea dimer [urea2+H]+ are 332k/224k cps.
+    The reagent labeler claimed only the monoisotopic line, and
+    `complete_isotope_envelopes` runs on role=M0 analytes only, so these satellites
+    landed in 'unexplained' and dominated the residual. This predicts each reagent
+    ion's envelope from its KNOWN ion_formula (`isotopes.isotope_pattern`) and marks
+    the matching UNEXPLAINED peaks reagent too.
+
+    Guarded by intensity: a satellite peak is claimed only if its height is within
+    `gate`x the predicted (rel_intensity x parent height) -- a peak far BRIGHTER than
+    the reagent satellite should be has a co-eluting analyte on top, so it is left.
+    `merge_da` is tightened to 3 mDa so the ¹³C (+1.00335) and ¹⁵N (+0.99703) lines
+    stay resolved (they are separate peaks in the data, 6.3 mDa apart)."""
+    from peaky.chem import isotopes as ISO
+    if "height" not in ledger.columns:
+        return {"iso_reagent": 0}
+    reag = ledger[(ledger["role"] == L.ROLE_REAGENT)
+                  & ledger["ion_formula"].notna()].copy()
+    if not len(reag):
+        return {"iso_reagent": 0}
+    mzs = ledger["mz"].to_numpy()
+    claimed = 0
+    for _, pr in reag.iterrows():
+        pmz = float(pr["mz"]); ph = float(pr["height"]) if pd.notna(pr["height"]) else 0.0
+        ionf = str(pr["ion_formula"]).rstrip("+-")
+        try:
+            pattern = ISO.isotope_pattern(ionf, min_rel=min_rel, max_shift=6.5,
+                                          merge_da=0.003)
+        except Exception:
+            continue
+        for dm, rel, lab in pattern:
+            if dm <= 0.01:                       # skip the M0 line itself
+                continue
+            target = pmz + dm
+            tol = target * ppm * 1e-6
+            cand = ledger.index[(np.abs(mzs - target) <= tol)
+                                & (ledger["role"].to_numpy() == L.ROLE_UNEXPLAINED)]
+            if not len(cand):
+                continue
+            i = min(cand, key=lambda j: abs(float(ledger.at[j, "mz"]) - target))
+            h = float(ledger.at[i, "height"]) if pd.notna(ledger.at[i, "height"]) else 0.0
+            pred = rel * ph
+            if pred > 0 and h > gate * pred:     # analyte sitting on top -> leave it
+                continue
+            try:
+                L.mark_reagent(ledger, ledger.at[i, "peak_id"],
+                               f"reagent isotopologue: {lab} of {pr['ion_formula']} "
+                               f"(rel {rel*100:.1f}%)",
+                               ion_formula=pr["ion_formula"])
+                L.lock_peaks(ledger, [ledger.at[i, "peak_id"]])
+                claimed += 1
+            except L.LedgerError:
+                continue
+    if claimed:
+        log(f"[reagent] claimed {claimed} reagent isotopologue satellite(s) "
+            f"(¹³C/¹⁵N/heavy-halogen of the reagent ions)")
+    return {"iso_reagent": claimed}
 
 
 def reclaim_reagent_clusters(ledger: pd.DataFrame, reagent: str = "Br", *,

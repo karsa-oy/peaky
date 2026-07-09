@@ -1,0 +1,18 @@
+# Mascope server credentials.
+#
+# Easiest (clone-and-go): copy this to `.env` in the repo root and fill it in.
+#     cp .env.example .env
+# A project-local .env is git-ignored and found automatically. Or use the shared
+# home location instead:
+#     mkdir -p ~/.mascope && cp .env.example ~/.mascope/.env
+#
+# Search order: --env / $MASCOPE_ENV > repo-root .env (or cwd) > ~/.mascope/.env.
+# Process environment variables of the same name also work without any file.
+#
+# Your access token comes from the Mascope web app (account / API settings).
+
+MASCOPE_URL=https://bates.mascope.app
+MASCOPE_ACCESS_TOKEN=bLAhEptMetqEzJEmHdDB5nmKGyjBnvJc9Pa4X0P5uvA
+
+# Run outputs go here (kept at the established location; configured explicitly).
+PEAKY_OUTPUT_DIR=/Users/aleksei/peaky-output

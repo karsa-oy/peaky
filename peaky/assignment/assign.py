@@ -170,6 +170,10 @@ def _stage_reagent_post(st):
     if n:
         st.log(f"[run] post-labeled {n} more reagent-cluster peaks")
     reagents.reclaim_reagent_clusters(st.led, st.reagent, ppm=12.0, log=st.log)
+    # claim the bright ¹³C/¹⁵N (and halide heavy-isotope) satellites of the reagent
+    # ions -- they otherwise dominate the unexplained residual (the urea-dimer ¹³C/¹⁵N
+    # at 122.075/122.069 were the two biggest 'unexplained' peaks of the batch).
+    reagents.label_reagent_isotopologues(st.led, log=st.log)
 
 
 def _stage_timeseries(st):
