@@ -195,6 +195,33 @@ check("strip: NH3 analyte + real analytes (158, NBBS@214) kept",
       set(kept["neutral_formula"]) == {"H3N", "C9H18O", "C10H15NO2S"},
       kept["neutral_formula"].tolist())
 
+# --- label_reagent_isotopologues: claim the bright ¹³C/¹⁵N satellites of the reagent
+# ions (the urea-dimer ¹³C/¹⁵N at 122.075/122.069 were the 2 biggest 'unexplained'
+# peaks). Gated on intensity: a peak far brighter than the satellite (analyte on top)
+# is left. Dimer ion C2H9N4O2+ @121.072: ¹³C +1.0034=122.0753, ¹⁵N +0.9970=122.0690.
+iled = L.new_ledger(pd.DataFrame({
+    "peak_id": ["dimer", "d13c", "d15n", "d18o_analyte"],
+    "mz": [121.071931, 122.075286, 122.068966, 123.076241],
+    # d18o_analyte: the dimer's ¹⁸O mass, but 5M cps >> the predicted ~64k satellite
+    # -> a co-eluting analyte sits on top, so the intensity gate must LEAVE it.
+    "height": [1.6e7, 3.3e5, 2.3e5, 5.0e6],
+}))
+L.mark_reagent(iled, "dimer", "reagent ion: [(CH4N2O)2+H]+", ion_formula="C2H9N4O2+")
+out_iso = RG.label_reagent_isotopologues(iled, ppm=12, min_rel=0.004,
+                                         log=lambda *a, **k: None)
+check("iso-reagent: dimer ¹³C satellite (122.075) claimed as reagent",
+      L.role_of(iled, "d13c") == L.ROLE_REAGENT, L.role_of(iled, "d13c"))
+check("iso-reagent: dimer ¹⁵N satellite (122.069) claimed as reagent",
+      L.role_of(iled, "d15n") == L.ROLE_REAGENT, L.role_of(iled, "d15n"))
+check("iso-reagent: claimed satellites are locked",
+      bool(iled.loc[iled.peak_id == "d13c", "locked"].iloc[0]))
+check("iso-reagent: satellite carries a descriptive commentary",
+      "isotopologue" in str(iled.loc[iled.peak_id == "d13c", "commentary"].iloc[0]))
+check("iso-reagent: bright analyte-on-top (5M cps at the ¹⁸O mass) NOT stolen",
+      L.role_of(iled, "d18o_analyte") == L.ROLE_UNEXPLAINED,
+      L.role_of(iled, "d18o_analyte"))
+check("iso-reagent: count", out_iso["iso_reagent"] == 2, out_iso)
+
 def test_all():
     assert FAIL == 0, f"{FAIL} checks failed"
 
