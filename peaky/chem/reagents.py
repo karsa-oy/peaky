@@ -68,13 +68,11 @@ def _build_positive_library(reagent: str, *, max_n: int = 6
     n = 1..max_n:
 
       * [R_n + H]+   -- the bare protonated cluster (61.04 / 121.07 / ...);
-      * [R_n + NH4]+ -- the SAME cluster charged by AMBIENT AMMONIA rather than a
-        proton (78.07 for n=1). NH3 is ubiquitous in ambient air and clusters onto
-        the urea reagent; this is an ion-source background cluster, NOT an analyte
-        ammonium adduct. Its exact mass equals [ (R_n)·NH3 + H ]+, which the CHON
-        grid otherwise reads as a spurious `(R_n)NH3` analyte on the [M+NH4]+/[M+H]+
-        channel (e.g. urea itself read as `CH4N2O [M+NH4]+`), so it must be claimed
-        here as reagent.
+      * [R_n + NH4]+ for n >= 2 -- a urea MULTIMER charged by ambient ammonia; an
+        ion-source cluster. (The n=1 case [urea+NH4]+ == [NH3+(urea)H]+ at 78.07 is
+        NOT here: it is ammonia measured via its single urea adduct -- the same ion,
+        but the meaningful neutral is the AMBIENT NH3 analyte, so it is registered
+        as a pass-0 known species, not stolen as reagent.)
 
     The ion has the elemental composition R_n + (H or NH4) and charge +1 (an
     electron removed)."""
@@ -89,10 +87,12 @@ def _build_positive_library(reagent: str, *, max_n: int = 6
         dH = dict(base); dH["H"] = dH.get("H", 0) + 1
         out.append((f"[({unit}){n}+H]+", C.neutral_mass(dH) - _M_E,
                     C.format_formula(dH) + "+"))
-        # [R_n + NH4]+  (ambient-ammonia charged cluster)
-        dN = dict(base); dN["N"] = dN.get("N", 0) + 1; dN["H"] = dN.get("H", 0) + 4
-        out.append((f"[({unit}){n}+NH4]+", C.neutral_mass(dN) - _M_E,
-                    C.format_formula(dN) + "+"))
+        # [R_n + NH4]+ for n>=2 (ammonia on a urea multimer = ion-source cluster);
+        # n=1 is the ambient-NH3 analyte (pass-0 known species), left off here.
+        if n >= 2:
+            dN = dict(base); dN["N"] = dN.get("N", 0) + 1; dN["H"] = dN.get("H", 0) + 4
+            out.append((f"[({unit}){n}+NH4]+", C.neutral_mass(dN) - _M_E,
+                        C.format_formula(dN) + "+"))
     return out
 
 

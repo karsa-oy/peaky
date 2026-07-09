@@ -108,9 +108,21 @@ def _known_species(polarity: str = "negative") -> dict:
             # P-thioate.
             "C16H30NO7S2P": "organothiophosphate (C16 N-dithioate; Cl2 isobar)",
         }
+        # AMBIENT AMMONIA. NH3 is measured in urea-CIMS via its urea adduct
+        # [NH3+(CH4N2O)H]+ (m/z 78.066) -- the SAME ion as [urea+NH4]+, but the
+        # meaningful neutral is the ambient NH3, not the reagent. Its other channels
+        # ([M+H]+ 18.03, [M+NH4]+ 35.06) fall below the measured range, so it is a
+        # single-channel known species (the >=2-channel gate is P-only). Supplying
+        # it here keeps the ambient-NH3 signal as an analyte instead of discarding it
+        # as a reagent cluster, and stops the CHON grid reading 78.066 as the phantom
+        # `CH4N2O [M+NH4]+` (urea as its own ammonium adduct).
+        ambient_inorganic = {
+            "H3N": "ammonia (ambient; via urea adduct)",
+        }
         return {
             "organophosphate": organophosphate,
             "organothiophosphate": organothiophosphate,
+            "ambient_inorganic": ambient_inorganic,
         }
     atmos = {
         # small atmospheric acids / radicals detected as Br- adducts -- the
@@ -313,6 +325,8 @@ def run_pass0_known(
                 if fam == "perfluoroacid"
                 else "chlorinated-paraffin"
                 if fam == "chlorinated_paraffin"
+                else "ambient"
+                if fam == "ambient_inorganic"
                 else "contaminant"
             )
             fam_kids = kids[kids["compound_formula"] == r["compound_formula"]]
