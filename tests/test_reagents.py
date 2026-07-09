@@ -118,12 +118,15 @@ check("urea [R_n+H]+ cluster spacing ~60.0324",
 # ion formulae are CATIONS with the known elemental composition
 check("[urea+H]+ ion_formula CH5N2O+", "CH5N2O+" in near_f(ulib, 61.0396), near_f(ulib, 61.0396))
 check("[urea2+H]+ ion_formula C2H9N4O2+", "C2H9N4O2+" in near_f(ulib, 121.0720), near_f(ulib, 121.0720))
-# ammonia-charged cluster [urea_n + NH4]+ -- ambient NH3 on the reagent, an ion-
-# source background, NOT an analyte ammonium adduct. n=1 = 78.0662, degenerate with
-# the CHON grid reading `CH4N2O [M+NH4]+` (urea read as its own analyte).
-check("[urea+NH4]+ present ~78.0662", bool(near(ulib, 78.0662)), near(ulib, 78.0662))
-check("[urea+NH4]+ ion_formula CH8N3O+", "CH8N3O+" in near_f(ulib, 78.0662), near_f(ulib, 78.0662))
-check("[urea2+NH4]+ present ~138.0985", bool(near(ulib, 138.0985)), near(ulib, 138.0985))
+# ammonia-charged clusters [urea_n + NH4]+: n>=2 are urea-multimer ion-source
+# clusters (reagent). n=1 (78.0662) is NOT here -- it is ambient NH3 measured via its
+# single urea adduct [NH3+(urea)H]+ (same ion), registered as a pass-0 known species.
+check("[urea+NH4]+ (78.0662) NOT in reagent library (it is the ambient-NH3 analyte)",
+      not near(ulib, 78.0662), near(ulib, 78.0662))
+check("[urea2+NH4]+ present ~138.0985 (urea-multimer NH3 cluster, reagent)",
+      bool(near(ulib, 138.0985)), near(ulib, 138.0985))
+check("[urea2+NH4]+ ion_formula C2H12N5O2+",
+      "C2H12N5O2+" in near_f(ulib, 138.0985), near_f(ulib, 138.0985))
 
 # reagent_for_adducts maps the urea adduct -> 'urea', halogens unchanged
 check("reagent_for_adducts urea", RG.reagent_for_adducts(["[M+(CH4N2O)H]+", "[M+H]+"]) == "urea")
@@ -180,15 +183,17 @@ check("reclaim: counts (>=2 reagent, >=2 displaced M0)",
 # as analyte from a merged ledger (no role column; matches by exact ion mass).
 merged = pd.DataFrame({
     "mz": [61.039624, 78.066209, 121.071931, 158.1536, 214.0896],
-    "neutral_formula": ["CHNO", "CH4N2O", "CH4N2O", "C9H18O", "C10H15NO2S"],
-    "adduct": ["[M+NH4]+", "[M+NH4]+", "[M+(CH4N2O)H]+", "[M+NH4]+", "[M+H]+"],
-    "tier": ["Candidate", "Candidate", "Assigned", "Candidate", "Assigned"],
+    # 78.066 = ammonia's urea adduct (analyte, NOT a reagent mass) -> kept
+    "neutral_formula": ["CHNO", "H3N", "CH4N2O", "C9H18O", "C10H15NO2S"],
+    "adduct": ["[M+NH4]+", "[M+(CH4N2O)H]+", "[M+(CH4N2O)H]+", "[M+NH4]+", "[M+H]+"],
+    "tier": ["Candidate", "Assigned", "Assigned", "Candidate", "Assigned"],
 })
 kept, stripped = RG.strip_reagent_cluster_rows(merged, "urea", log=lambda *a, **k: None)
-check("strip: reagent monomer/dimer/ammonia rows removed from analyte merge",
-      set(stripped["mz"].round(3)) == {61.040, 78.066, 121.072}, stripped["mz"].tolist())
-check("strip: real analytes (158, NBBS@214) kept",
-      set(kept["neutral_formula"]) == {"C9H18O", "C10H15NO2S"}, kept["neutral_formula"].tolist())
+check("strip: reagent monomer(61)/dimer(121) removed; NH3 analyte(78) NOT stripped",
+      set(stripped["mz"].round(3)) == {61.040, 121.072}, stripped["mz"].tolist())
+check("strip: NH3 analyte + real analytes (158, NBBS@214) kept",
+      set(kept["neutral_formula"]) == {"H3N", "C9H18O", "C10H15NO2S"},
+      kept["neutral_formula"].tolist())
 
 def test_all():
     assert FAIL == 0, f"{FAIL} checks failed"
