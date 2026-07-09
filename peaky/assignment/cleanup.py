@@ -1040,40 +1040,36 @@ def prefer_amine_over_ammonium(ledger: pd.DataFrame, *, ts_peaks=None,
     the accurate mass + isotope pattern CANNOT distinguish an ammonium adduct of X
     from a protonated amine X+NH3. The one discriminator is TIME: a true ammonium
     adduct of X must track X's own [M+H]+/urea parent trace, because it is the same
-    molecule ionised two ways; a peak that does NOT track the parent is a distinct
-    compound -> the protonated amine. With a batch time series this becomes a
-    per-row THREE-WAY verdict on the [M+NH4]+ trace vs the best of X's [M+H]+ /
-    [M+(CH4N2O)H]+ parent traces (2 h-binned log-correlation r over overlapping
-    bins):
+    molecule ionised two ways.
 
-      * KEEP as [M+NH4]+ (real adduct) when r >= r_min AND overlap >= min_overlap.
-      * RE-READ to [M+H]+ of X+NH3 (amine) when r <= r_reject AND overlap >=
-        min_overlap: the peak has its own independent time behaviour, so it is not
-        X's adduct.
-      * AMBIGUOUS / UNTESTABLE (r_reject < r < r_min, or too few overlapping bins,
-        or a channel missing from the TS): the data cannot resolve the degeneracy,
-        so KEEP the ammonium reading but CAP the tier at Candidate with an explicit
-        note. (Re-reading to the amine would be an equally unsupported guess.)
+    POLICY -- ammonium adducts are rare, so the burden of proof is on the ADDUCT
+    reading; the protonated CHON wins by default. Per [M+NH4]+-mass neutral X, with a
+    batch time series (2 h-binned log-correlation r of the [M+NH4]+ trace vs the best
+    of X's [M+H]+ / [M+(CH4N2O)H]+ parent traces):
 
-    Overriding exceptions (checked first, keep [M+NH4]+ at its current tier):
-      * X contains Si: ammonium adducts of siloxanes are real contaminant
-        chemistry; the +NH3 re-read would fabricate an "aminosiloxane".
-      * X is PROTECTED -- its identity is established by curation/cross-channel
-        evidence independent of this NH4 channel (reflist-rescue / known-species /
-        certified-neutral provenance; pass the neutral-formula set as `protected`).
-        This holds e.g. NBBS (a Keller-list contaminant) whose weak, isobar-
-        contaminated NH4 trace fails the tracking test yet is a genuine adduct.
+      * KEEP as [M+NH4]+ adduct (Assigned) ONLY when it TRACKS a shaped parent
+        (r >= r_min, overlap >= min_overlap) -- confirmed same molecule.
+      * OTHERWISE default to [M+H]+ of the protonated CHON (amine X+NH3), at
+        Candidate tier: independent time trace (r <= r_reject), only weak tracking
+        (r_reject<r<r_min), a flat unconfirmable parent, or a parent absent from the
+        TS. We do NOT assert an ammonium adduct we cannot confirm.
+
+    Overriding exceptions (keep [M+NH4]+):
+      * X contains Si: ammonium adducts of siloxanes are real contaminant chemistry;
+        the +NH3 re-read would fabricate an "aminosiloxane". (Tier unchanged.)
+      * X is PROTECTED -- identity established by curation/cross-channel evidence
+        independent of the NH4 channel (reflist-rescue / known-species / certified
+        provenance; pass the neutral-formula set as `protected`). Holds e.g. NBBS.
+        (Tier unchanged.)
       * the amine X+NH3 is valence-impossible (saturated X -> negative DBE): the
-        ammonium reading is FORCED.
+        ammonium reading is the only valid one, kept but capped Candidate.
 
-    Without a time series (`ts_peaks=None`, e.g. a single-sample run) there is no
-    time discriminator, so the gate falls back to the older binary PRESENCE test:
-    keep [M+NH4]+ if X is also assigned as [M+H]+/urea, else re-read to the amine.
+    Without a time series (single-sample run) nothing can be confirmed, so every
+    non-Si/protected [M+NH4]+ defaults to the protonated CHON (Candidate).
 
-    A re-read changes only neutral_formula + adduct (the ion/m-z/score/ppm and tier
-    are identical). Mutates in place; returns a summary of dispositions."""
-    keys = ["relabeled", "kept_covary", "kept_capped", "kept_presence",
-            "kept_protected", "kept_si", "forced_nh4"]
+    A re-read changes neutral_formula + adduct and caps the tier at Candidate (the
+    ion/m-z/score/ppm are identical). Mutates in place; returns a summary."""
+    keys = ["relabeled", "kept_covary", "kept_protected", "kept_si", "forced_nh4"]
     if not {"neutral_formula", "adduct"} <= set(ledger.columns):
         return {k: 0 for k in keys}
     protected = {str(p) for p in (protected or ())}
@@ -1083,26 +1079,38 @@ def prefer_amine_over_ammonium(ledger: pd.DataFrame, *, ts_peaks=None,
     verdict = _covariation_verdict(ledger, ts_peaks, r_min, r_reject, min_overlap)
     counts = {k: 0 for k in keys}
 
-    def _reread(i, X):
+    def _cap_tier(i):
+        if "tier" in ledger.columns and str(ledger.at[i, "tier"]) == "Assigned":
+            ledger.at[i, "tier"] = "Candidate"
+
+    def _reread(i, X, *, why):
+        """DEFAULT reading for an unconfirmed [M+NH4]+ mass: read it as [M+H]+ of the
+        protonated CHON (the amine X+NH3), at Candidate tier. Ammonium adducts are
+        rare, so the CHON reading wins unless the adduct is confirmed by tracking. If
+        the amine is valence-impossible the ammonium reading is the only valid one --
+        keep it, but still cap to Candidate (it is unconfirmed)."""
         cnt = C.parse_formula(X)
         cnt["N"] = cnt.get("N", 0) + 1
         cnt["H"] = cnt.get("H", 0) + 3
         ok, _ = C.dbe_ok(cnt)
-        if not ok:                                        # amine impossible -> forced
+        if not ok:                                        # amine impossible -> keep NH4
+            _cap_tier(i)
+            _note(ledger, i, f"[M+NH4]+ kept (amine valence-impossible), unconfirmed "
+                  f"({why}); capped Candidate")
             counts["forced_nh4"] += 1
             return
         ledger.at[i, "neutral_formula"] = C.format_formula(cnt)
         ledger.at[i, "adduct"] = "[M+H]+"
-        _note(ledger, i, "NH4-adduct re-read as protonated +NH3 amine "
-              "(does not track parent; uronium parsimony)")
+        _cap_tier(i)
+        _note(ledger, i, f"read as protonated CHON (amine {C.format_formula(cnt)}), "
+              f"Candidate: [M+NH4]+ of {X} not confirmed ({why})")
         counts["relabeled"] += 1
 
-    def _cap(i, why):
-        if "tier" in ledger.columns and str(ledger.at[i, "tier"]) == "Assigned":
-            ledger.at[i, "tier"] = "Candidate"
-        _note(ledger, i, f"[M+NH4]+/amine degeneracy unresolved ({why}); "
-              "kept ammonium, capped Candidate")
-        counts["kept_capped"] += 1
+    _WHY = {"reject": "independent time trace",
+            "ambiguous": "only weak tracking",
+            "presence-cap": "parent flat, adduct unconfirmable",
+            "presence-reread": "parent channels absent from TS",
+            "presence-keep": "no time series to confirm"}
 
     for i in ledger.index[is_m0 & (ledger["adduct"] == "[M+NH4]+")]:
         X = str(ledger.at[i, "neutral_formula"] or "")
@@ -1115,23 +1123,20 @@ def prefer_amine_over_ammonium(ledger: pd.DataFrame, *, ts_peaks=None,
             counts["kept_protected"] += 1
             continue
         v, r, ov = verdict(X)
-        if v == "keep":                                   # tracks a shaped parent
+        if v == "keep":                                   # tracks a shaped parent -> real adduct
             _note(ledger, i, f"[M+NH4]+ confirmed: tracks parent (r={r:.2f})")
             counts["kept_covary"] += 1
-        elif v in ("reject", "presence-reread"):          # independent, or parent absent
-            _reread(i, X)
-        elif v == "presence-keep":                        # no-TS fallback, corroborated
-            counts["kept_presence"] += 1
-        elif v == "ambiguous":                            # shaped parent, weak r
-            _cap(i, f"weak tracking r={r:.2f}")
-        else:                                             # presence-cap: present but flat/unconfirmable
-            _cap(i, "parent flat, cannot confirm adduct")
+            continue
+        why = _WHY.get(v, "unconfirmed")
+        if v in ("reject", "ambiguous"):
+            why += f" (r={r:.2f})"
+        _reread(i, X, why=why)                            # DEFAULT: protonated CHON, Candidate
 
     mode = "co-variation" if ts_peaks is not None else "presence"
-    log(f"[uronium-amine] ({mode}) {counts['relabeled']} re-read as amine; "
-        f"kept {counts['kept_covary']} tracking + {counts['kept_capped']} capped-ambiguous "
-        f"+ {counts['kept_presence']} presence + {counts['kept_protected']} protected "
-        f"+ {counts['kept_si']} Si; {counts['forced_nh4']} forced (no valid amine)")
+    log(f"[uronium-amine] ({mode}) default->CHON: {counts['relabeled']} read as "
+        f"protonated CHON (Candidate); {counts['kept_covary']} kept as [M+NH4]+ adduct "
+        f"(tracks parent); {counts['kept_protected']} protected + {counts['kept_si']} Si "
+        f"kept; {counts['forced_nh4']} amine-impossible kept-NH4")
     return counts
 
 

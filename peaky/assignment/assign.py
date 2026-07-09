@@ -163,10 +163,13 @@ def _stage_composite(st):
 
 
 def _stage_reagent_post(st):
-    """Final reagent sweep: catch cluster peaks the passes left unexplained."""
+    """Final reagent sweep: catch cluster peaks the passes left unexplained, then
+    AUTHORITATIVELY reclaim any reagent-cluster mass a pass committed an analyte M0
+    onto (the urea `[R_n+H]+`/`[R_n+NH4]+` == `CHNO`/`CH4N2O` degeneracy)."""
     n = reagents.label_reagents(st.led, st.reagent, ppm=12.0)
     if n:
         st.log(f"[run] post-labeled {n} more reagent-cluster peaks")
+    reagents.reclaim_reagent_clusters(st.led, st.reagent, ppm=12.0, log=st.log)
 
 
 def _stage_timeseries(st):

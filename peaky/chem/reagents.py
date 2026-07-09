@@ -64,19 +64,35 @@ def _proton() -> float:
 
 def _build_positive_library(reagent: str, *, max_n: int = 6
                             ) -> list[tuple[str, float, str]]:
-    """[(label, ion_mz, ion_formula)] for the protonated-reagent cluster series
-    [R_n + H]+, n = 1..max_n. The ion has the elemental composition R_n + H and
-    charge +1 (an electron removed)."""
+    """[(label, ion_mz, ion_formula)] for the protonated-reagent cluster series,
+    n = 1..max_n:
+
+      * [R_n + H]+   -- the bare protonated cluster (61.04 / 121.07 / ...);
+      * [R_n + NH4]+ -- the SAME cluster charged by AMBIENT AMMONIA rather than a
+        proton (78.07 for n=1). NH3 is ubiquitous in ambient air and clusters onto
+        the urea reagent; this is an ion-source background cluster, NOT an analyte
+        ammonium adduct. Its exact mass equals [ (R_n)·NH3 + H ]+, which the CHON
+        grid otherwise reads as a spurious `(R_n)NH3` analyte on the [M+NH4]+/[M+H]+
+        channel (e.g. urea itself read as `CH4N2O [M+NH4]+`), so it must be claimed
+        here as reagent.
+
+    The ion has the elemental composition R_n + (H or NH4) and charge +1 (an
+    electron removed)."""
     unit = _POSITIVE_REAGENTS.get(reagent)
     if unit is None:
         return []
     unit_cnt = C.parse_formula(unit)
     out: list[tuple[str, float, str]] = []
     for n in range(1, max_n + 1):
-        d = {el: c * n for el, c in unit_cnt.items()}
-        d["H"] = d.get("H", 0) + 1                    # the extra proton's H
-        mass = C.neutral_mass(d) - _M_E              # cation: lose one electron
-        out.append((f"[({unit}){n}+H]+", mass, C.format_formula(d) + "+"))
+        base = {el: c * n for el, c in unit_cnt.items()}
+        # [R_n + H]+
+        dH = dict(base); dH["H"] = dH.get("H", 0) + 1
+        out.append((f"[({unit}){n}+H]+", C.neutral_mass(dH) - _M_E,
+                    C.format_formula(dH) + "+"))
+        # [R_n + NH4]+  (ambient-ammonia charged cluster)
+        dN = dict(base); dN["N"] = dN.get("N", 0) + 1; dN["H"] = dN.get("H", 0) + 4
+        out.append((f"[({unit}){n}+NH4]+", C.neutral_mass(dN) - _M_E,
+                    C.format_formula(dN) + "+"))
     return out
 
 
@@ -144,9 +160,19 @@ def build_library(reagent: str = "Br", *, max_n: int = 4, max_neutral: int = 1
 
 
 def label_reagents(ledger: pd.DataFrame, reagent: str = "Br", *, ppm: float = 15.0,
-                   only_unexplained: bool = True) -> int:
+                   only_unexplained: bool = True, lock: bool = True) -> int:
     """Mark ledger peaks matching a reagent-cluster m/z as role='reagent'.
-    Returns the number of peaks labeled."""
+
+    Reagent clusters are NOT sample chemistry, so once claimed they must be
+    immovable: `lock=True` (default) LOCKS each labelled peak so a later pass with
+    `claim_unexplained_only=False` (e.g. the pass-1 backbone) cannot overwrite the
+    reagent label with an analyte M0 -- the bug that let the bright [urea+H]+
+    (61.04) and [urea2+H]+ (121.07) reagent ions be re-read as `CHNO`/`CH4N2O`
+    ammonium-adduct analytes and dominate the 'assigned' signal.
+
+    `only_unexplained=True` skips already-committed peaks; use
+    `reclaim_reagent_clusters` to DISPLACE an M0 that a pass already put on a
+    reagent mass. Returns the number of peaks labelled."""
     lib = build_library(reagent)
     if not lib:
         return 0
@@ -168,10 +194,84 @@ def label_reagents(ledger: pd.DataFrame, reagent: str = "Br", *, ppm: float = 15
                 L.mark_reagent(ledger, row["peak_id"],
                                f"reagent ion: {best[0]} ({(mz-best[1])/best[1]*1e6:+.1f} ppm)",
                                ion_formula=best[2])
+                if lock:
+                    L.lock_peaks(ledger, [row["peak_id"]])
                 n += 1
             except L.LedgerError:
                 continue
     return n
+
+
+def reclaim_reagent_clusters(ledger: pd.DataFrame, reagent: str = "Br", *,
+                             ppm: float = 12.0, log=print) -> dict:
+    """Authoritatively claim the reagent-cluster masses: for each library ion, take
+    the BRIGHTEST peak within `ppm` and force it to role='reagent' (+lock), even if
+    a pass already committed an analyte M0 there (displacing that phantom and its
+    isotope children). This is the post-hoc guard for the reagent-vs-analyte
+    exact-mass degeneracy (urea `[R_n+H]+`/`[R_n+NH4]+` == `CHNO`/`CH4N2O`
+    ammonium/urea analyte reading). Returns counts."""
+    lib = build_library(reagent)
+    if not lib or "height" not in ledger.columns:
+        return {"reagent": 0, "displaced_m0": 0}
+    reag = disp = 0
+    mzs = ledger["mz"].to_numpy()
+    for _label, ion_mz, ion_formula in lib:
+        tol = ion_mz * ppm * 1e-6
+        cand = ledger.index[(ledger["mz"] - ion_mz).abs() <= tol]
+        cand = [i for i in cand if not bool(ledger.at[i, "locked"])]
+        if not cand:
+            continue
+        # brightest peak at this reagent mass is the reagent ion itself
+        i = max(cand, key=lambda j: (ledger.at[j, "height"]
+                                     if pd.notna(ledger.at[j, "height"]) else 0.0))
+        pid = ledger.at[i, "peak_id"]
+        role = str(ledger.at[i, "role"])
+        if role == L.ROLE_REAGENT:
+            continue
+        if role == L.ROLE_M0:
+            L.clear_assignment(ledger, pid, reason=f"reagent cluster {_label}")
+            disp += 1
+        try:
+            L.mark_reagent(ledger, pid,
+                           f"reagent ion: {_label} "
+                           f"({(ledger.at[i, 'mz']-ion_mz)/ion_mz*1e6:+.1f} ppm)",
+                           ion_formula=ion_formula)
+            L.lock_peaks(ledger, [pid])
+            reag += 1
+        except L.LedgerError:
+            continue
+    if reag:
+        log(f"[reagent] reclaimed {reag} reagent-cluster ion(s) "
+            f"({disp} displaced an analyte M0 phantom)")
+    return {"reagent": reag, "displaced_m0": disp}
+
+
+def strip_reagent_cluster_rows(merged: pd.DataFrame, reagent: str = "Br", *,
+                               ppm: float = 12.0, log=print):
+    """Merge-level guard: drop analyte M0 rows whose ion m/z coincides with a
+    reagent-cluster ion. The batch merge keeps only per-file M0 rows, so a reagent
+    cluster that a per-file pass mislabelled as an analyte (urea `[R_n+H]+` read as
+    `CHNO`/`CH4N2O` on the [M+NH4]+/urea channel) survives into the merged ledger
+    and dominates the 'assigned' signal. This removes them by exact-mass match to
+    the reagent library. Returns (kept, stripped) DataFrames."""
+    lib = build_library(reagent)
+    if not lib or not len(merged):
+        return merged, merged.iloc[0:0]
+    masses = sorted(m for _l, m, _f in lib)
+    import bisect
+    drop = []
+    for i, mz in merged["mz"].items():
+        tol = mz * ppm * 1e-6
+        lo = bisect.bisect_left(masses, mz - tol)
+        hi = bisect.bisect_right(masses, mz + tol)
+        if hi > lo:
+            drop.append(i)
+    stripped = merged.loc[drop]
+    kept = merged.drop(index=drop).reset_index(drop=True)
+    if len(stripped):
+        log(f"[reagent] merge guard: removed {len(stripped)} reagent-cluster ion(s) "
+            f"mislabelled as analyte ({', '.join(stripped['neutral_formula'].astype(str).head(4))}...)")
+    return kept, stripped
 
 
 def reagent_for_adducts(adducts: list[str]) -> str | None:
