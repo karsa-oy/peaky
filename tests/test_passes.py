@@ -966,6 +966,10 @@ check("explicit c_max/o_max overrides the profile",
 check("_known_species(positive) carries the organophosphate family",
       "organophosphate" in P._known_species("positive")
       and "C6H15O4P" in P._known_species("positive")["organophosphate"])
+check("_known_species(positive) registers ambient ammonia (H3N) as a known species",
+      "H3N" in P._known_species("positive").get("ambient_inorganic", {}))
+check("_known_species(negative) has NO ammonia entry (urea-adduct channel is +mode)",
+      "ambient_inorganic" not in P._known_species("negative"))
 check("_known_species(negative) keeps the atmospheric list",
       "atmospheric" in P._known_species("negative"))
 check("_known_species(negative) carries the PFCA (perfluoroacid) series incl TFA",

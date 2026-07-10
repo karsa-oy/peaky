@@ -1031,74 +1031,151 @@ def run_cleanup(client, sample_id, ledger, profile, cfg, *, log=print) -> dict:
             "envelope_tails": tails["tails"]}
 
 
-def prefer_amine_over_ammonium(ledger: pd.DataFrame, *, ts_peaks=None, r_min: float = 0.7,
+def prefer_amine_over_ammonium(ledger: pd.DataFrame, *, ts_peaks=None,
+                               r_min: float = 0.6, r_reject: float = 0.2,
+                               min_overlap: int = 12, protected=None,
                                log=print) -> dict:
     """Uronium / positive urea-CIMS: a [M+NH4]+ adduct of a CHO neutral X is mass-
     AND isotope-identical to [M+H]+ of the amine X+NH3 (the SAME ion formula), so
-    the data cannot distinguish them. In an N-rich urea source the protonated amine
-    is the simpler explanation than an ammonium side-adduct, so RE-READ each
-    [M+NH4]+ assignment as [M+H]+ of X+NH3 -- UNLESS:
+    the accurate mass + isotope pattern CANNOT distinguish an ammonium adduct of X
+    from a protonated amine X+NH3. The one discriminator is TIME: a true ammonium
+    adduct of X must track X's own [M+H]+/urea parent trace, because it is the same
+    molecule ionised two ways.
 
-      * X is CORROBORATED. Without a time series (`ts_peaks=None`) corroboration is
-        PRESENCE-based: X is also assigned as [M+H]+ or [M+(CH4N2O)H]+. With a batch
-        time series it is the stronger CO-VARIATION test: the NH4 trace must
-        correlate (log Pearson r >= r_min) with the [M+H]+ OR urea-cluster trace of
-        the SAME m/z -- a faint NH4 peak that does not track the parent is NOT
-        corroboration; or
-      * the amine X+NH3 is valence-impossible (saturated X -> negative DBE); the
-        NH4 adduct is then the only valid reading and is FORCED/kept.
+    POLICY -- ammonium adducts are rare, so the burden of proof is on the ADDUCT
+    reading; the protonated CHON wins by default. Per [M+NH4]+-mass neutral X, with a
+    batch time series (2 h-binned log-correlation r of the [M+NH4]+ trace vs the best
+    of X's [M+H]+ / [M+(CH4N2O)H]+ parent traces):
 
-    Only neutral_formula + adduct change (the ion, m/z, score, tier, ppm are
-    identical). Relabels in place; returns a summary.
-    """
+      * KEEP as [M+NH4]+ adduct (Assigned) ONLY when it TRACKS a shaped parent
+        (r >= r_min, overlap >= min_overlap) -- confirmed same molecule.
+      * OTHERWISE default to [M+H]+ of the protonated CHON (amine X+NH3), at
+        Candidate tier: independent time trace (r <= r_reject), only weak tracking
+        (r_reject<r<r_min), a flat unconfirmable parent, or a parent absent from the
+        TS. We do NOT assert an ammonium adduct we cannot confirm.
+
+    Overriding exceptions (keep [M+NH4]+):
+      * X contains Si: ammonium adducts of siloxanes are real contaminant chemistry;
+        the +NH3 re-read would fabricate an "aminosiloxane". (Tier unchanged.)
+      * X is PROTECTED -- identity established by curation/cross-channel evidence
+        independent of the NH4 channel (reflist-rescue / known-species / certified
+        provenance; pass the neutral-formula set as `protected`). Holds e.g. NBBS.
+        (Tier unchanged.)
+      * the amine X+NH3 is valence-impossible (saturated X -> negative DBE): the
+        ammonium reading is the only valid one, kept but capped Candidate.
+
+    Without a time series (single-sample run) nothing can be confirmed, so every
+    non-Si/protected [M+NH4]+ defaults to the protonated CHON (Candidate).
+
+    A re-read changes neutral_formula + adduct and caps the tier at Candidate (the
+    ion/m-z/score/ppm are identical). Mutates in place; returns a summary."""
+    keys = ["relabeled", "kept_covary", "kept_protected", "kept_si", "forced_nh4"]
     if not {"neutral_formula", "adduct"} <= set(ledger.columns):
-        return {"relabeled": 0, "kept_corroborated": 0, "forced_nh4": 0}
+        return {k: 0 for k in keys}
+    protected = {str(p) for p in (protected or ())}
     is_m0 = (ledger["role"] == L.ROLE_M0) if "role" in ledger.columns \
         else pd.Series(True, index=ledger.index)
 
-    keeps = _make_corroboration_test(ledger, ts_peaks, r_min)
+    verdict = _covariation_verdict(ledger, ts_peaks, r_min, r_reject, min_overlap)
+    counts = {k: 0 for k in keys}
 
-    relabeled = kept = forced = 0
-    for i in ledger.index[is_m0 & (ledger["adduct"] == "[M+NH4]+")]:
-        X = str(ledger.at[i, "neutral_formula"] or "")
-        if not X or X == "nan":
-            continue
-        if keeps(X):                                      # corroborated -> keep NH4
-            kept += 1
-            continue
+    def _cap_tier(i):
+        if "tier" in ledger.columns and str(ledger.at[i, "tier"]) == "Assigned":
+            ledger.at[i, "tier"] = "Candidate"
+
+    def _reread(i, X, *, why):
+        """DEFAULT reading for an unconfirmed [M+NH4]+ mass: read it as [M+H]+ of the
+        protonated CHON (the amine X+NH3), at Candidate tier. Ammonium adducts are
+        rare, so the CHON reading wins unless the adduct is confirmed by tracking. If
+        the amine is valence-impossible the ammonium reading is the only valid one --
+        keep it, but still cap to Candidate (it is unconfirmed)."""
         cnt = C.parse_formula(X)
         cnt["N"] = cnt.get("N", 0) + 1
         cnt["H"] = cnt.get("H", 0) + 3
         ok, _ = C.dbe_ok(cnt)
-        if not ok:                                        # amine impossible -> NH4 forced
-            forced += 1
-            continue
+        if not ok:                                        # amine impossible -> keep NH4
+            _cap_tier(i)
+            _note(ledger, i, f"[M+NH4]+ kept (amine valence-impossible), unconfirmed "
+                  f"({why}); capped Candidate")
+            counts["forced_nh4"] += 1
+            return
         ledger.at[i, "neutral_formula"] = C.format_formula(cnt)
         ledger.at[i, "adduct"] = "[M+H]+"
-        if "tier_reason" in ledger.columns:
-            ledger.at[i, "tier_reason"] = (
-                str(ledger.at[i, "tier_reason"] or "")
-                + " | NH4-adduct re-read as protonated +NH3 amine (uronium parsimony)").strip(" |")
-        relabeled += 1
-    mode = f"co-variation r>={r_min}" if ts_peaks is not None else "presence"
-    log(f"[uronium-amine] ({mode}) {relabeled} [M+NH4]+ re-read as [M+H]+ amine; "
-        f"kept {kept} corroborated NH4 adducts; {forced} forced (no valid amine)")
-    return {"relabeled": relabeled, "kept_corroborated": kept, "forced_nh4": forced}
+        _cap_tier(i)
+        _note(ledger, i, f"read as protonated CHON (amine {C.format_formula(cnt)}), "
+              f"Candidate: [M+NH4]+ of {X} not confirmed ({why})")
+        counts["relabeled"] += 1
+
+    _WHY = {"reject": "independent time trace",
+            "ambiguous": "only weak tracking",
+            "presence-cap": "parent flat, adduct unconfirmable",
+            "presence-reread": "parent channels absent from TS",
+            "presence-keep": "no time series to confirm"}
+
+    for i in ledger.index[is_m0 & (ledger["adduct"] == "[M+NH4]+")]:
+        X = str(ledger.at[i, "neutral_formula"] or "")
+        if not X or X == "nan":
+            continue
+        if C.parse_formula(X).get("Si"):                  # siloxane adduct -> keep
+            counts["kept_si"] += 1
+            continue
+        if X in protected:                                # curated identity -> keep
+            counts["kept_protected"] += 1
+            continue
+        v, r, ov = verdict(X)
+        if v == "keep":                                   # tracks a shaped parent -> real adduct
+            _note(ledger, i, f"[M+NH4]+ confirmed: tracks parent (r={r:.2f})")
+            counts["kept_covary"] += 1
+            continue
+        why = _WHY.get(v, "unconfirmed")
+        if v in ("reject", "ambiguous"):
+            why += f" (r={r:.2f})"
+        _reread(i, X, why=why)                            # DEFAULT: protonated CHON, Candidate
+
+    mode = "co-variation" if ts_peaks is not None else "presence"
+    log(f"[uronium-amine] ({mode}) default->CHON: {counts['relabeled']} read as "
+        f"protonated CHON (Candidate); {counts['kept_covary']} kept as [M+NH4]+ adduct "
+        f"(tracks parent); {counts['kept_protected']} protected + {counts['kept_si']} Si "
+        f"kept; {counts['forced_nh4']} amine-impossible kept-NH4")
+    return counts
 
 
-def _make_corroboration_test(ledger, ts_peaks, r_min):
-    """Return keeps(neutral) -> bool. Presence-based unless a time series is given,
-    then NH4 is kept only when its trace co-varies (log r>=r_min) with the [M+H]+ or
-    urea-cluster trace."""
+def _note(ledger, i, msg):
+    if "tier_reason" in ledger.columns:
+        ledger.at[i, "tier_reason"] = (
+            str(ledger.at[i, "tier_reason"] or "") + f" | {msg}").strip(" |")
+
+
+def _covariation_verdict(ledger, ts_peaks, r_min, r_reject, min_overlap):
+    """Return verdict(neutral) -> (tag, r, overlap). The tag drives the gate:
+
+      'keep'            r >= r_min against a SHAPED parent -> real adduct.
+      'reject'          r <= r_reject against a shaped parent -> re-read to amine.
+      'ambiguous'       r between the thresholds -> keep but cap Candidate.
+      'presence-keep'   no shaped parent overlaps testably, but X IS assigned as
+                        [M+H]+/urea in the ledger -> (no-TS path) keep uncapped.
+      'presence-cap'    same, but the TS path caps it Candidate (a present-but-flat
+                        parent cannot confirm the adduct).
+      'presence-reread' no shaped parent AND X is absent as [M+H]+/urea -> the
+                        parent channels are missing, which refutes the ammonium
+                        reading (a real X would protonate / form the dominant urea
+                        adduct); re-read to the amine.
+
+    A parent is a valid correlation target only if it is SHAPED (cv >= FLAT_CV): a
+    flat parent (steady background) has no time structure to track, and two flat
+    traces correlate at noise level, so flat parents route to the presence branch
+    instead of producing a spurious reject. Without a time series the gate degrades
+    to the binary presence test ('presence-keep' / 'presence-reread')."""
+    corrob = set(ledger.loc[ledger["adduct"].isin(["[M+H]+", "[M+(CH4N2O)H]+"]),
+                            "neutral_formula"].dropna().astype(str))
     if ts_peaks is None:
-        corrob = set(ledger.loc[ledger["adduct"].isin(["[M+H]+", "[M+(CH4N2O)H]+"]),
-                                "neutral_formula"].dropna().astype(str))
-        return lambda X: X in corrob
+        return lambda X: (("presence-keep" if X in corrob else "presence-reread"),
+                          float("nan"), 0)
 
     import numpy as np
-    from peaky.batch import timeseries as TS
-    mat, bin_mz = TS.build_matrix(ts_peaks)
-    bm = bin_mz.sort_values(); arr = bm.to_numpy(); idx = bm.index.to_numpy()
+    from peaky.batch import cluster as CL
+    mat, tbins = _binned_matrix(ts_peaks)
+    bm = tbins.sort_values(); arr = bm.to_numpy(); idx = bm.index.to_numpy()
 
     def _logtrace(neutral, adduct):
         try:
@@ -1113,18 +1190,62 @@ def _make_corroboration_test(ledger, ts_peaks, r_min):
                     best = (idx[j], ppm)
         if best is None:
             return None
-        return np.log10(mat[best[0]].clip(lower=1).to_numpy())
+        col = mat[best[0]].to_numpy(float).copy()
+        col[~(col > 0)] = np.nan                          # undetected bins -> NaN
+        return np.log10(col)
 
-    def keeps(X):
+    def _shaped(logtrace):                                # cv over detected bins
+        lin = 10.0 ** logtrace[np.isfinite(logtrace)]
+        m = float(lin.mean()) if len(lin) else 0.0
+        return m > 0 and float(lin.std()) / m >= CL.FLAT_CV
+
+    def verdict(X):
         nh4 = _logtrace(X, "[M+NH4]+")
-        if nh4 is None:
-            return False
-        for ref in ("[M+H]+", "[M+(CH4N2O)H]+"):
-            t = _logtrace(X, ref)
-            if t is None:
-                continue
-            ok = np.isfinite(nh4) & np.isfinite(t)
-            if ok.sum() >= 6 and np.corrcoef(nh4[ok], t[ok])[0, 1] >= r_min:
-                return True
-        return False
-    return keeps
+        best_r, best_ov = float("nan"), 0
+        shaped_parent = False           # did any testable parent carry real shape?
+        if nh4 is not None:
+            for ref in ("[M+H]+", "[M+(CH4N2O)H]+"):
+                t = _logtrace(X, ref)
+                if t is None:
+                    continue
+                ok = np.isfinite(nh4) & np.isfinite(t)
+                if int(ok.sum()) < min_overlap:
+                    continue                              # sparse parent: cannot correlate
+                shaped_parent = shaped_parent or _shaped(t[ok])
+                rr = float(np.corrcoef(nh4[ok], t[ok])[0, 1])
+                if not np.isfinite(best_r) or rr > best_r:
+                    best_r, best_ov = rr, int(ok.sum())
+        if np.isfinite(best_r):
+            if best_r >= r_min:                           # co-varies -> real adduct
+                return ("keep", best_r, best_ov)          # (high r itself proves shape)
+            if best_r <= r_reject and shaped_parent:      # a shaped parent it fails to track
+                return ("reject", best_r, best_ov)        # -> independent -> amine
+            if best_r > r_reject:                         # weak-but-positive tracking
+                return ("ambiguous", best_r, best_ov)
+            # low r but every testable parent is FLAT: correlation is noise, not a
+            # verdict -> fall through to presence.
+        # no shaped parent gave a verdict -> presence decides. Present (even if
+        # flat) keeps the ammonium reading but capped; absent refutes it -> re-read.
+        return (("presence-cap" if X in corrob else "presence-reread"), best_r, best_ov)
+    return verdict
+
+
+def _binned_matrix(ts_peaks, *, bin_hours: float = 2.0):
+    """Time-bin a batch peak table into a (time-bin x m/z-bin) median-intensity
+    matrix. Denoises the per-sample trace and aligns irregular acquisition onto a
+    fixed grid so the [M+NH4]+/parent log-correlation is stable. Falls back to the
+    raw per-sample matrix when the table has no `datetime_utc`."""
+    import numpy as np
+    from peaky.batch import timeseries as TS
+    mat, bin_mz = TS.build_matrix(ts_peaks)
+    if "datetime_utc" not in getattr(ts_peaks, "columns", ()):
+        return mat, bin_mz
+    tmap = (ts_peaks[["sample_item_id", "datetime_utc"]].drop_duplicates()
+            .set_index("sample_item_id")["datetime_utc"])
+    dt = pd.to_datetime(tmap.reindex(mat.index))
+    if dt.isna().all():
+        return mat, bin_mz
+    step = np.timedelta64(int(bin_hours * 3600), "s")
+    binkey = dt.values.astype("datetime64[s]").astype("int64") // step.astype("int64")
+    binned = mat.groupby(binkey).median()
+    return binned, bin_mz

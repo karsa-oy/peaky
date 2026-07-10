@@ -163,10 +163,17 @@ def _stage_composite(st):
 
 
 def _stage_reagent_post(st):
-    """Final reagent sweep: catch cluster peaks the passes left unexplained."""
+    """Final reagent sweep: catch cluster peaks the passes left unexplained, then
+    AUTHORITATIVELY reclaim any reagent-cluster mass a pass committed an analyte M0
+    onto (the urea `[R_n+H]+`/`[R_n+NH4]+` == `CHNO`/`CH4N2O` degeneracy)."""
     n = reagents.label_reagents(st.led, st.reagent, ppm=12.0)
     if n:
         st.log(f"[run] post-labeled {n} more reagent-cluster peaks")
+    reagents.reclaim_reagent_clusters(st.led, st.reagent, ppm=12.0, log=st.log)
+    # claim the bright ¹³C/¹⁵N (and halide heavy-isotope) satellites of the reagent
+    # ions -- they otherwise dominate the unexplained residual (the urea-dimer ¹³C/¹⁵N
+    # at 122.075/122.069 were the two biggest 'unexplained' peaks of the batch).
+    reagents.label_reagent_isotopologues(st.led, log=st.log)
 
 
 def _stage_timeseries(st):
@@ -296,6 +303,13 @@ _STAGES = [
     _Stage("reflist_rescue", lambda st: reflists.rescue_unexplained_by_reflist(
         st.client, st.sample_id, st.led, st.profile, st.cfg, st.reflists_active,
         st.adducts, log=st.log), when=lambda st: bool(st.reflists_active)),
+    # final envelope sweep: an M0 committed AFTER the three earlier sweeps (a pass-8
+    # reflist rescue, or a parent whose earlier assignment was cleared and re-won,
+    # orphaning its children) still owes its satellites -- without this its bright
+    # 13C line sits in the residual (the NBBS urea-adduct M+1 was the single
+    # brightest "unexplained" peak of a positive urea-CIMS ambient batch run).
+    _Stage("iso_env_final",
+           lambda st: passes.complete_isotope_envelopes(st.led, st.cfg, log=st.log)),
     _Stage("timeseries", _stage_timeseries,
            when=lambda st: st.ts_peaks is not None and len(st.ts_peaks)),
 ]

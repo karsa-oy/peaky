@@ -111,13 +111,22 @@ check("[urea+H]+ present ~61.0396", bool(near(ulib, 61.0396)), near(ulib, 61.039
 check("[urea2+H]+ present ~121.0720", bool(near(ulib, 121.0720)), near(ulib, 121.0720))
 check("[urea3+H]+ present ~181.1044", bool(near(ulib, 181.1044)), near(ulib, 181.1044))
 check("[urea4+H]+ present ~241.1368", bool(near(ulib, 241.1368)), near(ulib, 241.1368))
-# spacing is exactly one urea (60.0324)
-umasses = sorted(m for _l, m, _f in ulib)
-check("urea cluster spacing ~60.0324",
-      abs((umasses[1] - umasses[0]) - 60.0324) < 1e-3, umasses[1] - umasses[0])
+# spacing of the [urea_n+H]+ series is exactly one urea (60.0324)
+uHmasses = sorted(m for _l, m, _f in ulib if _l.endswith("+H]+"))
+check("urea [R_n+H]+ cluster spacing ~60.0324",
+      abs((uHmasses[1] - uHmasses[0]) - 60.0324) < 1e-3, uHmasses[1] - uHmasses[0])
 # ion formulae are CATIONS with the known elemental composition
 check("[urea+H]+ ion_formula CH5N2O+", "CH5N2O+" in near_f(ulib, 61.0396), near_f(ulib, 61.0396))
 check("[urea2+H]+ ion_formula C2H9N4O2+", "C2H9N4O2+" in near_f(ulib, 121.0720), near_f(ulib, 121.0720))
+# ammonia-charged clusters [urea_n + NH4]+: n>=2 are urea-multimer ion-source
+# clusters (reagent). n=1 (78.0662) is NOT here -- it is ambient NH3 measured via its
+# single urea adduct [NH3+(urea)H]+ (same ion), registered as a pass-0 known species.
+check("[urea+NH4]+ (78.0662) NOT in reagent library (it is the ambient-NH3 analyte)",
+      not near(ulib, 78.0662), near(ulib, 78.0662))
+check("[urea2+NH4]+ present ~138.0985 (urea-multimer NH3 cluster, reagent)",
+      bool(near(ulib, 138.0985)), near(ulib, 138.0985))
+check("[urea2+NH4]+ ion_formula C2H12N5O2+",
+      "C2H12N5O2+" in near_f(ulib, 138.0985), near_f(ulib, 138.0985))
 
 # reagent_for_adducts maps the urea adduct -> 'urea', halogens unchanged
 check("reagent_for_adducts urea", RG.reagent_for_adducts(["[M+(CH4N2O)H]+", "[M+H]+"]) == "urea")
@@ -140,6 +149,78 @@ check("urea2 reagent row records ion_formula C2H9N4O2+",
       uled.loc[uled.peak_id == "u2", "ion_formula"].iloc[0])
 check("positive analyte peak NOT labeled reagent",
       L.role_of(uled, "org") == L.ROLE_UNEXPLAINED, L.role_of(uled, "org"))
+check("labeled urea reagent peaks are LOCKED (a later pass can't overwrite them)",
+      bool(uled.loc[uled.peak_id == "u2", "locked"].iloc[0]), "u2 not locked")
+
+# --- reclaim_reagent_clusters: displace an analyte M0 a pass put on a reagent mass
+# (the CHNO@61 / CH4N2O@121 == urea [R_n+H]+ degeneracy). The BRIGHT reagent peak
+# gets forced to reagent even though pass 1 committed CHNO/CH4N2O onto it.
+rled = L.new_ledger(pd.DataFrame({
+    "peak_id": ["bright61", "dim61", "dimer121", "realorg"],
+    "mz": [61.039624, 61.039077, 121.071931, 158.1536],
+    "height": [3.3e6, 1.5e4, 1.6e7, 2.5e5],
+}))
+# simulate pass-1 committing the reagent-degenerate analyte onto the BRIGHT peaks
+L.commit_assignment(rled, "bright61", neutral_formula="CHNO", adduct="[M+NH4]+",
+                    ion_formula="CH5N2O+", ion_score=0.93, compound_score=0.93,
+                    ppm_error=0.1, pass_no=1, method="cheminfo+grid", confidence="Good", commentary="test")
+L.commit_assignment(rled, "dimer121", neutral_formula="CH4N2O", adduct="[M+(CH4N2O)H]+",
+                    ion_formula="C2H9N4O2+", ion_score=0.99, compound_score=0.99,
+                    ppm_error=0.1, pass_no=1, method="cheminfo+grid", confidence="Good", commentary="test")
+out_rc = RG.reclaim_reagent_clusters(rled, "urea", ppm=12, log=lambda *a, **k: None)
+check("reclaim: bright 61 M0 phantom displaced to reagent",
+      L.role_of(rled, "bright61") == L.ROLE_REAGENT, L.role_of(rled, "bright61"))
+check("reclaim: bright 121 dimer M0 phantom displaced to reagent",
+      L.role_of(rled, "dimer121") == L.ROLE_REAGENT, L.role_of(rled, "dimer121"))
+check("reclaim: reclaimed reagent ions are locked",
+      bool(rled.loc[rled.peak_id == "bright61", "locked"].iloc[0]))
+check("reclaim: real off-mass analyte untouched",
+      L.role_of(rled, "realorg") == L.ROLE_UNEXPLAINED)
+check("reclaim: counts (>=2 reagent, >=2 displaced M0)",
+      out_rc["reagent"] >= 2 and out_rc["displaced_m0"] >= 2, out_rc)
+
+# --- strip_reagent_cluster_rows: merge-level guard drops reagent ions mislabelled
+# as analyte from a merged ledger (no role column; matches by exact ion mass).
+merged = pd.DataFrame({
+    "mz": [61.039624, 78.066209, 121.071931, 158.1536, 214.0896],
+    # 78.066 = ammonia's urea adduct (analyte, NOT a reagent mass) -> kept
+    "neutral_formula": ["CHNO", "H3N", "CH4N2O", "C9H18O", "C10H15NO2S"],
+    "adduct": ["[M+NH4]+", "[M+(CH4N2O)H]+", "[M+(CH4N2O)H]+", "[M+NH4]+", "[M+H]+"],
+    "tier": ["Candidate", "Assigned", "Assigned", "Candidate", "Assigned"],
+})
+kept, stripped = RG.strip_reagent_cluster_rows(merged, "urea", log=lambda *a, **k: None)
+check("strip: reagent monomer(61)/dimer(121) removed; NH3 analyte(78) NOT stripped",
+      set(stripped["mz"].round(3)) == {61.040, 121.072}, stripped["mz"].tolist())
+check("strip: NH3 analyte + real analytes (158, NBBS@214) kept",
+      set(kept["neutral_formula"]) == {"H3N", "C9H18O", "C10H15NO2S"},
+      kept["neutral_formula"].tolist())
+
+# --- label_reagent_isotopologues: claim the bright ¹³C/¹⁵N satellites of the reagent
+# ions (the urea-dimer ¹³C/¹⁵N at 122.075/122.069 were the 2 biggest 'unexplained'
+# peaks). Gated on intensity: a peak far brighter than the satellite (analyte on top)
+# is left. Dimer ion C2H9N4O2+ @121.072: ¹³C +1.0034=122.0753, ¹⁵N +0.9970=122.0690.
+iled = L.new_ledger(pd.DataFrame({
+    "peak_id": ["dimer", "d13c", "d15n", "d18o_analyte"],
+    "mz": [121.071931, 122.075286, 122.068966, 123.076241],
+    # d18o_analyte: the dimer's ¹⁸O mass, but 5M cps >> the predicted ~64k satellite
+    # -> a co-eluting analyte sits on top, so the intensity gate must LEAVE it.
+    "height": [1.6e7, 3.3e5, 2.3e5, 5.0e6],
+}))
+L.mark_reagent(iled, "dimer", "reagent ion: [(CH4N2O)2+H]+", ion_formula="C2H9N4O2+")
+out_iso = RG.label_reagent_isotopologues(iled, ppm=12, min_rel=0.004,
+                                         log=lambda *a, **k: None)
+check("iso-reagent: dimer ¹³C satellite (122.075) claimed as reagent",
+      L.role_of(iled, "d13c") == L.ROLE_REAGENT, L.role_of(iled, "d13c"))
+check("iso-reagent: dimer ¹⁵N satellite (122.069) claimed as reagent",
+      L.role_of(iled, "d15n") == L.ROLE_REAGENT, L.role_of(iled, "d15n"))
+check("iso-reagent: claimed satellites are locked",
+      bool(iled.loc[iled.peak_id == "d13c", "locked"].iloc[0]))
+check("iso-reagent: satellite carries a descriptive commentary",
+      "isotopologue" in str(iled.loc[iled.peak_id == "d13c", "commentary"].iloc[0]))
+check("iso-reagent: bright analyte-on-top (5M cps at the ¹⁸O mass) NOT stolen",
+      L.role_of(iled, "d18o_analyte") == L.ROLE_UNEXPLAINED,
+      L.role_of(iled, "d18o_analyte"))
+check("iso-reagent: count", out_iso["iso_reagent"] == 2, out_iso)
 
 def test_all():
     assert FAIL == 0, f"{FAIL} checks failed"
