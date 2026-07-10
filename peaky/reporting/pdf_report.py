@@ -146,6 +146,16 @@ def load_context(out_dir: str, *, tag: str, label: str, ts_path: str | None = No
                 if labs:
                     iso_by_channel.setdefault((nf, ad), set()).update(labs)
         ctx["iso_by_channel"] = iso_by_channel
+        # max observed intensity (cps) per (neutral, channel): the brightest M0
+        # height for that channel across the representative files. Heights live in
+        # the per-file ledgers (not the m/z-only merged ledger), so pool them here.
+        if {"neutral_formula", "adduct"} <= set(a.columns):
+            _m0h = a[a["role"] == "M0"]
+            if len(_m0h):
+                mh = _m0h.groupby([_m0h["neutral_formula"].astype(str),
+                                   _m0h["adduct"].astype(str)])["h"].max()
+                ctx["max_h_by_channel"] = {(nf, ad): float(v)
+                                           for (nf, ad), v in mh.items()}
         # mass error (ppm) by category for the accuracy plot
         if "ppm_error" in a.columns:
             m0 = a[a["role"] == "M0"]
@@ -230,6 +240,34 @@ def load_context(out_dir: str, *, tag: str, label: str, ts_path: str | None = No
                 ctx["batch_name"] = str(names[0])
         mat, bin_mz = TS.build_matrix(ts)
         binsig = mat.sum(axis=0)
+        # batch-wide MAX intensity per assigned channel: the brightest this ion gets
+        # in ANY sample of the FULL batch (the appendix's `max cps`). The per-file
+        # value computed above only saw the ~12 representative samples; override it
+        # with the whole-batch max by matching each channel's ion m/z to its TS bin.
+        _bmax = mat.max(axis=0)
+        _bins = list(mat.columns)
+        _bmz = np.array([float(bin_mz[b]) for b in _bins], dtype=float)
+        _bmx = _bmax.reindex(_bins).to_numpy(dtype=float)
+        _o = np.argsort(_bmz); _bmz = _bmz[_o]; _bmx = _bmx[_o]
+
+        def _batch_max(mz, tol=8.0):
+            i = int(np.searchsorted(_bmz, mz)); best = None
+            for j in (i - 1, i):
+                if 0 <= j < len(_bmz):
+                    ppm = abs(_bmz[j] - mz) / mz * 1e6
+                    if ppm <= tol and (best is None or ppm < best[1]):
+                        best = (float(_bmx[j]), ppm)
+            return None if best is None else best[0]
+        if "neutral_formula" in merged.columns and "adduct" in merged.columns:
+            mbc = {}
+            for _mz, _nf, _ad in zip(merged["mz"], merged["neutral_formula"].astype(str),
+                                     merged["adduct"].astype(str)):
+                v = _batch_max(float(_mz))
+                if v is not None:
+                    mbc[(_nf, _ad)] = v
+            if mbc:
+                ctx["max_h_by_channel"] = mbc     # batch-wide, replaces the rep-file max
+                ctx["max_h_scope"] = "batch"
         expl = ctx.get("expl_mz", np.array([]))
 
         def matched(mz, tol=8.0):
@@ -1095,6 +1133,7 @@ def assignments_table(ctx, pdf):
     if merged is None or not len(merged) or "neutral_formula" not in merged.columns:
         return
     iso = ctx.get("iso_by_channel", {})
+    max_h = ctx.get("max_h_by_channel", {})
     df = merged.copy()
     df["neutral_formula"] = df["neutral_formula"].astype(str)
     df["adduct"] = df["adduct"].astype(str)
@@ -1108,12 +1147,24 @@ def assignments_table(ctx, pdf):
     df["_nm"] = df["neutral_formula"].map(nm)
     df = df.sort_values(["_nm", "mz"], kind="mergesort")
 
+    def _cps(h):                              # compact cps: 3.3M / 120k / 840
+        if h is None or not (h == h) or h <= 0:
+            return "  -"
+        if h >= 9.95e5:
+            return f"{h / 1e6:.1f}M"
+        if h >= 995:
+            return f"{h / 1e3:.0f}k"
+        return f"{h:.0f}"
+
     # fixed-width monospace columns (A4 portrait fits ~108 mono chars at size 6.5)
-    NW, AW, IW = 15, 19, 44                  # neutral / adduct / isotopes field widths
-    head = f"{'neutral':<{NW}}{'m/z':>10}  {'channel':<{AW}}{'tier':<11}{'score':>6}{'  f':>4}  isotopes"
+    NW, AW, IW = 15, 19, 36                  # neutral / adduct / isotopes field widths
+    _scope = ("brightest height of the channel in ANY sample of the full batch"
+              if ctx.get("max_h_scope") == "batch"
+              else "brightest height of the channel across the representative samples")
+    head = (f"{'neutral':<{NW}}{'m/z':>10}  {'channel':<{AW}}{'tier':<11}{'score':>6}"
+            f"{'max cps':>8}{'  f':>4}  isotopes")
     rows: list = [("m", head),
-                  ("dim", "  f = files the channel was seen in · isotopes = confirmed isotopologues "
-                          "(union across files)")]
+                  ("dim", f"  max cps = {_scope} · f = files seen · isotopes = confirmed")]
     last = None
     for _, r in df.iterrows():
         nf, ad = r["neutral_formula"], r["adduct"]
@@ -1128,8 +1179,9 @@ def assignments_table(ctx, pdf):
         tier = str(r.get("tier", ""))[:10]
         nf_files = r.get("n_files", "")
         adv = ad if len(ad) <= AW else ad[:AW - 1] + "…"
+        ih = _cps(max_h.get((nf, ad)))
         rows.append(("m", f"{shown:<{NW}}{float(r['mz']):>10.4f}  {adv:<{AW}}"
-                          f"{tier:<11}{scs:>6}{str(nf_files):>4}  {itxt}"))
+                          f"{tier:<11}{scs:>6}{ih:>8}{str(nf_files):>4}  {itxt}"))
 
     header, body = rows[:2], rows[2:]
     PER = 50

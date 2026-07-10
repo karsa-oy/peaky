@@ -35,13 +35,13 @@ with tempfile.TemporaryDirectory() as d:
     # carries a tier + ppm_error + peak_id so the mass-defect/mass-error QC figure
     # (qc_massdefect) has a calibrated point and a parented iso-child.
     pd.DataFrame([
-        dict(peak_id=1, mz=169.1223, role="M0", neutral_formula="C10H16O2", height=10000,
+        dict(peak_id=1, mz=169.1223, role="M0", neutral_formula="C10H16O2", adduct="[M+H]+", height=10000,
              tier="Assigned", ppm_error=0.3, parent_peak_id=None),
-        dict(peak_id=2, mz=170.1256, role="iso_child", neutral_formula=None, height=1100,
+        dict(peak_id=2, mz=170.1256, role="iso_child", neutral_formula=None, adduct=None, height=1100,
              tier=None, ppm_error=None, parent_peak_id=1),
-        dict(peak_id=3, mz=250.0, role="reagent", neutral_formula=None, height=500,
+        dict(peak_id=3, mz=250.0, role="reagent", neutral_formula=None, adduct=None, height=500,
              tier=None, ppm_error=None, parent_peak_id=None),
-        dict(peak_id=4, mz=300.0, role="unexplained", neutral_formula=None, height=80,
+        dict(peak_id=4, mz=300.0, role="unexplained", neutral_formula=None, adduct=None, height=80,
              tier=None, ppm_error=None, parent_peak_id=None),
     ]).to_csv(f"{d}/per_file/s1_ledger.csv", index=False)
     pd.DataFrame({"neutral_formula": ["C10H16O2", "C10H14O2", "C9H12O2"],
@@ -63,6 +63,25 @@ with tempfile.TemporaryDirectory() as d:
     check("load_context: brightest full per-file ledger retained for the QC figure",
           ctx.get("bright_ledger") is not None and "role" in ctx["bright_ledger"].columns,
           None if ctx.get("bright_ledger") is None else list(ctx["bright_ledger"].columns)[:3])
+    check("load_context: max_h_by_channel = brightest per-file M0 height per channel",
+          ctx.get("max_h_by_channel", {}).get(("C10H16O2", "[M+H]+")) == 10000.0,
+          ctx.get("max_h_by_channel"))
+    check("load_context: max_h_by_channel omits channels absent from per-file M0 "
+          "(appendix renders '-')",
+          ("C3H2F6O", "[M+Br]-") not in ctx.get("max_h_by_channel", {}),
+          ctx.get("max_h_by_channel"))
+    # max cps = the WHOLE-BATCH max (from the TS), not just the ~rep files. Write a
+    # tiny TS where a NON-representative sample (s2) is brighter than the rep file.
+    pd.DataFrame([
+        dict(sample_item_id="s1", datetime_utc="2026-06-20T00:00:00Z", mz=169.1223, height=10000.0),
+        dict(sample_item_id="s2", datetime_utc="2026-06-20T02:00:00Z", mz=169.1223, height=30000.0),
+    ]).to_parquet(f"{d}/mini_ts.parquet")
+    ctx_ts = R.load_context(d, tag="Ur", label="Ur⁺ CIMS", ts_path=f"{d}/mini_ts.parquet")
+    check("max cps is the WHOLE-BATCH max (brighter non-rep sample wins over rep file)",
+          ctx_ts.get("max_h_by_channel", {}).get(("C10H16O2", "[M+H]+")) == 30000.0
+          and ctx_ts.get("max_h_scope") == "batch",
+          (ctx_ts.get("max_h_by_channel"), ctx_ts.get("max_h_scope")))
+
     check("load_context: role-signal split (analyte/reagent/unexplained)",
           set(ctx.get("role_signal_frac", {})) == {"analyte", "reagent", "unexplained"},
           ctx.get("role_signal_frac"))
