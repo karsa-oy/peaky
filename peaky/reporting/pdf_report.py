@@ -971,7 +971,7 @@ def families(ctx, pdf):
                (C.parse_formula(str(f)) for f in g["neutral_formula"]) if cnt.get("C", 0)]
         oc = np.median(ocs) if ocs else float("nan")
         top = ", ".join(g.sort_values("median_cps", ascending=False)["neutral_formula"]
-                        .drop_duplicates().head(4))
+                        .dropna().astype(str).drop_duplicates().head(4))
         lines.append(("m", f"  {int(cid):>5}   {len(g):>2}     {oc:>5.2f}      {top}"))
     if singletons:
         lines += [("gap", 0.5),
@@ -1017,6 +1017,17 @@ def _unexplained_gate_page(ctx, pdf):
         ("gap", 0.4),
         ("b", f"{ngate} bins pass. These are then split by time behaviour:"),
         ("gap", 0.3),
+    ]
+    nunion = un.get("n_entered_union")
+    if nunion:
+        lines += [
+            ("m", f"   • {nunion} UNIFIED — present in ≥ {g.get('union_presence_min', 0.3):.0%} of samples and not an"),
+            ("m", "                isotope satellite; these join the SAME clustering as the"),
+            ("m", f"                assigned channels ({un.get('n_in_families', 0)} landed in co-varying families,"),
+            ("m", "                legend '? m/z'). Isotope satellites rejected: "
+                  f"{un.get('n_isotope_rejected', 0)}."),
+        ]
+    lines += [
         ("m", f"   • {nvary} VARYING  — a sustained change (cv ≥ {g.get('varying_cv_min', 0.3):.2f}) or a transient"),
         ("m", f"                burst (peak/median ≥ {g.get('varying_burst_range', 1.7):.1f}); drawn individually,"),
         ("m", f"                grouped into {ncl} co-varying cluster(s)."),
