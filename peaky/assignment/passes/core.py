@@ -230,11 +230,16 @@ def arbitrate(scored: pd.DataFrame, cfg: PassConfig) -> dict:
     # Mascope-confirmed has its skepticism WAIVED -- direct evidence overrides
     # the prior. Heteroatoms with a usable isotope diagnostic and no confirmation
     # additionally take the gate penalty. Elements without a light-isotope
-    # diagnostic (N, P, Si, I, F) keep the plain complexity prior.
+    # diagnostic (N, P, I, F -- all effectively mono-isotopic) keep the plain
+    # complexity prior; those are corroborated by cross-channel/series evidence
+    # at tier time, not by an isotope twin. Si DOES have a diagnostic twin
+    # (29Si/30Si), so it is gated here -- a diag TUPLE credits either the M+1
+    # (29Si) or M+2 (30Si) line (str.startswith accepts a tuple of prefixes).
     _DIAG = {
         "Cl": ("37Cl", cfg.het_iso_penalty_halogen),
         "Br": ("81Br", cfg.het_iso_penalty_halogen),
         "S": ("34S", cfg.het_iso_penalty_S),
+        "Si": (("29Si", "30Si"), cfg.het_iso_penalty_Si),
     }
 
     def _evidence_penalty(row) -> float:

@@ -56,6 +56,14 @@ class PassConfig:
     # 34S is small (4.4%) -> softer penalty.
     het_iso_penalty_halogen: float = 0.30
     het_iso_penalty_S: float = 0.12
+    # Si has a genuine, diagnostic 29Si(4.7%)+30Si(3.1%) M+1/M+2 pattern (a real
+    # multi-Si siloxane confirms easily; a single-Si 29Si sits near the server
+    # isotope floor). A bare-Si mass fit with NO confirmed satellite is almost
+    # always a mass coincidence (PDMS/silanol formulas are dense in mass space),
+    # so an unconfirmed Si takes a SOFT gate on top of the complexity prior --
+    # sized like 34S, not the halogens, so a real-but-faint single-Si is not
+    # nuked outright (the tiers-level Si demote is the belt-and-suspenders catch).
+    het_iso_penalty_Si: float = 0.12
     # The reagent halogen (e.g. Br in Br-CIMS) is special: its heavy isotope in
     # the ION cannot prove the halogen sits in the NEUTRAL (covalent X(Br)[M-H]-
     # and Y.HBr.Br- / Y[M+Br]- aliases share the ion). Confirmation therefore
