@@ -30,7 +30,7 @@ from peaky import paths as PT
 from peaky.chem import profiles as P
 from peaky.batch import sampling as SS
 
-__version__ = "0.2.0"  # cross-file consensus winner-selection (corroborated-formula vote)
+__version__ = "0.3.0"  # + sample-level process parallelism (--jobs)
 
 DEFAULT_TOL_PPM = 6.0
 TIER_ASSIGNED = "Assigned"
@@ -252,6 +252,76 @@ def _protected_neutrals(ledger: pd.DataFrame) -> set:
 
 
 # ---------------------------------------------------------------------------
+# sample-level parallelism (process pool)
+# ---------------------------------------------------------------------------
+# Each A.run is self-contained: it builds its OWN Mascope client via connect()
+# (which reads MASCOPE_URL/TOKEN/WORKSPACE from the env that 'spawn' inherits),
+# owns a per-sample disk cache, and re-derives every mutated cfg field. So samples
+# parallelise cleanly across processes. The heavy passes (degeneracy audit, pass2/4
+# scoring) are pure-Python and GIL-bound, so a PROCESS pool -- not threads -- is
+# what actually uses the extra cores. Determinism is preserved by reducing results
+# in sample_ids order (align() has order-sensitive tie-breaks), NOT completion order.
+_W: dict = {}   # per-worker-process read-only context, populated by _worker_init
+
+
+def _worker_init(context, reflists_active, base_kw, ts_path):
+    global _W
+    _W = {"context": context, "reflists_active": reflists_active,
+          "base_kw": base_kw, "ts_path": ts_path, "ts": None}
+
+
+def _assign_one(sid: str) -> dict:
+    """Top-level (spawn-picklable) worker: assign ONE sample and return the
+    picklable pieces the parent reduces. The parent writes the per-file CSV and
+    computes the offset -- in sample order -- so all disk I/O and the align() input
+    order stay single-writer and deterministic."""
+    import copy
+    from peaky.assignment import assign as A
+    kw = dict(_W["base_kw"])
+    if kw.get("cfg") is not None:
+        kw["cfg"] = copy.deepcopy(kw["cfg"])   # isolate per-sample cfg mutation
+    if _W["ts_path"] is not None:
+        if _W["ts"] is None:
+            _W["ts"] = pd.read_parquet(_W["ts_path"])   # load once per process
+        kw["ts_peaks"] = _W["ts"]
+    lines: list = []
+    res = A.run(sid, context=_W["context"], reflists_active=_W["reflists_active"],
+                log=lines.append, **kw)
+    return {"sid": sid, "ledger": res["ledger"],
+            "plausibility_audit": res.get("plausibility_audit") or [],
+            "stats": dict(res.get("stats", {})), "log": lines}
+
+
+def _physical_cores() -> int:
+    """Physical (not logical) core count -- the pool is CPU/GIL-bound, so
+    hyperthreads give no speedup. os.cpu_count() returns logical cores."""
+    import subprocess
+    import sys
+    if sys.platform == "darwin":
+        try:
+            out = subprocess.run(["sysctl", "-n", "hw.physicalcpu"],
+                                 capture_output=True, text=True, timeout=2).stdout.strip()
+            if out.isdigit():
+                return max(1, int(out))
+        except Exception:
+            pass
+    n = os.cpu_count() or 2
+    return max(1, n // 2)
+
+
+def _resolve_jobs(n_jobs, n_samples: int) -> int:
+    """min(requested-or-physical-cores, n_samples), >=1. n_jobs=None consults
+    $PEAKY_JOBS then falls back to physical cores; <=0 also means auto."""
+    if n_jobs is None:
+        env = os.environ.get("PEAKY_JOBS", "").strip()
+        n_jobs = int(env) if env.lstrip("-").isdigit() else 0
+    n_jobs = int(n_jobs)
+    if n_jobs <= 0:
+        n_jobs = _physical_cores()
+    return max(1, min(n_jobs, max(1, n_samples)))
+
+
+# ---------------------------------------------------------------------------
 # network: assign each representative file, keep per-file records, combine
 # ---------------------------------------------------------------------------
 def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
@@ -261,7 +331,7 @@ def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
         k_max: int = 10, height_floor: float = 1000.0,
         out_dir: str, tol_ppm: float = DEFAULT_TOL_PPM,
         sample_ids: list | None = None, ts_peaks=None, amine_r_min: float = 0.6,
-        log=print, **assign_kw) -> dict:
+        n_jobs: int | None = None, log=print, **assign_kw) -> dict:
     """Assign the representative subset of a batch and combine, keeping per-file
     ledgers. Provide EITHER `peaks` (a batch peak/sample table) OR `batch` (a
     batch name; the per-sample list is fetched fresh from the live server, which
@@ -335,23 +405,67 @@ def run(peaks=None, *, batch: str | None = None, dataset: str | None = None,
     #   gate must not re-read (reflist / known-species / certified provenance) --
     #   e.g. NBBS, whose weak isobar-contaminated NH4 trace fails the tracking test
     #   yet is a genuine Keller-list contaminant adduct.
-    for i, sid in enumerate(sample_ids, 1):
-        log(f"[assign_batch] ({i}/{len(sample_ids)}) assigning {sid} ...")
-        res = A.run(sid, context=context, log=log, reflists_active=reflists_active, **assign_kw)
-        led = res["ledger"]
+    n_jobs = _resolve_jobs(n_jobs, len(sample_ids))
+
+    def _apply(sid, led, plaus, stats):
+        """Parent-side reduce (called in sample_ids order): write the per-file CSV
+        and fold this sample into the accumulators. Order-fixed so align() -- which
+        has order-sensitive tie-breaks -- yields byte-identical output either path."""
         led.to_csv(os.path.join(pfdir, f"{sid}_ledger.csv"), index=False)
-        plaus_audit.extend(res.get("plausibility_audit") or [])
-        protected_neutrals |= _protected_neutrals(led)
+        plaus_audit.extend(plaus)
+        protected_neutrals.update(_protected_neutrals(led))
         per_file[sid] = _m0(led)
         try:
             offsets[sid] = IO.estimate_offset(IO.fetch_peaks(client, sid, use_cache=True))
         except Exception:
             offsets[sid] = None
-        st = dict(res.get("stats", {}))
+        st = dict(stats)
         st.update(sample_id=sid, offset_ppm=offsets[sid],
                   n_M0=int((led["role"] == "M0").sum()) if "role" in led.columns else None)
         per_stats.append(st)
-        log(f"[assign_batch]   {sid}: offset={offsets[sid]} stats={res.get('stats')}")
+        log(f"[assign_batch]   {sid}: offset={offsets[sid]}")
+
+    if n_jobs <= 1:
+        for i, sid in enumerate(sample_ids, 1):
+            log(f"[assign_batch] ({i}/{len(sample_ids)}) assigning {sid} ...")
+            res = A.run(sid, context=context, log=log,
+                        reflists_active=reflists_active, **assign_kw)
+            _apply(sid, res["ledger"], res.get("plausibility_audit") or [],
+                   dict(res.get("stats", {})))
+    else:
+        # Write the batch TS to disk once so workers load it from the parquet
+        # rather than re-pickling the full-batch DataFrame into every process.
+        base_kw = {k: v for k, v in assign_kw.items() if k != "ts_peaks"}
+        ts_path = None
+        _ts = assign_kw.get("ts_peaks")
+        if _ts is not None:
+            ts_path = os.path.join(pfdir, "_batch_ts.parquet")
+            _ts.to_parquet(ts_path)
+        # Bound total match_compounds concurrency at the flaky server: each worker
+        # runs PEAKY_MATCH_WORKERS threads, so keep n_jobs * that modest (~12).
+        os.environ.setdefault("PEAKY_MATCH_WORKERS", str(max(2, 12 // n_jobs)))
+        import multiprocessing as _mp
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        log(f"[assign_batch] parallel: {n_jobs} worker processes "
+            f"(match-workers/proc={os.environ['PEAKY_MATCH_WORKERS']}) "
+            f"over {len(sample_ids)} samples")
+        results: dict = {}
+        with ProcessPoolExecutor(
+                max_workers=n_jobs, mp_context=_mp.get_context("spawn"),
+                initializer=_worker_init,
+                initargs=(context, reflists_active, base_kw, ts_path)) as ex:
+            futs = {ex.submit(_assign_one, sid): sid for sid in sample_ids}
+            for done, fut in enumerate(as_completed(futs), 1):
+                out = fut.result()
+                results[out["sid"]] = out
+                log(f"[assign_batch] ({done}/{len(sample_ids)}) done {out['sid']}")
+        # Reduce STRICTLY in sample_ids order (not completion order) so align()'s
+        # input is fixed and the merged output is byte-identical to a serial run.
+        for sid in sample_ids:
+            out = results[sid]
+            for ln in out["log"]:              # replay worker logs, grouped per sid
+                log(ln)
+            _apply(sid, out["ledger"], out["plausibility_audit"], out["stats"])
 
     merged, jitter = align(per_file, tol_ppm=tol_ppm, offsets=offsets)
     # Merge guard: drop reagent-cluster ions a per-file pass mislabelled as analyte

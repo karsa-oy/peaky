@@ -632,7 +632,10 @@ def _reanchor_labelled_reagent(ion_rows: list[dict], *, delta: float, label: str
     new_base["iso_label"] = "M0"
 
 
-MATCH_WORKERS = 5   # concurrent match_compounds batches (I/O-bound; server-safe)
+# concurrent match_compounds batches per process (I/O-bound; server-safe). Read
+# from the env so the batch process pool can DIVIDE it across worker processes
+# (N_procs * PEAKY_MATCH_WORKERS stays a bounded total load on the flaky server).
+MATCH_WORKERS = max(1, int(os.environ.get("PEAKY_MATCH_WORKERS", "5")))
 
 
 def _polarity_sign(pol) -> str | None:

@@ -213,7 +213,7 @@ def cmd_batch(args) -> None:
                        subject=args.subject, do_report=not args.no_report,
                        config=args.reagent_config, select=args.select,
                        coverage_target=args.coverage_target, k_max=args.k_max,
-                       height_floor=args.height_floor)
+                       height_floor=args.height_floor, n_jobs=args.jobs)
     ctx = res["ctx"]
     print(f"\n[batch] done -> {ctx.out_dir}")
     if res.get("report_pdf"):
@@ -339,6 +339,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="brightest: max number of winner samples to assign (default 10)")
     pb.add_argument("--height-floor", type=float, default=1000.0,
                     help="brightest: a bin is significant if its max height >= this (cps)")
+    pb.add_argument("--jobs", "-j", type=int, default=None,
+                    help="assign samples in parallel across N worker processes "
+                         "(default: physical cores, capped at the sample count; "
+                         "1 = the serial path; env PEAKY_JOBS also honored). Output "
+                         "is byte-identical to a serial run.")
     pb.set_defaults(func=cmd_batch)
 
     pr = sub.add_parser("report",
