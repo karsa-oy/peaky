@@ -2,6 +2,8 @@ __pycache__/
 *.pyc
 
 # secrets & data (never commit)
+# NB: `.env*` (not `.env.*`) also catches suffix-style creds like .envPROD /
+# .envSITE (the dot-form `.env.*` would let those slip through).
 .env
 .env*
 !.env.example
@@ -13,8 +15,11 @@ __pycache__/
 # local agent settings
 .claude/
 
-# generated run outputs
-/output/                 # the workspace output/ folder (PEAKY_OUTPUT_DIR; `peaky setup`)
+# generated run outputs (contain campaign data / private identifiers — never commit).
+# NB: keep the comment on its OWN line — an inline "# ..." after a pattern becomes part
+# of the pattern (git only treats a line STARTING with # as a comment), which silently
+# disabled /output/ and let a run folder slip through before.
+/output/
 /peaky-output/
 checkpoints/
 *_assignments.xlsx

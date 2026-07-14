@@ -339,6 +339,21 @@ tolerance `δGKA ≈ (X/mass(R))·δm`, `δm = ppm·(m/z)·1e-6`. Use it to spot
 structure (CF₂ contaminant ladders, oxidation series) the auto-detector did not
 already open. `peaky assign` emits one per run (plus a second over the unexplained residual).
 
+## Diel (time-of-day) composition figures
+
+`python3 scripts/diel_classes.py --run-dir <RUN_FOLDER> --label 'NO3 CIMS' --tz-offset -5`
+→ `figures/story_<tag>_diel_{composite,individual}.png`. Per-ion HOUR-OF-DAY
+profile (median within each local hour on log intensity, normalised to the ion's
+own mean) grouped by backbone class (`cluster.formula_class`): the **composite**
+overlays one median line per class; the **individual** small-multiples show every
+ion's profile (thin) + class median (bold), one panel per class. `--tz-offset H`
+sets local time (UTC+H; CDT = −5), `--tier {assigned,all}`, `--classes` to
+restrict panels. Reveals the oxidation-state→time-of-day clock (daytime
+photochemistry builds oxygen ~13–15 h; nocturnal reduced fatty acids ~03–05 h;
+semivolatile chloroparaffins lag to ~17 h). Pure helpers `load_ion_diel` /
+`diel_profile` / `peak_hour` are importable. Also accepts `--ledger/--ts-parquet`
+directly instead of `--run-dir`.
+
 ## Module map (`peaky/`)
 
 | module                | role                                                                                                                                                                                                                                                                                                                                                                                                                     |
