@@ -234,7 +234,7 @@ def run_batch(*, batch: str, dataset: str | None = None, reagent: str = "auto",
               amine_r_min: float = 0.6, do_report=True, config: str | None = None,
               select: str = "representative", coverage_target: float = 0.85,
               k_max: int = 10, height_floor: float = 1000.0,
-              log=print, **assign_kw) -> dict:
+              n_jobs: int | None = None, log=print, **assign_kw) -> dict:
     """Full batch pipeline in ONE call: sample-subset ASSIGN (live match_compounds)
     -> merge -> cluster figures -> Van Krevelen -> PDF report, into one versioned run
     folder. `ts` is the full-batch per-sample peak time series (DataFrame or parquet
@@ -262,7 +262,7 @@ def run_batch(*, batch: str, dataset: str | None = None, reagent: str = "auto",
     res = AB.run(batch=batch, dataset=dataset, reagent=prof.name,
                  out_dir=ctx.out_dir, ts_peaks=ts, amine_r_min=amine_r_min,
                  select=select, coverage_target=coverage_target, k_max=k_max,
-                 height_floor=height_floor, log=log, **assign_kw)
+                 height_floor=height_floor, n_jobs=n_jobs, log=log, **assign_kw)
     gen = generate_report(ctx, ts, subject=subject, do_report=do_report, log=log)
 
     # provenance: pin this run to its exact code + input-data hash + config +

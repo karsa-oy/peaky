@@ -6,6 +6,59 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased] — report refactor
 
+### Fixed (phantom heteroatom assignments — Si / P)
+- **Silicon isotope gate** (`passes/config.py` `het_iso_penalty_Si`,
+  `passes/core.py` `_DIAG`). Si now sits in the isotope-evidence gate alongside
+  S/Cl/Br: an unconfirmed Si formula (no matched ²⁹Si/³⁰Si satellite) pays a
+  het-iso penalty and loses arbitration to a CHO/CHON rival instead of winning on
+  accurate mass alone; a real siloxane whose ²⁹Si/³⁰Si envelope is confirmed pays
+  nothing. The gate diagnostic accepts either the M+1 (²⁹Si) or M+2 (³⁰Si) line.
+- **Tier demotion of uncorroborated Si and mono-isotopic P/I** (`tiers.py`). A Si
+  formula with no confirmed satellite and no cross-channel/series support, or a
+  mono-isotopic P/I (no possible isotope twin) seen only on a single clustering
+  channel, is demoted Assigned → Candidate; `known:` / cross-channel / isotope-
+  confirmed species are spared. Kills phantom PDMS/silanol fits and orphan-adduct
+  organophosphates (e.g. a "C13H29O4P" that was really a neighbouring CHON's ¹⁵N
+  satellite).
+
+### Fixed (exhaustive isotopologue claiming — no leaked satellites)
+- **Faint diagnostic satellites are now claimed** (`chem/isotopes.py`
+  `diag_min_rel` + `D_15N`/`D_30SI`; `passes/postprocess.py`; `assignment/cleanup.py`
+  `reclaim_satellites`). The M+1/M+2 lines of ¹⁵N (0.36 %/N), ¹⁸O, and a single
+  ³⁴S/²⁹Si/³⁰Si sit below the envelope plausibility floor and were left unclaimed,
+  so they floated free as base peaks that mass-coincidence phantoms grabbed. They
+  are now predicted below the floor and swept by `reclaim_satellites` (extended from
+  ¹³C/⁸¹Br/³⁷Cl to the full diagnostic set with atom-count-aware ratio gates).
+- **Strong-scoring phantoms displaced onto their true parent**
+  (`complete_isotope_envelopes`). A peak on a faint parent-satellite line whose
+  intensity matches the predicted satellite is moved into the iso-child role even
+  when its own accurate-mass score is high — mass identity + intensity consistency
+  outweigh the score. Excess-intensity and High-confidence victims are spared.
+  (`tests/test_phantom_guards.py`, 27 checks.)
+
+### Added (batch performance — sample-level parallelism)
+- **`peaky batch --jobs/-j N`** (`batch/assign_batch.py`, `cli.py`, `pipeline.py`;
+  env `PEAKY_JOBS`). Assigns the selected samples across a spawn process pool —
+  ~3.5× faster on multicore. Byte-identical to a serial run: results are reduced in
+  `sample_ids` order into the deterministic merge, and each worker gets its own
+  pickled `PassConfig`. Per-worker `match_compounds` concurrency is scaled down
+  (`PEAKY_MATCH_WORKERS`, `io_mascope.py`) so total server load stays bounded.
+  `--jobs 1` keeps the exact serial path; default is physical-core count capped at
+  the sample count. (`tests/test_batch_parallel.py`, 16 checks.)
+
+### Changed (clustering — residual-space / common-mode redesign)
+- **Cluster figures now cluster on de-glued residual correlation**
+  (`batch/cluster.py`, `batch/clustering.py`, `reporting/pdf_report.py`). Raw
+  pairwise correlation was dominated by a shared diel common-mode wave, collapsing
+  distinct chemistries into one blob. The CHANGING set now runs assigned channels +
+  gated unassigned bins through ONE unified space clustered on
+  log → per-channel diel-anomaly → common-mode-removed residuals (`corr_space='raw'`
+  restores the legacy behaviour); families are labeled by their assigned members
+  ("co-varies with X"), anchor-free families flagged NOVEL. BACKGROUND is split into
+  common-mode diel carriers / low-amplitude diel-structured / genuinely flat; short
+  batches fall back to raw correlation. (`tests/test_cluster.py`,
+  `tests/test_clustering.py`.)
+
 ### Added (off-grid discovery: certified-neutral + organothiophosphates)
 - **MCP server** (`peaky/mcp_server.py`, `peaky mcp`; extra `pip install
   'mascope-peaky[mcp]'`; see `docs/MCP.md`). Drives the pipeline from any MCP

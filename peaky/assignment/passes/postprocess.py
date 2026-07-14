@@ -137,8 +137,15 @@ def complete_isotope_envelopes(
             continue
         try:
             # max_shift 12: keep the M+7/M+8 envelope of 4+ heavy-halogen ions
-            # (a Br4 M+8 is ~0.9x M0) instead of leaking it into the residual
-            pattern = ISO.isotope_pattern(str(ionf), min_rel=min_rel, max_shift=12.0)
+            # (a Br4 M+8 is ~0.9x M0) instead of leaking it into the residual.
+            # diag_min_rel keeps the faint single-heteroatom diagnostic lines
+            # (15N 0.36%, 18O, a single 34S/29Si/30Si) that min_rel=0.06 would
+            # prune -- so they are CLAIMED (unexplained) or DISPLACE a weak phantom
+            # M0 sitting on them (the 15N-satellite-of-a-CHON -> phantom-P leak),
+            # instead of floating free for the opportunistic passes to grab. The
+            # intensity-consistency gate below, not the floor, is the discriminator.
+            pattern = ISO.isotope_pattern(str(ionf), min_rel=min_rel,
+                                          max_shift=12.0, diag_min_rel=0.001)
         except Exception:
             continue
         for dmass, rel, label in pattern:
@@ -168,20 +175,28 @@ def complete_isotope_envelopes(
                     except L.LedgerError:
                         pass
             elif role_j == L.ROLE_M0:
-                if bool(ledger.at[j, "locked"]):
+                if bool(ledger.at[j, "locked"]) or \
+                        str(ledger.at[j, "confidence"]).startswith("High"):
+                    # locked, or a High-confidence fit that earned it via its OWN
+                    # isotope children -- a real compound, never a satellite.
                     continue
-                conf_j = str(ledger.at[j, "confidence"])
                 sc_j = ledger.at[j, "ion_score"]
                 weak_score = pd.isna(sc_j) or float(sc_j) < cfg.tau_high
-                # only displace a WEAK victim, on a tight intensity match. The
-                # tier column is NA here (tiers run later), so protect on
-                # CONFIDENCE + standalone SCORE instead: High-confidence or
-                # near-High-scoring fits are real compounds, not satellites.
-                if (
-                    not conf_j.startswith("High")
-                    and weak_score
-                    and 0.45 <= ratio <= 2.2
-                ):
+                # A WEAK-scoring victim on a loose intensity match is a satellite
+                # (the tier column is NA here -- tiers run later -- so gate on the
+                # standalone score). A STRONG-scoring victim is normally a real
+                # compound, EXCEPT on a FAINT M+1/M+2 diagnostic line (tight 5 ppm
+                # mass, small predicted intensity: a 15N/34S/29Si/30Si/18O line, not
+                # the bright 13C or halogen M+2) whose measured height is what the
+                # parent's envelope predicts to within a tight factor. There, mass
+                # identity + intensity consistency outweigh a high accurate-mass
+                # score: a good score on a mono-isotopic-heteroatom ghost -- a P/S
+                # formula sitting on a CHON's 15N line -- is exactly the phantom we
+                # must absorb (the parent is ~100x brighter, so an independent
+                # co-eluter would sit far ABOVE the faint predicted line, ratio>>2).
+                faint_line = dmass < 2.5 and rel < 0.10
+                if (weak_score and 0.45 <= ratio <= 2.2) or \
+                        (faint_line and 0.5 <= ratio <= 2.0):
                     try:
                         L.displace_to_isotopologue(
                             ledger, tpid, pid, iso_label=label, iso_match_score=score

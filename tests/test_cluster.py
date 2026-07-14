@@ -203,6 +203,154 @@ with tempfile.TemporaryDirectory() as d:
           cimg.shape)
     check("render_changers([]) -> []", CL.render_changers([], ctr, cg, f"{d}/e", str) == [])
 
+# --- diurnal structure gate: amplitude-blind eta2 catches low-amplitude diel waves ---
+# 7 days at ~0.5 h resolution
+_h = np.linspace(0, 167, 336)
+_wiggle = 0.01 * np.cos(13.0 * _h)                       # deterministic noise
+_diel = 1000.0 * 10 ** (0.08 * np.sin(2 * np.pi * _h / 24) + _wiggle)   # ±20% daily wave
+                                          # (real diel channels: range 1.24-1.40)
+_flatn = 1000.0 * 10 ** _wiggle                          # structureless
+check("diurnal_eta2 high for a low-amplitude diel wave",
+      CL.diurnal_eta2(_diel, _h) > 0.8, CL.diurnal_eta2(_diel, _h))
+check("diurnal_eta2 low for a structureless trace",
+      CL.diurnal_eta2(_flatn, _h) < 0.2, CL.diurnal_eta2(_flatn, _h))
+check("diurnal_eta2 = 0 when the span is < ~2 diel cycles",
+      CL.diurnal_eta2(_diel[:60], _h[:60]) == 0.0)
+
+_tr = pd.DataFrame({"diel": _diel, "noise": _flatn})
+check("diel wave fails the amplitude gates (cv + burst range) without hours",
+      not CL.trace_varies(_tr, "diel"))
+check("diel wave PROMOTED to varying when hours are passed",
+      CL.trace_varies(_tr, "diel", hours=_h))
+check("structureless trace stays flat even with hours",
+      not CL.trace_varies(_tr, "noise", hours=_h))
+_v, _f = CL.split_varying(_tr, ["diel", "noise"], hours=_h)
+check("split_varying(hours=) -> diel varying, noise flat", _v == ["diel"] and _f == ["noise"])
+
+# --- split_flat_clusters: structure-aware keep + relaxed structureless-settling demote ---
+def _fam(base):
+    return pd.DataFrame({f"m{i}": base * (1 + 0.02 * np.roll(_wiggle, i)) for i in range(3)})
+
+_row = lambda mem: (1, mem, 0.9, "peak", 12.0)
+_mem = ["m0", "m1", "m2"]
+# (a) low-amplitude diel family: amplitude says flat -> kept only with hours
+_trd = _fam(_diel)
+_dyn, _flt = CL.split_flat_clusters([_row(_mem)], _trd)
+check("diel family DEMOTED by the amplitude-only gate (old behavior, no hours)",
+      len(_flt) == 1 and not _dyn)
+_dyn, _flt = CL.split_flat_clusters([_row(_mem)], _trd, hours=_h)
+check("diel family KEPT when hours enable the structure test",
+      len(_dyn) == 1 and not _flt, (len(_dyn), len(_flt)))
+# (b) fatty-acid signature: startup fall inflates full range; starts at ~0.65 of peak
+#     (slips the strict 0.8 guard); flat after settling; NO diel structure
+_fa = 500.0 + 1500.0 * np.exp(-_h / 8.0)
+_trf = _fam(_fa)
+_dyn, _flt = CL.split_flat_clusters([_row(_mem)], _trf)
+check("structureless settling family KEPT by old gate (the cluster-280 bug)",
+      len(_dyn) == 1 and not _flt)
+_dyn, _flt = CL.split_flat_clusters([_row(_mem)], _trf, hours=_h)
+check("structureless settling family DEMOTED with the relaxed start-high bar",
+      len(_flt) == 1 and not _dyn, (len(_dyn), len(_flt)))
+# (c) real early rise-event: starts LOW -> must be kept under both gates
+_ev = 200.0 + 1800.0 * np.exp(-((_h - 30.0) ** 2) / 50.0)
+_tre = _fam(_ev)
+_dyn, _flt = CL.split_flat_clusters([_row(_mem)], _tre, hours=_h)
+check("early rise-event family still KEPT (starts low, below even the loose bar)",
+      len(_dyn) == 1 and not _flt, (len(_dyn), len(_flt)))
+# (d) SHORT batch (< 2 diel cycles): eta2 is unmeasurable (forced 0.0), which must
+#     NOT read as "measured structureless" — the loose settling bar must not fire,
+#     so a rise-then-settle family with starts_high in [0.5, 0.8) keeps the legacy
+#     STRICT bar and stays dynamic.
+_h30 = np.linspace(0, 30, 90)
+_short = 300.0 + 1700.0 * (np.exp(-((_h30 - 4.0) ** 2) / 18.0) + 0.12)
+_trs = pd.DataFrame({f"m{i}": _short * (1 + 0.02 * np.cos(0.7 * i + _h30)) for i in range(3)})
+_dyn_nh, _flt_nh = CL.split_flat_clusters([_row(_mem)], _trs)           # legacy (no hours)
+_dyn_h, _flt_h = CL.split_flat_clusters([_row(_mem)], _trs, hours=_h30)  # hours, short span
+check("short batch: hours= must not change the legacy settling verdict",
+      (len(_dyn_nh), len(_flt_nh)) == (len(_dyn_h), len(_flt_h)),
+      ((len(_dyn_nh), len(_flt_nh)), (len(_dyn_h), len(_flt_h))))
+
+
+# --- residual (de-glued) correlation space -----------------------------------
+# two channels with INDEPENDENT day-to-day behaviour but the SAME diel wave:
+# raw correlation glues them; residual correlation must not.
+_days = (_h // 24).astype(int)
+_wave = 0.25 * np.sin(2 * np.pi * _h / 24)
+# a realistic panel: 12 channels with INDEPENDENT day-to-day patterns + the SAME
+# diel wave (the common_mode panel-median needs a population — with a tiny panel a
+# 2-member family's own pattern would BE the median and get erased; documented
+# trade-off, production panels have hundreds of channels).
+_daypat = {i: np.array([np.cos(0.9 * i + 2.1 * d) for d in range(8)])[_days] for i in range(12)}
+_panel = {f"p{i}": 1000.0 * 10 ** (_wave + 0.10 * _daypat[i] + 0.01 * np.cos((5 + i) * _h))
+          for i in range(12)}
+_panel["A"] = 1000.0 * 10 ** (_wave + 0.10 * _daypat[0] + 0.01 * np.cos(31 * _h))  # true partner of p0
+_trg = pd.DataFrame(_panel)
+_rawr = np.corrcoef(np.log10(_trg["p0"]), np.log10(_trg["p5"]))[0, 1]
+check("raw log correlation GLUES two unrelated channels sharing the diel wave",
+      _rawr > 0.6, _rawr)
+_res, _r2, _cm = CL.decompose(_trg, list(_trg.columns), _h)
+_resr = _res["p0"].corr(_res["p5"])
+check("residual correlation de-glues them (r < 0.6)", abs(_resr) < 0.6, _resr)
+_resr2 = _res["p0"].corr(_res["A"])
+check("a REAL co-varying pair (same day-to-day pattern) survives residualization",
+      _resr2 > 0.6, _resr2)
+_pure = pd.DataFrame({"W": 1000.0 * 10 ** (_wave + 0.005 * np.cos(23 * _h)),
+                      "N": _flatn})
+# NOTE: the diel anomaly already removes a channel's own daily cycle, so a PURE
+# wave carrier is identified by its R2 against the shared mode of a panel that
+# still carries day-to-day common structure:
+_dayc = np.array([0.1, -0.2, 0.15, -0.1, 0.25, -0.15, 0.2, -0.25])[_days]     # shared day-to-day
+_carrier = {f"c{i}": 1000.0 * 10 ** (0.2 * _dayc + 0.01 * np.cos((7 + i) * _h)) for i in range(4)}
+_trc = pd.DataFrame(_carrier)
+_res2, _r2c, _ = CL.decompose(_trc, list(_trc.columns), _h)
+check("shared day-to-day mode carriers have high R2 vs the common mode",
+      float(_r2c.min()) > 0.7, dict(_r2c))
+check("correlate(log=False) accepts a residual frame",
+      CL.correlate(_res, ["p0", "A"], log=False)[1].shape == (2, 2))
+
+# validate_cohesion: a tight family passes, a glued-loose one is flagged
+_corr_ok = pd.DataFrame(np.array([[1, .8, .7], [.8, 1, .75], [.7, .75, 1]]),
+                        index=["a", "b", "c"], columns=["a", "b", "c"])
+_corr_bad = pd.DataFrame(np.array([[1, .2, .1], [.2, 1, .15], [.1, .15, 1]]),
+                         index=["a", "b", "c"], columns=["a", "b", "c"])
+_coh = CL.validate_cohesion([(1, ["a", "b", "c"], .9, "peak", 1.0)], _corr_ok)
+check("validate_cohesion: tight family not flagged", _coh[1] == (_coh[1][0], False) and _coh[1][0] > 0.7)
+_coh = CL.validate_cohesion([(2, ["a", "b", "c"], .9, "peak", 1.0)], _corr_bad)
+check("validate_cohesion: loose family flagged", _coh[2][1] and _coh[2][0] < 0.5)
+
+# isotope_satellite_of: a bin one 13C step above a brighter parent is a satellite
+_kmz = np.array([200.0000, 250.0000])
+_kmed = np.array([5000.0, 8000.0])
+check("isotope_satellite_of catches the 13C satellite of a brighter parent",
+      CL.isotope_satellite_of(201.003355, _kmz, _kmed, 300.0) == 200.0)
+check("isotope_satellite_of ignores a BRIGHTER bin (satellites are dimmer)",
+      CL.isotope_satellite_of(201.003355, _kmz, _kmed, 9000.0) is None)
+check("isotope_satellite_of ignores a non-isotope spacing",
+      CL.isotope_satellite_of(201.5, _kmz, _kmed, 300.0) is None)
+
+
+# --- grouped structured-background pages --------------------------------------
+check("formula_class basics",
+      [CL.formula_class(f) for f in
+       ("C7H8O5", "C6H11NO6", "C9H11ClO5S", "C3HF5", "C9H8OSi", "C10H19NO5S", "?179.0076", "")]
+      == ["CHO", "CHON", "halogenated", "F-containing", "Si / siloxane", "CHONS",
+          "unassigned", "unassigned"])
+import tempfile as _tf, os as _os
+with _tf.TemporaryDirectory() as _d:
+    _gcols = {"CHO": ["diel", "noise"], "CHON": ["p0", "p1", "p2"], "empty": []}
+    _gtr = pd.concat([_tr, _trg[["p0", "p1", "p2"]]], axis=1)
+    _paths = CL.render_grouped_flat(_gcols, _gtr, _h, f"{_d}/sb", lambda k: k,
+                                    title="Structured background", subtitle="test",
+                                    group_note=lambda n, cs: f"{len(cs)} ch")
+    check("render_grouped_flat writes paginated pages, skipping empty groups",
+          len(_paths) == 1 and _os.path.exists(_paths[0]), _paths)
+    import matplotlib.image as _mpimg2
+    _img = _mpimg2.imread(_paths[0])
+    check("grouped page is A4 portrait", _img.shape[0] > _img.shape[1], _img.shape)
+    check("render_grouped_flat([]) -> []",
+          CL.render_grouped_flat({}, _gtr, _h, f"{_d}/e", str) == [])
+
+
 def test_all():
     assert FAIL == 0, f"{FAIL} checks failed"
 

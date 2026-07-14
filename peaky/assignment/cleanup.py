@@ -31,7 +31,7 @@ from peaky.assignment import degeneracy as D
 from peaky.io import io_mascope as IO
 from peaky.assignment import ledger as L
 
-__version__ = "0.4.0"   # + reclaim_satellites (attach leaked 13C/81Br/37Cl satellites)
+__version__ = "0.5.0"   # + reclaim_satellites now covers 15N/34S/29Si/30Si/18O (not just 13C/81Br/37Cl)
 # (history) v43-review fixes: ringing brightness floor (H4),
                         # CHO-only isotope-confirmed recovery (H1/H2), covalent
                         # cluster commentary (M4)
@@ -347,26 +347,40 @@ def _ion_str(neutral, adduct):
 
 
 def reclaim_satellites(ledger: pd.DataFrame, *, ppm: float = 6.0, log=print) -> dict:
-    """Final sweep: attach an UNEXPLAINED peak that is a clean 13C / 81Br / 37Cl
-    satellite of an assigned M0 (parent carries that element AND the intensity
-    ratio is physically consistent) as an iso_child. Catches the few satellites
-    the envelope passes leak. Touches only unexplained rows -- it can never demote
-    a real M0. The 13C gate is carbon-count-aware (ratio ~ nC*1.1%), so it cannot
-    mis-grab an unrelated neighbour at +1.003 Da."""
+    """Final sweep: attach an UNEXPLAINED peak that is a clean satellite of an
+    assigned M0 (parent carries that element AND the intensity ratio is physically
+    consistent) as an iso_child. Covers the full diagnostic set 13C / 15N / 81Br /
+    37Cl / 34S / 29Si / 30Si / 18O -- so a faint single-heteroatom satellite (a
+    CHON's 15N line, a mono-S 34S) that the envelope passes and the server both
+    leak is claimed here instead of floating free as a base peak a mass-coincidence
+    phantom can grab. Touches only unexplained rows -- it can never demote a real
+    M0. Every gate is atom-count-aware (ratio ~ n_atoms * per-atom abundance), so
+    it cannot mis-grab an unrelated neighbour at the satellite offset."""
     from peaky.chem import isotopes as ISO
     m0 = ledger[ledger["role"] == L.ROLE_M0].dropna(subset=["mz"]).sort_values("mz")
     if not len(m0):
         return {"reclaimed": 0}
     mz = m0["mz"].to_numpy(); pid = m0["peak_id"].to_numpy()
     ionf = m0["ion_formula"].astype(str).to_numpy(); ph = m0["height"].to_numpy()
-    DELT = [(ISO.D_13C, "13C", "C"), (ISO.D_81BR, "81Br", "Br"), (ISO.D_37CL, "37Cl", "Cl")]
+    # (delta-m, label, element, per-atom abundance). 13C first (most common), then
+    # the heavy-halogen M+2 doublets, then the faint mono-heteroatom diagnostics.
+    DELT = [
+        (ISO.D_13C,  "13C",  "C",  ISO.R_13C_PER_C),
+        (ISO.D_81BR, "81Br", "Br", ISO.R_81BR_PER_BR),
+        (ISO.D_37CL, "37Cl", "Cl", ISO.R_37CL_PER_CL),
+        (ISO.D_15N,  "15N",  "N",  ISO.R_15N_PER_N),
+        (ISO.D_34S,  "34S",  "S",  ISO.R_34S_PER_S),
+        (ISO.D_29SI, "29Si", "Si", ISO.R_29SI_PER_SI),
+        (ISO.D_30SI, "30Si", "Si", ISO.R_30SI_PER_SI),
+        (ISO.D_18O,  "18O",  "O",  ISO.R_18O_PER_O),
+    ]
     n = 0
     for i in ledger.index[ledger["role"] == L.ROLE_UNEXPLAINED]:
         cmz = ledger.at[i, "mz"]; chh = ledger.at[i, "height"]
         if pd.isna(cmz):
             continue
         cmz = float(cmz); chh = float(chh) if pd.notna(chh) else 0.0
-        for d, label, el in DELT:
+        for d, label, el, per in DELT:
             t = cmz - d; tol = cmz * ppm * 1e-6
             j = bisect.bisect_left(mz, t - tol); best = None
             while j < len(mz) and mz[j] <= t + tol:
@@ -379,13 +393,13 @@ def reclaim_satellites(ledger: pd.DataFrame, *, ppm: float = 6.0, log=print) -> 
             if nel < 1 or ph[best] <= 0:
                 continue
             ratio = chh / ph[best]
-            if el == "C":                      # carbon-count-aware 13C gate
-                exp = nel * 0.0107
-                ok = 0.3 * exp <= ratio <= 2.5 * exp and ratio < 1.0
-            elif el == "Br":                   # ~0.97 per Br adduct/atom
+            if label == "81Br":                # ~0.97 per Br adduct/atom
                 ok = 0.55 <= ratio <= 1.4 * nel
-            else:                              # 37Cl ~0.32 per Cl
+            elif label == "37Cl":              # 37Cl ~0.32 per Cl
                 ok = 0.18 <= ratio <= 0.5 * nel
+            else:                              # 13C/15N/34S/29Si/30Si/18O: count-aware
+                exp = nel * per
+                ok = 0.3 * exp <= ratio <= 2.5 * exp and ratio < 1.0
             if not ok:
                 continue
             try:
@@ -407,7 +421,7 @@ def reclaim_envelope_tails(ledger: pd.DataFrame, *, ppm: float = 6.0, log=print)
     poly-halogen M0 to leaked unexplained peaks. reclaim_satellites only does the
     single k=1 step, so a chlorinated paraffin's M+4/M+6/... ³⁷Cl tail -- which for
     many Cl is BRIGHTER than M0 -- leaks into 'unexplained' (the dominant satellite
-    leak measured on the ¹⁵NO₃⁻ batch). Walk k=2..nX from each M0 and accept an
+    leak measured on a nitrate-CIMS batch). Walk k=2..nX from each M0 and accept an
     unexplained peak whose intensity ratio matches the binomial C(nX,k)(p/q)^k.
     Touches only unexplained rows; the ratio gate (and exact +k·Δ mass) prevent
     grabbing an unrelated neighbour. p/q: ³⁷Cl 0.3199, ⁸¹Br 0.9728.

@@ -55,7 +55,7 @@ import pandas as pd
 from peaky.chem import chemistry as C
 from peaky.assignment import ledger as L
 
-__version__ = "0.6.0"  # + fluorine F/H-coherence cap (partial-F mass fits -> Candidate)
+__version__ = "0.7.0"  # + Si/P phantom demote (uncorroborated Si + mono-isotopic P/I -> Candidate)
 
 TIER_ASSIGNED = "Assigned"
 TIER_CANDIDATE = "Candidate"
@@ -425,6 +425,35 @@ def compute_tiers(ledger: pd.DataFrame) -> pd.DataFrame:
                       "below PFAS-like F/H coherence; F has no minor isotope, so "
                       "the fluorine count is a mass-only claim with no possible "
                       "isotope confirmation")
+        elif counts.get("Si", 0) >= 1 and not corroborated:
+            # Si carries a genuine, diagnostic 29Si(4.7%)+30Si(3.1%) M+1/M+2 twin,
+            # so a real silicon species confirms it (a multi-Si siloxane trivially;
+            # its combined 29Si is well above the isotope floor). An unconfirmed Si
+            # with no cross-channel / series support is almost always a PDMS/silanol
+            # mass coincidence -- mass space is dense with Si formulas. The
+            # arbitration het-iso gate already discounts it; this is the
+            # belt-and-suspenders catch for any that still won the M0 slot.
+            tier = TIER_CANDIDATE
+            reason = (f"Si{counts['Si']} with no confirmed 29Si/30Si satellite and "
+                      "no cross-channel / series corroboration: silicon has a strong "
+                      "M+1/M+2 twin that must appear if real, so this is a mass-only "
+                      "claim (likely a PDMS/silanol coincidence)")
+        elif (counts.get("P", 0) >= 1 or counts.get("I", 0) >= 1) and not corroborated:
+            # P (31P) and I (127I) are truly mono-isotopic: no isotope twin can ever
+            # confirm the heteroatom count, so a bare P/I mass fit is unfalsifiable
+            # from accurate mass alone. A real organophosphate / iodo-species is
+            # corroborated by a second ionization channel (e.g. malathion across
+            # [M+H]+/urea/NH4) or a homologous series; pass-0 known: organophosphates
+            # are exempt (handled above). Without any of that -- the classic
+            # orphan-adduct phantom (a P formula sitting only on the peaky-internal
+            # [M+NH4]+, latching a neighbour's 15N satellite) -- the count is a
+            # mass-only claim.
+            het = "P" if counts.get("P", 0) >= 1 else "I"
+            tier = TIER_CANDIDATE
+            reason = (f"mono-isotopic {het} with no cross-channel / series "
+                      f"corroboration: {het} has no minor isotope, so the {het} "
+                      "count is a mass-only claim with no possible isotope "
+                      "confirmation and no independent channel to fix it")
         elif reagent_n and not corroborated:
             # positive-mode reagent-N isobar with nothing to fix the nitrogen
             # count: the ion reads equally as an N-free neutral on an N-donating

@@ -19,8 +19,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-__version__ = "0.2.0"
-
+__version__ = "0.3.0"  # + diag_min_rel: claim faint 15N/18O/single-heavy satellites (D_15N, D_30SI)
 # delta-m (Da) between an isotopologue satellite and its monoisotopic parent
 # (AME2020 exact masses; 81Br-79Br = 80.9162897 - 78.9183376 = 1.9979521 --
 # was 1.997795, 0.16 mDa low and inconsistent with passes._DBR; fixed 2026-06-13)
@@ -29,6 +28,8 @@ D_37CL = 1.997050
 D_81BR = 1.9979521
 D_34S = 1.995796
 D_29SI = 0.999568
+D_30SI = 1.996840
+D_15N = 0.997035
 D_18O = 2.004246
 
 # natural-abundance per-atom ratio of the +N satellite to the monoisotopic peak
@@ -37,6 +38,9 @@ R_37CL_PER_CL = 0.3196        # 37Cl/35Cl
 R_81BR_PER_BR = 0.9728        # 81Br/79Br
 R_34S_PER_S = 0.0443          # 34S/32S
 R_29SI_PER_SI = 0.0510        # 29Si/28Si
+R_30SI_PER_SI = 0.0309        # 30Si/28Si
+R_15N_PER_N = 0.003640        # 15N/14N (faint: 0.36% per N)
+R_18O_PER_O = 0.002050        # 18O/16O (faint: 0.20% per O)
 
 
 # Per-atom isotope distributions: element -> [(mass_shift_from_lightest, abundance)].
@@ -88,7 +92,8 @@ def _label_for_shift(dmass: float, counts: dict | None = None) -> str:
 
 
 def isotope_pattern(ion_formula: str, *, min_rel: float = 0.03,
-                    max_shift: float = 6.5, merge_da: float = 0.006
+                    max_shift: float = 6.5, merge_da: float = 0.006,
+                    diag_min_rel: float | None = None
                     ) -> list[tuple[float, float, str]]:
     """Predict the isotopologue envelope of an ION formula.
 
@@ -98,7 +103,15 @@ def isotope_pattern(ion_formula: str, *, min_rel: float = 0.03,
     within ~3 mDa are merged keeping the intensity-weighted exact mass. This is
     what lets the envelope-completion pass recognise an unexplained peak as the
     M+2/M+4 satellite of a committed parent (the silanediol Si4+Br case, where
-    the M+4/M+2 ratio of ~0.26 otherwise mimics a Cl doublet)."""
+    the M+4/M+2 ratio of ~0.26 otherwise mimics a Cl doublet).
+
+    diag_min_rel (when set below min_rel) keeps the FAINT single-heteroatom
+    diagnostic M+1/M+2 lines -- 15N (0.36%/N), 18O, a single 34S/29Si/30Si -- that
+    the plain min_rel floor prunes. A single-N/O/S/Si analyte's diagnostic
+    satellite sits below any sane plausibility floor, yet it must still be CLAIMED
+    (else it floats free as a base peak a mass-coincidence phantom grabs -- the
+    15N-satellite-of-a-CHON leak). The intensity-consistency gate at the call site,
+    not min_rel, is the discriminator against a coincidental neighbour."""
     from peaky.chem import chemistry as C
     counts = C.parse_formula(ion_formula)
     # distribution as {rounded_shift: [prob, weighted_mass_sum]}
@@ -153,13 +166,18 @@ def isotope_pattern(ion_formula: str, *, min_rel: float = 0.03,
             merged[-1][1] += p * dmass
         else:
             merged.append([p, p * dmass])
+    # single-heteroatom diagnostic lines whose floor diag_min_rel can lower
+    _DIAG_LABELS = ("13C", "15N", "29Si", "30Si", "34S", "18O", "37Cl", "81Br")
     out = []
     for p, wm in merged:
         dmass = wm / p
         rel = p / base
-        if rel >= min_rel:
-            out.append((round(dmass, 4), round(rel, 4),
-                        _label_for_shift(dmass, counts)))
+        label = _label_for_shift(dmass, counts)
+        floor = min_rel
+        if diag_min_rel is not None and label in _DIAG_LABELS:
+            floor = min(floor, diag_min_rel)
+        if rel >= floor:
+            out.append((round(dmass, 4), round(rel, 4), label))
     return sorted(out)
 
 

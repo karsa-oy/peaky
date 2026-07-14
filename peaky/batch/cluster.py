@@ -27,8 +27,7 @@ import pandas as pd
 from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import squareform
 
-__version__ = "0.1.0"
-
+__version__ = "0.2.0"  # + residual-space / common-mode clustering
 CHANGING = 0.30          # cv at/above which a trace is "changing"
 FLAT_CV = CHANGING       # cv BELOW which a trace counts as flat (the sustained-
                          # variation half of the gate; lower it to keep weak families)
@@ -56,6 +55,32 @@ BIG_CHANGE_FOLD = 3.0    # a single channel whose smoothed max/median is >= this
 BIG_CHANGE_FOLD_BRIGHT = 2.0    # a BRIGHT channel (median >= BIG_CHANGE_BRIGHT_CPS) surfaces
 BIG_CHANGE_BRIGHT_CPS = 1000.0  # at this lower fold: a 2-3x move of a ~10k-cps ion is a real,
                          # visible excursion that must not hide in the flat-background bunch
+DIURNAL_ETA2 = 0.50      # fraction of a trace's log-variance explained by hour-of-day
+                         # at/above which it counts as STRUCTURED (a coherent diel wave).
+                         # The cv/range gates are amplitude-only and blind to this: a real
+                         # low-amplitude diurnal analyte reads "flat" to them (measured on
+                         # a validation dataset: diel channels eta2 0.57-0.72 vs structureless
+                         # background ~0.1 — clean separation at 0.5).
+DIURNAL_MIN_RANGE = 1.15 # ...but a structured trace must also MOVE at least this much
+                         # (smoothed max/median) to be promoted — a numerically-coherent
+                         # microscopic ripple stays background.
+DIURNAL_SPAN_H = 40.0    # need ~2 diel cycles to measure eta2; below this return 0.0
+DIURNAL_BINS = 8         # 3-hour hour-of-day bins (robust at native sample resolution)
+SETTLING_START_LOOSE = 0.5  # relaxed starts-high bar for demoting a family that ALSO has
+                         # no diel structure (eta2 < DIURNAL_ETA2): a structureless family
+                         # that decays from a high start and is flat after the settling
+                         # window is background even when it misses the strict
+                         # SETTLING_START_MIN (the fatty-acid signature: starts ~0.67 of
+                         # peak). A real rise-event starts at ~0.05-0.4 -> still safe.
+DIEL_BINS = 24           # 1 h hour-of-day bins for the per-channel diel-anomaly profile
+COMMON_R2 = 0.70         # a channel whose log-trace is explained (R^2) by the shared
+                         # common-mode at/above this is a WAVE CARRIER -> named panel
+COHESION_MIN = 0.50      # flag an emitted cluster whose mean within-cluster residual r
+                         # is below this (validate_cohesion backstop; flag, never re-cut)
+ISO_SPACINGS = (1.003355, 0.997035, 1.995796, 1.997050, 1.997953, 2.004246)
+                         # 13C, 15N, 34S, 37Cl, 81Br, 18O mass steps: an unassigned bin
+                         # exactly one of these above a BRIGHTER known peak is that
+                         # peak's isotope satellite, not a novel co-varying compound
 DIST_T = 0.40            # 1-r cut: r > 0.6 merges
 MIN_POINTS = 8           # finite trace points needed to correlate
 MIN_MEMBERS = 3          # smallest reported cluster
@@ -93,16 +118,151 @@ def shape_of(mean_z, gap=0.5):
     return "rise" if e - s > gap else ("fall" if s - e > gap else "peak")
 
 
-def correlate(traces_for_corr: pd.DataFrame, cols, *, min_points=MIN_POINTS):
+def correlate(traces_for_corr: pd.DataFrame, cols, *, min_points=MIN_POINTS,
+              log=True):
     """log10 -> Pearson corr matrix over `cols` of the (already normalised or raw)
-    trace frame. Returns (Lg z-input, corr DataFrame)."""
+    trace frame. Returns (Lg z-input, corr DataFrame). Pass log=False when the
+    frame is ALREADY in log/residual space (residuals can be negative, so the
+    log10 clip would corrupt them)."""
     cols = [c for c in cols if c in traces_for_corr.columns]
     if not cols:
         return pd.DataFrame(), pd.DataFrame()
+    if not log:
+        Lg = traces_for_corr[cols]
+        return Lg, Lg.corr(min_periods=min_points)
     vals = traces_for_corr[cols].values
     floor = np.nanmin(vals[vals > 0]) if np.any(vals > 0) else 1e-9
     Lg = np.log10(traces_for_corr[cols].clip(lower=floor))
     return Lg, Lg.corr(min_periods=min_points)
+
+
+# ---------------------------------------------------------------------------
+# residual (de-glued) correlation space
+#
+# Raw log traces of an ambient batch share a boundary-layer/temperature diel
+# wave; on a validation dataset it explained a median R^2=0.59 per channel and ~92% of
+# the supra-threshold pair correlation — complete linkage on RAW then glues
+# chemically-unrelated species into giant families (n=104 mixing CHO acids,
+# fluorocarbons, organochlorines). The fix: correlate RESIDUALS instead —
+# (1) subtract each channel's own mean hour-of-day cycle (diel anomaly: keeps
+#     day-to-day deviations, so two channels correlate only if their day-to-day
+#     behaviour co-varies — a distinctive diel PHASE alone no longer suffices,
+#     and a real afternoon-photochemistry family can still separate on its
+#     day-to-day amplitude modulation);
+# (2) regress out the remaining shared mode, estimated as the per-time panel
+#     MEDIAN of the anomalies over the ASSIGNED reference channels (robust,
+#     deterministic; per-channel OLS gain so partial carriers shed exactly
+#     their share).
+# Rendering stays on RAW traces — only the similarity input changes.
+# ---------------------------------------------------------------------------
+def log_traces(traces: pd.DataFrame, cols) -> pd.DataFrame:
+    """log10 of the positive trace values (global positive floor, like correlate);
+    non-detections stay NaN so they never fake correlation."""
+    cols = [c for c in cols if c in traces.columns]
+    sub = traces[cols].astype(float)
+    vals = sub.values
+    floor = np.nanmin(vals[vals > 0]) if np.any(vals > 0) else 1e-9
+    return np.log10(sub.where(sub > 0).clip(lower=floor))
+
+
+def diel_anomaly(Lg: pd.DataFrame, hours, *, bins=DIEL_BINS,
+                 min_span=DIURNAL_SPAN_H) -> pd.DataFrame:
+    """Subtract each column's own mean hour-of-day profile from its log trace.
+    What remains is the DAY-TO-DAY anomaly: co-variation that survives this is
+    real synchronized behaviour across days, not a shared (or merely similar)
+    daily cycle. With < ~2 diel cycles the profile would just memorize the run,
+    so the frame is only demeaned instead."""
+    h = np.asarray(hours, float)
+    out = Lg - Lg.mean()
+    if not len(h) or (np.nanmax(h) - np.nanmin(h)) < min_span:
+        return out
+    hb = pd.Series(((h % 24.0) // (24.0 / bins)).astype(int), index=Lg.index)
+    prof = Lg.groupby(hb.values).transform("mean")
+    return Lg - prof
+
+
+def common_mode(anom: pd.DataFrame, ref_cols=None) -> pd.Series:
+    """The shared mode of an anomaly frame: per-timepoint MEDIAN across the
+    reference columns (default: all). Median, not mean — robust to a few
+    channels having a real plume at any one time."""
+    cols = [c for c in (ref_cols if ref_cols is not None else anom.columns)
+            if c in anom.columns]
+    return anom[cols].median(axis=1)
+
+
+def residualize(anom: pd.DataFrame, cm: pd.Series):
+    """Regress the common mode out of every column (per-channel OLS slope +
+    intercept over the finite overlap). Returns (residual frame, R^2 Series) —
+    R^2 = the fraction of each channel's anomaly variance the shared mode
+    explained (>= COMMON_R2 -> the channel IS the wave; see clustering driver)."""
+    cmv = pd.to_numeric(cm, errors="coerce")
+    resid = {}
+    r2 = {}
+    for c in anom.columns:
+        y = anom[c]
+        ok = y.notna() & cmv.notna()
+        n = int(ok.sum())
+        if n < MIN_POINTS or float(cmv[ok].var()) <= 0:
+            resid[c] = y - y.mean()
+            r2[c] = 0.0
+            continue
+        x = cmv[ok]; yy = y[ok]
+        b = float(((x - x.mean()) * (yy - yy.mean())).sum() / ((x - x.mean()) ** 2).sum())
+        a = float(yy.mean() - b * x.mean())
+        res = y - (a + b * cmv)
+        resid[c] = res
+        vy = float(yy.var())
+        r2[c] = max(0.0, 1.0 - float(res[ok].var()) / vy) if vy > 0 else 0.0
+    return pd.DataFrame(resid, index=anom.index), pd.Series(r2)
+
+
+def decompose(traces: pd.DataFrame, cols, hours, *, ref_cols=None,
+              bins=DIEL_BINS):
+    """The full raw->residual transform: log10 -> per-channel diel anomaly ->
+    shared-mode (panel median over `ref_cols`) OLS removal. Returns
+    (residual frame, R^2-vs-common-mode Series, common-mode Series).
+    `ref_cols` restricts the shared-mode estimate (e.g. to ASSIGNED channels)
+    so sparse/noisy unknown bins cannot bias the wave."""
+    Lg = log_traces(traces, cols)
+    anom = diel_anomaly(Lg, hours, bins=bins)
+    cm = common_mode(anom, ref_cols=ref_cols)
+    resid, r2 = residualize(anom, cm)
+    return resid, r2, cm
+
+
+def validate_cohesion(rows, corr: pd.DataFrame, *, r_min=COHESION_MIN):
+    """Backstop QC on emitted clusters: mean pairwise correlation (in the SAME
+    space that built them) among each cluster's members. Returns
+    {cluster_id: (mean_within_r, flagged)} — flagged when below r_min. A flag
+    marks a family the cut let through too loose; it is reported, never re-cut."""
+    out = {}
+    for cid, mem, *_ in rows:
+        cols = [m for m in mem if m in corr.columns]
+        if len(cols) < 2:
+            out[int(cid)] = (float("nan"), False)
+            continue
+        sub = corr.loc[cols, cols].values
+        iu = np.triu_indices(len(cols), k=1)
+        mean_r = float(np.nanmean(sub[iu]))
+        out[int(cid)] = (mean_r, bool(mean_r < r_min))
+    return out
+
+
+def isotope_satellite_of(mz: float, known_mz: np.ndarray, known_med: np.ndarray,
+                         my_med: float, *, tol_ppm=8.0,
+                         spacings=ISO_SPACINGS) -> float | None:
+    """If `mz` sits exactly one heavy-isotope step ABOVE a BRIGHTER known peak
+    (within tol_ppm), return that parent m/z — the bin is the parent's isotope
+    satellite, not an independent compound; else None. `known_mz` must be sorted
+    ascending, `known_med` its per-peak median brightness (same order)."""
+    for s in spacings:
+        target = mz - s
+        i = np.searchsorted(known_mz, target)
+        for j in (i - 1, i):
+            if 0 <= j < len(known_mz) and abs(known_mz[j] - target) / mz * 1e6 <= tol_ppm:
+                if known_med[j] > my_med:            # satellites are dimmer than M0
+                    return float(known_mz[j])
+    return None
 
 
 def cluster(cm: pd.DataFrame, *, dist_t=DIST_T, link=LINK, min_members=MIN_MEMBERS):
@@ -153,6 +313,47 @@ def trace_dynamic_range(traces: pd.DataFrame, col, *, smooth_w=SMOOTH_W) -> floa
     return _smoothed_range(pd.to_numeric(traces[col], errors="coerce").to_numpy(), smooth_w)
 
 
+def diurnal_eta2(y, hours, *, bins=DIURNAL_BINS, min_span=DIURNAL_SPAN_H,
+                 min_points=24) -> float:
+    """Fraction of a trace's log-variance explained by time-of-day: eta^2 of
+    log10(y) grouped into `bins` hour-of-day bins (hours % 24). ~0 = no daily
+    structure; ->1 = a pure diel wave. AMPLITUDE-BLIND — a coherent low-amplitude
+    wave scores high, which is exactly what the cv/range gates cannot see.
+    `hours` = time of each point in hours (any zero point; only the 24h phase is
+    used). Returns 0.0 when the trace spans < min_span hours (needs ~2 cycles to
+    distinguish a diel wave from a one-off drift) or has < min_points finite points."""
+    y = np.asarray(y, float)
+    h = np.asarray(hours, float)
+    ok = np.isfinite(y) & (y > 0) & np.isfinite(h)
+    if ok.sum() < min_points:
+        return 0.0
+    y, h = np.log10(y[ok]), h[ok]
+    if (h.max() - h.min()) < min_span:
+        return 0.0
+    hb = ((h % 24.0) // (24.0 / bins)).astype(int)
+    m = y.mean()
+    sst = float(((y - m) ** 2).sum())
+    if sst <= 0:
+        return 0.0
+    ssb = sum(len(y[hb == b]) * (y[hb == b].mean() - m) ** 2 for b in np.unique(hb))
+    return float(ssb / sst)
+
+
+def trace_diurnal_eta2(traces: pd.DataFrame, col, hours, **kw) -> float:
+    """diurnal_eta2 of one trace column (0.0 if the column is absent)."""
+    if col not in traces:
+        return 0.0
+    return diurnal_eta2(pd.to_numeric(traces[col], errors="coerce").to_numpy(), hours, **kw)
+
+
+def family_diurnal_eta2(members, traces: pd.DataFrame, hours, **kw) -> float:
+    """diurnal_eta2 of a cluster's MEMBER-MEAN raw trace — does the FAMILY carry a
+    coherent daily wave? (Averaging members first suppresses per-channel noise, so
+    a genuinely-diel family scores at least as high as its typical member.)"""
+    mean = _family_mean(members, traces)
+    return diurnal_eta2(mean, hours, **kw) if mean is not None else 0.0
+
+
 def _family_mean(members, traces: pd.DataFrame) -> np.ndarray | None:
     """Smoothed member-mean raw trace of a cluster, or None if it has no columns."""
     import warnings
@@ -200,7 +401,9 @@ def _starts_high(mean: np.ndarray, smooth_w=SMOOTH_W) -> float:
 
 def split_flat_clusters(rows, traces: pd.DataFrame, *, range_min=FLAT_CLUSTER_RANGE,
                         smooth_w=SMOOTH_W, settle_frac=SETTLE_FRAC,
-                        settling_start_min=SETTLING_START_MIN):
+                        settling_start_min=SETTLING_START_MIN, hours=None,
+                        eta2_min=DIURNAL_ETA2, eta2_range_min=DIURNAL_MIN_RANGE,
+                        settling_start_loose=SETTLING_START_LOOSE):
     """Partition cluster `rows` (cluster_rows output) into (dynamic, flat). A cluster
     is FLAT if its member-mean trace has no real excursion. Two ways to be flat:
       (1) flat over the FULL run (original rule), or
@@ -208,41 +411,74 @@ def split_flat_clusters(rows, traces: pd.DataFrame, *, range_min=FLAT_CLUSTER_RA
           family STARTS HIGH (>= settling_start_min of its peak in the first bins) —
           i.e. it decays from t0, the instrument/reagent-settling signature.
     Case (2) is demote-only and event-SAFE: a real early event rises from a low
-    baseline (starts_high << 1) so it fails the start-high guard and is kept."""
+    baseline (starts_high << 1) so it fails the start-high guard and is kept.
+
+    With `hours` (time of each trace bin, h) the split is STRUCTURE-AWARE — the
+    amplitude gates alone mislabel both ways (measured on a validation dataset):
+      * KEEP a low-amplitude family whose mean carries a coherent diel wave
+        (family eta2 >= eta2_min and range >= eta2_range_min): real ambient
+        analytes with a daily cycle sat just under range_min and were demoted;
+      * DEMOTE a STRUCTURELESS settling family at the RELAXED start-high bar
+        (settling_start_loose): a startup fall inflates the full-range past
+        range_min and a start at ~0.67 of peak slips the strict 0.8 guard (the
+        C14-C16 fatty-acid signature, eta2 ~0.1). A real rise-event starts at
+        ~0.05-0.4 of peak, below even the loose bar -> still kept."""
+    # eta2 is only MEANINGFUL with >= ~2 diel cycles; below that it is forced to
+    # 0.0, which must not read as "measured structureless" (it would relax the
+    # settling bar on every short batch and demote families legacy kept).
+    h = np.asarray(hours, float) if hours is not None else None
+    measurable = (h is not None and len(h)
+                  and (np.nanmax(h) - np.nanmin(h)) >= DIURNAL_SPAN_H)
     dyn, flat = [], []
     for row in rows:
+        e2 = family_diurnal_eta2(row[1], traces, hours) if measurable else 0.0
         full = cluster_flatness(row[1], traces, smooth_w=smooth_w)
         if full < range_min:
-            flat.append(row); continue
+            # amplitude says flat — but a coherent diel wave is real dynamics
+            (dyn if (e2 >= eta2_min and full >= eta2_range_min) else flat).append(row)
+            continue
         settled = cluster_flatness(row[1], traces, smooth_w=smooth_w, settle_frac=settle_frac)
         mean = _family_mean(row[1], traces)
         starts_high = _starts_high(mean, smooth_w) if mean is not None else 0.0
-        is_settling_bg = settled < range_min and starts_high >= settling_start_min
+        start_bar = (settling_start_loose if (measurable and e2 < eta2_min)
+                     else settling_start_min)
+        is_settling_bg = settled < range_min and starts_high >= start_bar
         (flat if is_settling_bg else dyn).append(row)
     return dyn, flat
 
 
 def trace_varies(traces: pd.DataFrame, col, *, cv_min=FLAT_CV, range_min=PEAK_RANGE,
-                 smooth_w=SMOOTH_W) -> bool:
+                 smooth_w=SMOOTH_W, hours=None, eta2_min=DIURNAL_ETA2,
+                 eta2_range_min=DIURNAL_MIN_RANGE) -> bool:
     """A trace gets correlation-clustered (vs bunched as flat) if it has SUSTAINED
     variation (cv >= cv_min) OR a coherent TRANSIENT burst (smoothed max/median >=
     range_min). CV alone left real co-varying burst families in the flat bucket — a
     brief synchronized spike barely changes std/mean. The clustering's r>0.6 /
-    >=3-member rule then filters any noise this lets back in."""
-    return (trace_cv(traces, col) >= cv_min
-            or trace_dynamic_range(traces, col, smooth_w=smooth_w) >= range_min)
+    >=3-member rule then filters any noise this lets back in.
+
+    With `hours` a third, amplitude-blind test runs: a coherent DIEL wave
+    (diurnal_eta2 >= eta2_min) that moves at least eta2_range_min also varies —
+    a real low-amplitude daily cycle fails both amplitude gates by design."""
+    if (trace_cv(traces, col) >= cv_min
+            or trace_dynamic_range(traces, col, smooth_w=smooth_w) >= range_min):
+        return True
+    return (hours is not None
+            and trace_diurnal_eta2(traces, col, hours) >= eta2_min
+            and trace_dynamic_range(traces, col, smooth_w=smooth_w) >= eta2_range_min)
 
 
 def split_varying(traces: pd.DataFrame, cols, *, cv_min=FLAT_CV, range_min=PEAK_RANGE,
-                  smooth_w=SMOOTH_W):
+                  smooth_w=SMOOTH_W, hours=None):
     """Partition `cols` into (varying, flat). A flat trace has no reliable SHAPE
     (neither sustained variation nor a transient burst) — its pairwise correlation
     is noise, so flat traces spuriously shatter into tiny clusters. Pull them out
-    BEFORE clustering and bunch them. Returns (varying, flat), order-preserving."""
+    BEFORE clustering and bunch them. Returns (varying, flat), order-preserving.
+    Pass `hours` to also promote low-amplitude but diel-STRUCTURED traces (see
+    trace_varies)."""
     varying, flat = [], []
     for c in dict.fromkeys(cols):
         (varying if trace_varies(traces, c, cv_min=cv_min, range_min=range_min,
-                                 smooth_w=smooth_w) else flat).append(c)
+                                 smooth_w=smooth_w, hours=hours) else flat).append(c)
     return varying, flat
 
 
@@ -703,8 +939,109 @@ def render_changers(items, traces_raw, grid, out_prefix, item_label, *, cap=48,
     return paths
 
 
+def formula_class(formula: str) -> str:
+    """Chemical backbone class of a NEUTRAL formula, for grouping report panels:
+    Si > F > Cl/Br halogenated > CHONS > CHOS > CHON > CHO. Non-formula labels
+    (the '?<mz>' unassigned keys, empty strings) -> 'unassigned'."""
+    from peaky.chem import chemistry as C
+    f = str(formula or "")
+    if not f or f.startswith("?"):
+        return "unassigned"
+    try:
+        counts = C.parse_formula(f)
+    except Exception:
+        return "unassigned"
+    if not counts.get("C"):
+        return "inorganic"
+    if counts.get("Si"):
+        return "Si / siloxane"
+    if counts.get("F"):
+        return "F-containing"
+    if counts.get("Cl") or counts.get("Br") or counts.get("I"):
+        return "halogenated"
+    has_n, has_s = bool(counts.get("N")), bool(counts.get("S"))
+    if has_n and has_s:
+        return "CHONS"
+    if has_s:
+        return "CHOS"
+    if has_n:
+        return "CHON"
+    return "CHO"
+
+
+def render_grouped_flat(groups, traces_raw, grid, out_prefix, item_label, *,
+                        ylim=None, title="", subtitle="", per_page=2,
+                        list_lines_max=12, group_note=None, dpi=200,
+                        start_page=1):
+    """Paginated A4-portrait pages for a bunched channel set SUBDIVIDED into named
+    groups (e.g. by chemical class): per group one overlay panel (raw cps, log y,
+    bold median) + its member labels listed beneath — the readable version of one
+    giant anonymous flat panel. `groups` = ordered dict/list of (name, cols);
+    `group_note(name, cols)` may return an extra header note (e.g. median eta2).
+    Long member lists are truncated at `list_lines_max` lines with a '+k more'
+    pointer (full membership lives in the set CSV). Returns the page paths,
+    numbered `<out_prefix>_p<i>.png` from start_page."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import warnings
+    items = [(n, [c for c in cs if c in traces_raw.columns]) for n, cs in
+             (groups.items() if isinstance(groups, dict) else groups)]
+    items = [(n, cs) for n, cs in items if cs]
+    if not items:
+        return []
+    PAGE_W, PAGE_H = 8.27, 11.69
+    paths = []
+    pi = start_page
+    for i0 in range(0, len(items), per_page):
+        page = items[i0:i0 + per_page]
+        fig = plt.figure(figsize=(PAGE_W, PAGE_H))
+        fig.text(0.075, 0.958, title, fontsize=12, weight="bold", color="#222")
+        fig.text(0.075, 0.938, textwrap.fill(subtitle, width=112), fontsize=8.5,
+                 color="#666", va="top")
+        slot_h = 0.86 / per_page
+        for si, (name, cols) in enumerate(page):
+            y0 = 0.90 - (si + 1) * slot_h            # slot bottom
+            note = f" — {group_note(name, cols)}" if group_note else ""
+            fig.text(0.075, y0 + slot_h - 0.012,
+                     f"{name} · {len(cols)} channels{note}",
+                     fontsize=10.5, weight="bold", color="#333")
+            ax = fig.add_axes([0.10, y0 + slot_h * 0.42, 0.86, slot_h * 0.47])
+            M = []
+            for c in cols:
+                yv = traces_raw[c].values.astype(float)
+                yy = np.where(yv > 0, yv, np.nan)
+                ax.plot(grid, yy, color="#888780", lw=0.6, alpha=0.35)
+                M.append(yy)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                ax.plot(grid, panel_median(M), color="#111", lw=1.8, alpha=0.9, zorder=5)
+            ax.set_yscale("log"); ax.set_xlim(0, float(grid[-1]))
+            if ylim:
+                ax.set_ylim(*ylim)
+            ax.set_ylabel("cps", fontsize=8); ax.tick_params(labelsize=8)
+            ax.grid(alpha=0.18, which="both")
+            if si == len(page) - 1:
+                ax.set_xlabel("hour of experiment (UTC)", fontsize=8, labelpad=2)
+            w = _wrap([item_label(c) for c in cols], width=96)
+            if len(w) > list_lines_max:
+                shown = sum(len(_l.split(", ")) for _l in w[:list_lines_max - 1])
+                w = w[:list_lines_max - 1] + [f"… +{len(cols) - shown} more — see the set CSV"]
+            # list top at 0.33*slot_h leaves room for the panel's tick + axis
+            # labels (top at 0.38 collided with the xlabel of the panel above)
+            tx = fig.add_axes([0.075, y0, 0.89, slot_h * 0.33]); tx.axis("off")
+            tx.text(0, 1, "\n".join(w), va="top", ha="left", fontsize=7.6,
+                    family="monospace", color="#333")
+        out = f"{out_prefix}_p{pi}.png"
+        fig.savefig(out, dpi=dpi); plt.close(fig)
+        paths.append(out)
+        pi += 1
+    return paths
+
+
 def render_flat_panel(cols, traces_raw, grid, out, item_label, *,
-                      label="flat / non-varying", ylim=None, list_max=72, title=""):
+                      label="flat / non-varying", ylim=None, list_max=72, title="",
+                      subtitle=None):
     """One A4-portrait page: a SINGLE overview panel of every 'flat / non-varying'
     trace overlaid (raw cps, log y) + their median. These were pulled OUT of
     correlation clustering (flat traces have no reliable shape, so they only
@@ -723,9 +1060,10 @@ def render_flat_panel(cols, traces_raw, grid, out, item_label, *,
     # wrap the caption to the page width (va='top' so it grows DOWN, toward the
     # plot, never up into the bold title) — a long one-liner used to run off the
     # right edge and get clipped.
-    _sub = (f"n={len(cols)} — channels with no real family dynamics: uncorrelated, or in a "
-            "co-varying cluster whose mean is flat, + Si contamination; bunched so they "
-            "don't bloat the cluster count")
+    _sub = subtitle if subtitle is not None else (
+        f"n={len(cols)} — channels with no real family dynamics: uncorrelated, or in a "
+        "co-varying cluster whose mean is flat, + Si contamination; bunched so they "
+        "don't bloat the cluster count")
     fig.text(0.075, 0.935, textwrap.fill(_sub, width=112), fontsize=8.5, color="#666",
              va="top")
     # taller panel when there's no member list to show below it

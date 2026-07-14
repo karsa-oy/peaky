@@ -152,11 +152,14 @@ peaky assign --sample-id <ID> --reagent <Br|Ur|NO3|NO3_15N|auto> \
 
 # a whole batch (representative subset -> merge -> clusters -> Van Krevelen -> PDF)
 peaky batch  --batch "<your batch>" --dataset "<your workspace>" \
-    --reagent <Br|Ur|NO3|NO3_15N|auto> --out-dir ~/peaky-output
+    --reagent <Br|Ur|NO3|NO3_15N|auto> --out-dir ~/peaky-output --jobs 6
 ```
 
 `--reagent` forces the analyte channels (a positive/sparse sample otherwise
-mis-detects as negative). `mascope-assign` is kept as an alias of `peaky`.
+mis-detects as negative). `--jobs/-j N` (or `PEAKY_JOBS`) assigns the selected
+samples across `N` worker processes — ~3.5× faster on multicore, output identical
+to a serial run; default is your physical-core count, `--jobs 1` is the serial
+path. `mascope-assign` is kept as an alias of `peaky`.
 Step-by-step walkthrough: **[QUICKSTART.md](QUICKSTART.md)**. Reagent depth, the
 module map, and chemistry rules: **[SKILL.md](SKILL.md)**.
 
