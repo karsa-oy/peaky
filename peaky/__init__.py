@@ -50,6 +50,7 @@ _LAZY = {
 # keeps resolving after the sub-package move (these are NOT submodules of the root).
 _MODULES = {
     "io_mascope": "io.io_mascope", "local_scoring": "io.local_scoring",
+    "curate": "io.curate",
     "chemistry": "chem.chemistry", "isotopes": "chem.isotopes",
     "reagents": "chem.reagents", "profiles": "chem.profiles", "contexts": "chem.contexts",
     "ledger": "assignment.ledger", "passes": "assignment.passes",
