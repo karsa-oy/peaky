@@ -8,6 +8,9 @@ Subcommands:
   batch          whole-batch pipeline: assign subset -> merge -> cluster -> Van Krevelen -> PDF
   report         regenerate figures + PDF from an existing run folder (offline)
   gka            build the interactive rotating-GKA HTML from a ledger CSV (offline)
+  curate         organise data (write API): create/rename/copy/move workspaces,
+                 datasets, batches, samples (--dry-run previews; deletes need --yes)
+  mcp            serve the pipeline over MCP (ChatGPT / Claude Desktop / Cursor)
 
 Run `peaky <cmd> --help` for each. Heavy work runs on the host Python
 (this package + mascope-sdk). A Mascope account/token is read from ~/.mascope/.env
@@ -258,6 +261,81 @@ def cmd_gka(args) -> None:
 # --------------------------------------------------------------------------- #
 # parser + entry point
 # --------------------------------------------------------------------------- #
+def cmd_curate(args) -> None:
+    """Data-curation verbs (create/rename/copy/move workspaces, datasets, batches,
+    samples). Every mutation honors --dry-run (preview, sends nothing); deletes
+    additionally need --yes. Backed by peaky.io.curate.CurationClient."""
+    _require_creds()
+    from peaky.io import curate as CU
+
+    c = CU.CurationClient.from_env(dry_run=args.dry_run,
+                                   cookie=getattr(args, "cookie", None))
+    verb = args.verb
+
+    if verb == "tree":
+        wsdf = c.list_workspaces()
+        if args.workspace:
+            wsdf = wsdf[wsdf["workspace_id"] == c.resolve_workspace_id(args.workspace)]
+        for _, w in wsdf.iterrows():
+            print(f"▸ {w['workspace_name']}  [{w['workspace_id']}]")
+            for _, d in c.list_datasets(w["workspace_id"]).iterrows():
+                print(f"    · {d['dataset_name']}  [{d['dataset_id']}]")
+                if args.deep:
+                    for _, b in c.list_batches(d["dataset_id"]).iterrows():
+                        pol = b.get("polarity", "")
+                        print(f"        - {b['sample_batch_name']} ({pol})  "
+                              f"[{b['sample_batch_id']}]")
+        return
+
+    if verb == "new-workspace":
+        r = c.create_workspace(args.name, args.desc or "")
+    elif verb == "new-dataset":
+        wid = c.resolve_workspace_id(args.workspace)
+        r = c.create_dataset(wid, args.name, args.desc or "")
+    elif verb == "new-batch":
+        did = c.resolve_dataset_id(args.workspace, args.dataset)
+        r = c.create_batch(did, args.name, args.polarity, args.desc or "")
+    elif verb == "copy-batch":
+        did = c.resolve_dataset_id(args.workspace, args.dataset)
+        bid = c.resolve_batch_id(did, args.batch)
+        to_did = c.resolve_dataset_id(args.to_workspace or args.workspace,
+                                      args.to_dataset)
+        r = c.copy_batch(bid, to_did, name=args.name, description=args.desc or "")
+    elif verb in ("copy-samples", "move-samples"):
+        to_did = c.resolve_dataset_id(args.to_workspace, args.to_dataset)
+        to_bid = c.resolve_batch_id(to_did, args.to_batch)
+        fn = c.copy_samples if verb == "copy-samples" else c.move_samples
+        r = fn(args.sample_ids, to_bid)
+    elif verb == "rename":
+        r = _curate_rename(c, args)
+    elif verb == "delete-batch":
+        did = c.resolve_dataset_id(args.workspace, args.dataset)
+        bid = c.resolve_batch_id(did, args.batch)
+        r = c.delete_batch(bid, confirm=args.yes)
+    else:
+        sys.exit(f"unknown curate verb {verb!r}")
+
+    print(c.summary())
+    if not args.dry_run and isinstance(r, dict) and not r.get("_planned"):
+        print(f"server -> {r}")
+    if args.dry_run:
+        print("\n(--dry-run: nothing was sent. Re-run without --dry-run to apply.)")
+
+
+def _curate_rename(c, args):
+    if args.kind == "workspace":
+        return c.update_workspace(c.resolve_workspace_id(args.target),
+                                  name=args.name, description=args.desc)
+    if args.kind == "dataset":
+        wid = c.resolve_workspace_id(args.workspace)
+        did = c._resolve(c.list_datasets(wid), args.target, id_col="dataset_id",
+                         name_col="dataset_name", kind="dataset")
+        return c.update_dataset(wid, did, name=args.name, description=args.desc)
+    did = c.resolve_dataset_id(args.workspace, args.dataset)
+    bid = c.resolve_batch_id(did, args.target)
+    return c.update_batch(bid, name=args.name, description=args.desc)
+
+
 def cmd_mcp(args) -> None:
     """Launch the peaky MCP server (drive the pipeline from an MCP client:
     ChatGPT Developer Mode, Claude Desktop, Cursor, ...). Credentials stay
@@ -375,6 +453,68 @@ def build_parser() -> argparse.ArgumentParser:
                      help="skill folder name under the skills dir (default: peaky)")
     pis.add_argument("--dir", default=None, help="skills dir (default: ~/.claude/skills)")
     pis.set_defaults(func=cmd_install_skill)
+
+    pc = sub.add_parser("curate", help="create/rename/copy/move workspaces, datasets, "
+                                       "batches, samples (write API; --dry-run to preview)")
+    pcs = pc.add_subparsers(dest="verb", required=True)
+
+    def _add_dry(p):
+        p.add_argument("--dry-run", action="store_true",
+                       help="preview only — record the plan, send nothing")
+        p.add_argument("--cookie", default=None,
+                       help="session cookie for WRITE endpoints (the server gates "
+                            "mutations behind a logged-in session; the bearer token "
+                            "only authorizes reads). Else $MASCOPE_SESSION_COOKIE. "
+                            "Copy the Cookie header from a logged-in browser request.")
+
+    pct = pcs.add_parser("tree", help="show the workspace/dataset[/batch] hierarchy (read-only)")
+    pct.add_argument("--workspace", default=None, help="limit to one workspace")
+    pct.add_argument("--deep", action="store_true", help="also list batches under each dataset")
+    _add_dry(pct)
+
+    pcw = pcs.add_parser("new-workspace", help="create a workspace")
+    pcw.add_argument("name"); pcw.add_argument("--desc", default=None); _add_dry(pcw)
+
+    pcd = pcs.add_parser("new-dataset", help="create a dataset in a workspace")
+    pcd.add_argument("--workspace", required=True)
+    pcd.add_argument("--name", required=True); pcd.add_argument("--desc", default=None)
+    _add_dry(pcd)
+
+    pcb = pcs.add_parser("new-batch", help="create an empty batch in a dataset")
+    pcb.add_argument("--workspace", required=True); pcb.add_argument("--dataset", required=True)
+    pcb.add_argument("--name", required=True)
+    pcb.add_argument("--polarity", required=True, choices=["+", "-", "+-"])
+    pcb.add_argument("--desc", default=None); _add_dry(pcb)
+
+    pcc = pcs.add_parser("copy-batch", help="copy a batch (with its samples) into a dataset")
+    pcc.add_argument("--workspace", required=True); pcc.add_argument("--dataset", required=True)
+    pcc.add_argument("--batch", required=True)
+    pcc.add_argument("--to-workspace", default=None, help="target workspace (default: same)")
+    pcc.add_argument("--to-dataset", required=True); pcc.add_argument("--name", required=True)
+    pcc.add_argument("--desc", default=None); _add_dry(pcc)
+
+    for v in ("copy-samples", "move-samples"):
+        pcm = pcs.add_parser(v, help=f"{v.split('-')[0]} sample items into another batch")
+        pcm.add_argument("--sample-ids", nargs="+", required=True)
+        pcm.add_argument("--to-workspace", required=True)
+        pcm.add_argument("--to-dataset", required=True); pcm.add_argument("--to-batch", required=True)
+        _add_dry(pcm)
+
+    pcr = pcs.add_parser("rename", help="rename / re-describe a workspace, dataset or batch")
+    pcr.add_argument("kind", choices=["workspace", "dataset", "batch"])
+    pcr.add_argument("target", help="name or id to rename")
+    pcr.add_argument("--workspace", default=None, help="owning workspace (dataset/batch)")
+    pcr.add_argument("--dataset", default=None, help="owning dataset (batch)")
+    pcr.add_argument("--name", default=None); pcr.add_argument("--desc", default=None)
+    _add_dry(pcr)
+
+    pcx = pcs.add_parser("delete-batch", help="delete a batch (needs --yes)")
+    pcx.add_argument("--workspace", required=True); pcx.add_argument("--dataset", required=True)
+    pcx.add_argument("--batch", required=True)
+    pcx.add_argument("--yes", action="store_true", help="confirm the deletion")
+    _add_dry(pcx)
+
+    pc.set_defaults(func=cmd_curate)
 
     pm = sub.add_parser("mcp", help="run peaky as an MCP server (ChatGPT Developer "
                                     "Mode / Claude Desktop / Cursor)")

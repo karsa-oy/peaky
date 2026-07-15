@@ -29,6 +29,11 @@ Claude    →  the interface    (you drive Peaky by asking in plain language)
   OH-oxidation HOM, common MS contaminants) corroborate near-ties and rescue
   mass-matched unexplained peaks, always re-scored by Mascope before commit — they
   never override the isotope evidence.
+- **Data curation** — the write side of the Mascope API (create / rename / copy / move
+  workspaces, datasets, batches, samples), so you can *organise* a campaign, not just
+  analyse it: split a run by time window, pull background/zero samples into their own
+  batch, copy a subset into a new dataset. Name-driven, dry-run-safe, delete-gated.
+  See **[docs/DATA_CURATION.md](docs/DATA_CURATION.md)**.
 - **Reproducible by construction** — same inputs → same bytes out (determinism tests,
   byte-stable workbooks/reports), so any figure or assignment can be regenerated exactly.
 
@@ -153,6 +158,12 @@ peaky assign --sample-id <ID> --reagent <Br|Ur|NO3|NO3_15N|auto> \
 # a whole batch (representative subset -> merge -> clusters -> Van Krevelen -> PDF)
 peaky batch  --batch "<your batch>" --dataset "<your workspace>" \
     --reagent <Br|Ur|NO3|NO3_15N|auto> --out-dir ~/peaky-output --jobs 6
+
+# organise data — the write API (--dry-run previews, sends nothing; deletes need --yes)
+peaky curate tree --deep                                  # read the workspace/dataset/batch layout
+peaky curate new-dataset  --workspace "<ws>" --name "<name>"
+peaky curate copy-samples --sample-ids <ID...> \
+    --to-workspace "<ws>" --to-dataset "<ds>" --to-batch "<batch>"
 ```
 
 `--reagent` forces the analyte channels (a positive/sparse sample otherwise
@@ -191,6 +202,8 @@ CI runs the suite on Python 3.12–3.13 with no credentials.
   **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** (start here).
 - **Assignment explained** (for a scientist): **[docs/ASSIGNMENT.md](docs/ASSIGNMENT.md)**.
 - **Outputs** — every artifact, where it's stored, what it is: **[docs/OUTPUTS.md](docs/OUTPUTS.md)**.
+- **Data curation** — the reverse-engineered Mascope write API + the curation engine:
+  **[docs/DATA_CURATION.md](docs/DATA_CURATION.md)**.
 - **Claude-Code operating instructions** — reagents, flags, chemistry rules:
   **[SKILL.md](SKILL.md)**.
 - **Development history + open items**: **[docs/ROADMAP.md](docs/ROADMAP.md)**.
